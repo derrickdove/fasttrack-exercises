@@ -9,7 +9,11 @@ import json
 import math
 from pathlib import Path
 import struct
+from types import TracebackType
 from typing import Callable, Protocol, TextIO
+
+from pyvisa.constants import StatusCode
+from pyvisa.errors import VisaIOError
 
 
 @dataclass(frozen=True)
@@ -44,25 +48,82 @@ class Transport(Protocol):
         raise NotImplementedError("E2: implement close")
 
 
+class ResourceLike(Protocol):
+    """Supplied VISA resource interface; timeout is in milliseconds."""
+
+    timeout: int
+    read_termination: str
+    write_termination: str
+
+    def write(self, cmd: str) -> None:
+        """Send a command with no reply."""
+        ...
+
+    def query(self, cmd: str) -> str:
+        """Return a reply; timeouts raise VisaTimeout or VisaIOError(error_timeout)."""
+        ...
+
+    def close(self) -> None:
+        """Release the instrument connection."""
+        ...
+
+
+class ResourceManagerLike(Protocol):
+    """Supplied interface for opening a VISA resource by name."""
+
+    def open_resource(self, name: str) -> ResourceLike:
+        ...
+
+
+class VisaTimeout(Exception):
+    """Supplied fake-resource timeout; real VISA uses VisaIOError(error_timeout)."""
+
+
 def validate_config(raw: dict[str, object]) -> StationConfig:
     """E1: Validate the complete configuration before any instrument access."""
     raise NotImplementedError("E1: implement validate_config")
 
 
-class SupplyDriver:
-    """E2: A voltage driver using the supplied transport interface."""
+class StationSupply:
+    """E2: Drive a supply using validated station settings."""
 
-    def __init__(self, transport: Transport, timeout_s: float) -> None:
-        """Store the transport and a finite positive timeout; perform no I/O."""
-        raise NotImplementedError("E2: implement __init__")
+    def __init__(self, resource: ResourceLike, max_voltage: float) -> None:
+        """Store an already-configured resource; callers use from_config."""
+        raise NotImplementedError("E2: store the resource, limit and closed state")
+
+    @classmethod
+    def from_config(
+        cls, config: dict[str, object], rm: ResourceManagerLike,
+    ) -> StationSupply:
+        """Validate all settings, open the resource, and set its timeout/terminations."""
+        raise NotImplementedError("E2: validate config before opening the supply")
 
     def read_voltage(self) -> float:
-        """Query voltage, retry one timeout, and convert V or mV replies to volts."""
-        raise NotImplementedError("E2: implement read_voltage")
+        """Query MEAS:VOLT?, retry one fake or VISA timeout, and convert the reply."""
+        raise NotImplementedError("E2: query voltage with one timeout retry")
 
-    def shutdown(self) -> None:
-        """Attempt OUTP OFF, then close even if the write raises."""
-        raise NotImplementedError("E2: implement shutdown")
+    def set_voltage(self, volts: float) -> None:
+        """Require a finite value whose three-decimal command is within the limit."""
+        raise NotImplementedError("E2: validate voltage before writing")
+
+    def enable_output(self, on: bool) -> None:
+        """Require exactly a bool, then write OUTP 1 or OUTP 0."""
+        raise NotImplementedError("E2: check the output flag at runtime")
+
+    def __enter__(self) -> StationSupply:
+        """Return this supply for use in a with block."""
+        raise NotImplementedError("E2: enter the supply context")
+
+    def __exit__(
+        self, exc_type: type[BaseException] | None,
+        exc_value: BaseException | None, traceback: TracebackType | None,
+    ) -> None:
+        """Disable output and close, preserving any exception from the block."""
+        raise NotImplementedError("E2: disable and always close on context exit")
+
+    def close(self) -> None:
+        """Close the resource at most once."""
+        raise NotImplementedError("E2: make close idempotent")
 
 
 def judge_samples(samples: list[float], low: float, high: float, required: int) -> str:

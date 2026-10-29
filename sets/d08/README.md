@@ -1,6 +1,6 @@
 # d08 — Modules, packages, type hints and mypy
 
-**Time:** about 45 minutes · **Read first:** [Python Tutorial §6: Modules and packages](https://docs.python.org/3/tutorial/modules.html), [§12: Virtual environments and packages](https://docs.python.org/3/tutorial/venv.html), [typing introduction](https://docs.python.org/3/library/typing.html), [mypy: Getting started](https://mypy.readthedocs.io/en/stable/getting_started.html), and [The Linux Command Line ch. 9: Permissions](https://linuxcommand.org/tlcl.php) · **You edit:** `starter/units/convert.py`, `starter/units/parse.py`, `starter/units/__init__.py`
+**Time:** about 57 minutes · **Read first:** [Python Tutorial §6: Modules and packages](https://docs.python.org/3/tutorial/modules.html), [§12: Virtual environments and packages](https://docs.python.org/3/tutorial/venv.html), [typing introduction](https://docs.python.org/3/library/typing.html), [mypy: Getting started](https://mypy.readthedocs.io/en/stable/getting_started.html), and [The Linux Command Line ch. 9: Permissions](https://linuxcommand.org/tlcl.php) · **You edit:** `starter/units/convert.py`, `starter/units/parse.py`, `starter/units/__init__.py`, `starter/units/guard.py`
 
 ## What you're building
 
@@ -8,8 +8,8 @@ A test station reads voltage, current, and resistance from instruments. Put its 
 
 ## How this works
 
-1. Replace the `raise NotImplementedError(...)` lines in the two function files. For E3, replace the whole placeholder function in `starter/units/__init__.py` as explained below. Don't edit `tests/` or the empty `starter/__init__.py`.
-2. Press **Ctrl+Shift+B → Test: d08** (or run `bash tools/run.sh d08` / `tools\run.ps1 d08` from the repo root). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+1. Replace the `raise NotImplementedError(...)` lines in `starter/units/convert.py`, `starter/units/parse.py`, and `starter/units/guard.py`. For E3, replace the whole placeholder function in `starter/units/__init__.py` as explained below. Don't edit `tests/` or the empty `starter/__init__.py`.
+2. Press **Ctrl+Shift+B → Test: d08** (or run `bash tools/run.sh d08` / `tools\run.ps1 d08` from the repo root). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A **module** is a Python file; a **package** groups modules in a directory with an `__init__.py` file, which runs when the package is imported. An **import** makes another module's names available; a **relative import** starts with a dot to refer to the current package. This repo imports your package as `starter.units`.
@@ -88,3 +88,96 @@ You may use ordinary string processing or the standard library's `re` module for
 For a direct check from the repo root, run `.venv\Scripts\python.exe -m mypy --strict sets/d08/starter/units` on Windows or `.venv/bin/python -m mypy --strict sets/d08/starter/units` on Linux. Run the set first so the virtual environment exists. If Python says `No module named mypy`, check that you used the repo's `.venv` interpreter.
 
 **Reread:** mypy Getting started, A quick intro to type hints and Next steps; Python Tutorial §12.1–12.2, Creating virtual environments and Managing packages; The Linux Command Line ch. 9, Reading, writing, and executing.
+
+### E5 — Type hints don't stop bad values at runtime (easy–medium, ~12 min)
+
+**Goal:** A power supply driver has an `enable_output(enable: bool)` method to turn its output on or off. A caller passed `2`. Write a check that the driver can call before sending an output command, then answer four questions about what type hints can catch. Work in `starter/units/guard.py`; no package re-export or driver method is required.
+
+**Part A — Code (~4 min)**
+
+**Signature:** `def require_bool(name: str, value: object) -> bool`
+
+A **bool** is exactly `True` or `False`; an **int** is a whole number. The hint `object` accepts any Python value, so this helper can inspect an input whose type is not yet trusted. **Runtime** means while the program is executing. **Dynamic typing**, which Python uses, means values have types at runtime and operations check the types they need as they execute. **Static typing** checks type use before execution; mypy adds static checking to annotated Python code.
+
+Return `value` unchanged if its type is exactly `bool`. For every other type, raise `TypeError` (Python's exception for an inappropriate type). The message must include the argument's `name` and the received type's name, such as `int` or `str`; the rest of the wording is up to you. `type(value)` gives the actual type, and `type(value).__name__` gives its name as text. Reject integers including `0`, `1`, and `2`, strings, `None` (the value meaning no value), floats, and every other non-bool value.
+
+**Examples:** `require_bool("enable", True)` → `True`; `require_bool("enable", False)` → `False`; `require_bool("enable", 2)` raises `TypeError`, for example with the message `enable must be bool, got int`.
+
+**Watch out:** `isinstance(value, int)` asks whether a value counts as an integer, and `isinstance(True, int)` is `True`: Python's bool type also counts as an int. Use `type(value) is bool` for this exact-type contract, or check for a bool before considering integer cases. Do not convert the input with `bool(value)`; conversion would accept bad inputs. In a condition, integer zero is false and other integers are true. A `bool` hint alone does not reject the caller's `2` at runtime. An **Enum** is a type with a fixed collection of named choices, such as output states ON and OFF; it can make a driver's allowed states clearer too. No Enum implementation is needed here.
+
+**Part B — Concept check (~8 min)**
+
+**Signature:** `def typing_answers() -> dict[str, str]`
+
+A **dict** (dictionary) maps keys to values; `dict[str, str]` means both are strings. Return exactly the keys `"Q1"`, `"Q2"`, `"Q3"`, and `"Q4"`, each mapped to your chosen uppercase option letter (`"A"`, `"B"`, `"C"`, or `"D"`). Do not return the option text. Both parts count together as E5.
+
+**Q1.** An operator script runs these lines directly in Python, without mypy. Which prediction fits Python's typing behavior?
+
+```python
+reading = 3.3
+reading = "OVLD"
+reading / 1000
+```
+
+- A. The first assignment fails because `reading` has no type hint.
+- B. The division raises `TypeError`; removing that line lets both assignments run.
+- C. The second assignment fails because the first assignment permanently fixed `reading` as a float.
+- D. All three lines run because dynamic typing allows arithmetic with any combination of types.
+
+<details>
+<summary>Why it matters on the job</summary>
+
+Knowing when checks happen helps you decide where a station should detect an invalid command.
+</details>
+
+**Q2.** Run this driver example directly in Python, without mypy; `commands` records what would be sent to the power supply. What happens as written, and in a fresh run with `enable = require_bool("enable", enable)` inserted before `commands.append` (using your completed Part A helper)?
+
+```python
+commands: list[str] = []
+
+def enable_output(enable: bool) -> None:
+    commands.append("OUTP 1" if enable else "OUTP 0")
+
+enable_output(2)
+```
+
+- A. Both runs raise `TypeError` before entering the function because its parameter is annotated.
+- B. The original appends `"OUTP 1"`; adding the helper converts `2` to `True` and appends the same command.
+- C. The original appends `"OUTP 1"`; adding the helper raises `TypeError` and leaves `commands` empty.
+- D. The original appends `"OUTP 0"` because `2` is not exactly `True`; adding the helper leaves `commands` empty.
+
+<details>
+<summary>Why it matters on the job</summary>
+
+An operator tool's unexpected input should be handled before the driver sends an output command.
+</details>
+
+**Q3.** When you run mypy for the station's driver package, what does it do?
+
+- A. It runs separately from the station program and checks source code against type hints without executing the driver.
+- B. It imports and runs every driver method to discover which argument values the hardware accepts.
+- C. It stays inside Python and checks each measurement's actual type whenever the station runs.
+- D. It rewrites the driver to add runtime input checks at every annotated method.
+
+<details>
+<summary>Why it matters on the job</summary>
+
+Knowing what a checker covers helps you choose the remaining tests for a driver.
+</details>
+
+**Q4.** Why should an output-on/off driver method accept a bool or an Enum of named states rather than a bare int (an integer with no named state)?
+
+- A. Either annotation automatically prevents all invalid arguments from reaching the method at runtime.
+- B. Either type automatically converts arbitrary integer inputs into valid on/off commands.
+- C. Either type lets mypy check the instrument's physical output state while the station is running.
+- D. Either type makes intended states clear to readers and static checkers; an explicit runtime check still rejects bad incoming values.
+
+<details>
+<summary>Why it matters on the job</summary>
+
+A clear output-state contract helps callers avoid sending an unintended command to powered hardware.
+</details>
+
+**Watch out:** Keep both supplied signatures and use option letters exactly as shown. Quiz failures name the question and a reading to revisit; they do not supply its correct letter.
+
+**Reread:** typing introduction, function annotations and runtime enforcement; mypy Getting started, A quick intro to type hints and Next steps.

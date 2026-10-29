@@ -4,11 +4,11 @@
 
 ## What you're building
 
-This set mixes this week's material with new problems from earlier weeks. An operator needs to select a station command, interpret instrument status, and set up instruments in a safe order. You will also parse driver error replies, expose status through a small web service, count logged alarms, and scan supply currents. All work stays in Python; no instrument, network server, container, or C++ compiler is needed. Example IDs use `psu` for a power supply unit, `dmm` for a digital multimeter (a voltage/current measuring instrument), and `scope` for an oscilloscope (a signal viewer).
+This set mixes this week's material with new problems from earlier weeks. An operator needs to review a service file, interpret instrument status, and set up instruments in a safe order. You will also parse driver error replies, expose status through a small web service, count logged alarms, and scan supply currents. All work stays in Python; no instrument, network server, container, or C++ compiler is needed. Example IDs use `psu` for a power supply unit, `dmm` for a digital multimeter (a voltage/current measuring instrument), and `scope` for an oscilloscope (a signal viewer).
 
 ## How this works
 
-1. Replace the `raise NotImplementedError(...)` lines in `starter/review6.py`. Don't edit `tests/`. Keep the supplied `_setup_graph`, `_health_app`, and `Transport` interface unchanged; their complete code reduces setup work in this review.
+1. Replace the `raise NotImplementedError(...)` lines in `starter/review6.py`. Don't edit `tests/`. Keep the supplied `_ServiceParser`, `_service_settings`, `_setup_graph`, `_health_app`, and `Transport` interface unchanged; their complete code reduces setup work in this review.
 2. Press **Ctrl+Shift+B → Test: r6** (or run `bash tools/run.sh r6` / `tools\run.ps1 r6`). At first you'll see `Exercises: 0 / 7 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
@@ -17,44 +17,39 @@ Earlier readings used here:
 - d04: Python Tutorial §7.2; `csv` documentation (`DictReader`, quoted fields).
 - d17: `typing.Protocol` documentation; *The Pragmatic Programmer*, "Decoupling" (drivers and fake transports).
 
-- d36: Python **Argparse Tutorial**; **argparse** documentation, subcommands.
+- d36: Python `configparser` documentation; `systemd.service` and `systemd.unit`, service policy and section format.
 - d37: FastAPI tutorial **First Steps** and **Testing**.
 - d39: **tomllib** documentation; *A Common-Sense Guide to DSA*, the chapter on graphs (topological ordering). This review supplies dictionaries, so you do not load a file.
 - d40: learncpp **O.2 Bitwise operators**, **O.3 Bit manipulation with bitwise operators and bit masks**, and **13.7 Introduction to structs**; *C++ Primer*, chapter 4, bitwise operators.
 - d41: learncpp **12.7 Introduction to pointers** and **14.2 Introduction to classes**; *C++ Primer*, chapter 7, classes. E4 revisits the driver's error-reply boundary in Python.
 
-A **CLI** (command-line interface) accepts words typed in a terminal. A **parser** turns those words into named values. An `argparse.Namespace` stores those values as attributes, such as `args.station`.
+An **INI file** groups `key=value` settings under `[section]` headers. A **systemd service** is a background program managed by Linux's service manager; its **unit file** describes how to run it. `configparser` reads INI text.
 A **Boolean** is either `True` or `False`. A **dictionary** maps keys to values. A **type hint**, such as `list[str]`, describes the expected input or output. A **ValueError** signals that a value has the right general type but invalid contents.
 An **assertion** checks an expected result; **pytest** runs tests containing those checks.
 
-```python
-import argparse
-parser = argparse.ArgumentParser()
-parser.add_argument("--channel", default="CH1")
-args = parser.parse_args(["--channel", "CH2"])
-assert args.channel == "CH2"
-```
-
 ## Exercises
 
-### E1 — Select an operator command (easy, ~8 min)
+### E1 — Review a service file (easy, ~5 min)
 
-**Goal:** Parse a command without starting a test or contacting hardware.
+**Goal:** Check a small station service policy without running systemd.
 
-**Signature:** `def parse_command(argv: list[str]) -> argparse.Namespace`
+**Signature:** `def service_problems(text: str) -> list[str]`
 
-Use `argparse` with required **subcommands** (the first word selects a different operation):
+The supplied `_service_settings(text)` helper handles parsing; use its returned dictionary to check the three policy rules. Leave the helper unchanged. It parses INI text with `configparser`, with interpolation (substitution of `%` placeholders) disabled. Section and key names are case-sensitive. Surrounding setting whitespace is removed by the parser. Inputs have no repeated sections/keys or `[DEFAULT]` settings. Allow missing sections and keys; ignore unrelated settings. Check these rules in this order and return the corresponding exact message for each broken rule:
 
-- `run --station NAME [--dry-run]`: return attributes `command="run"`, `station=NAME`, and `dry_run` as a Boolean, default `False`. A **dry run** previews work without operating hardware; here it is only a parsed flag.
-- `show --station NAME --instrument ID`: return attributes `command="show"`, `station=NAME`, and `instrument=ID`.
+| Rule in `[Service]` | Message |
+| --- | --- |
+| `User` is present, nonempty, and not exactly `root` or `0` | `User must be non-root` |
+| `ExecStart` is present and its value starts with `/` | `ExecStart must be absolute` |
+| `Restart` equals `on-failure` | `Restart must be on-failure` |
 
-`argv` contains only argument words, with no program filename. Preserve string values exactly and do not modify the list. Options can appear in either order after their subcommand. Successful parsing prints nothing. Missing required arguments, unknown commands, and unknown options must follow argparse's usual behavior: print a diagnostic to standard error (the terminal's error stream) and raise `SystemExit` with code `2`. Ordinary `--help` keeps argparse's usual help behavior. Error/help wording and irrelevant attributes for the other command are not checked.
+`User` names the account running the service; numeric user ID `0` is root too. `ExecStart` is its launch command; an **absolute path** here simply starts with `/`. `Restart=on-failure` requests restarting after an unsuccessful exit. Don't check whether the account or command exists. A missing `[Service]` fails all three rules. Malformed INI syntax must propagate a `configparser.Error`, rather than becoming policy messages.
 
-**Example:** `parse_command(["run", "--station", "bench-2", "--dry-run"]).dry_run` → `True`
+**Example:** `[Service]\nUser=station\nExecStart=/opt/station/probe\nRestart=on-failure\n` → `[]`.
 
-**Watch out:** A store-true flag takes no value. Do not read the real process arguments; parse the supplied `argv`.
+**Watch out:** The supplied parser preserves exact key names and literal percent signs. Use missing-key defaults when checking the policy.
 
-**Reread:** d36, Python **Argparse Tutorial**, optional arguments and `store_true`; **argparse** documentation, subcommands (`add_subparsers`).
+**Reread:** d36, Python `configparser` docs, `read_string`, mapping access, `optionxform`, and interpolation; `systemd.service`, `ExecStart`, `Restart`; `systemd.unit`, section format.
 
 ### E2 — Decode an instrument status byte (easy, ~7 min)
 

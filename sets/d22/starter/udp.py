@@ -25,3 +25,8 @@ def receive_all(
 def echo_once(sock: socket.socket) -> tuple[str, int]:
     """Reply to one sender with uppercase bytes using the caller's socket."""
     raise NotImplementedError("E4: Receive one datagram and send an uppercase reply.")
+
+
+def transport_answers() -> dict[str, str]:
+    """Return option letters for transport questions Q1 through Q4."""
+    raise NotImplementedError("E5: Choose TCP or UDP answers for Q1 through Q4.")

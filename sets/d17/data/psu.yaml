@@ -1,0 +1,14 @@
+# Fixed TCP/IP replies; no hardware or network connection is used.
+spec: "1.0"
+devices:
+  psu:
+    eom:
+      TCPIP INSTR:
+        q: "\n"
+        r: "\n"
+    dialogues:
+      - q: "MEAS:VOLT?"
+        r: "12.034"
+resources:
+  TCPIP::192.168.1.100::INSTR:
+    device: psu

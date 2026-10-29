@@ -1,6 +1,6 @@
 """Week 5 review with earlier CSV and checked-telemetry practice."""
 from collections.abc import Callable
-import configparser
+import argparse
 import csv
 import math
 from pathlib import Path
@@ -8,20 +8,6 @@ import subprocess
 import zlib
 
 Step = tuple[str, Callable[[], bool], Callable[[], None]]
-
-
-class _ServiceParser(configparser.ConfigParser):
-    """Supplied: preserve systemd's case-sensitive setting names."""
-
-    def optionxform(self, optionstr: str) -> str:
-        return optionstr
-
-
-def _service_settings(text: str) -> dict[str, str]:
-    """Supplied: parse literal INI values; return {} for a missing Service section."""
-    parser = _ServiceParser(interpolation=None)
-    parser.read_string(text)
-    return dict(parser["Service"]) if parser.has_section("Service") else {}
 
 
 def _cleanup_attempts(cleanups: list[Callable[[], None]]) -> bool:
@@ -40,9 +26,9 @@ def run_probe(args: list[str], timeout: float) -> tuple[int, str, str]:
     raise NotImplementedError("E1: run a probe with captured output and a timeout")
 
 
-def service_problems(text: str) -> list[str]:
-    """E3: check User, ExecStart, and Restart in an INI service definition."""
-    raise NotImplementedError("E3: return service problems in the documented order")
+def parse_command(argv: list[str]) -> argparse.Namespace:
+    """E3: Parse the run/show operator commands described in the README."""
+    raise NotImplementedError("E3: build an argparse parser with required subcommands")
 
 
 def run_sequence(steps: list[Step]) -> tuple[str, list[str]]:

@@ -1,16 +1,16 @@
 # check30 — Day 30: minimum-ready check
 
-**Time:** about 150 minutes · **Read first:** review day; no new reading. Review the earlier readings named below. · **You edit:** `starter/check30.py`
+**Time:** about 165 minutes · **Read first:** review day; no new reading. Review the earlier readings named below. · **You edit:** `starter/check30.py`
 
 ## What you're building
 
-A chassis test station needs to decide whether its tools are ready, read limits, command a power supply, check measurements, and account for telemetry. These nine new problems test the minimum skills needed to do that work without real hardware. A **test station** is the computer and instruments used to test a chassis; **telemetry** is measurement data sent from a device to that computer.
+A chassis test station needs to decide whether its tools are ready, read limits, command a power supply, check measurements, and account for telemetry. These ten new problems test the minimum skills needed to do that work without real hardware. A **test station** is the computer and instruments used to test a chassis; **telemetry** is measurement data sent from a device to that computer.
 
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` bodies in `starter/check30.py`. Don't edit `tests/`. The supplied data classes and `Transport` interface stay as supplied; don't implement the interface's two placeholder methods.
-2. Press **Ctrl+Shift+B → Test: check30** (or run `bash tools/run.sh check30` / `tools\run.ps1 check30`). At first you'll see `Exercises: 0 / 9 passed`. Rerun after each exercise.
-3. **Time-box this check to 150 minutes:** set a timer, work from E1 to E9, and move on when an exercise's budget expires. The exercises are ordered from easiest to hardest and can be completed independently. Record unfinished exercises and the ones that took longest.
+2. Press **Ctrl+Shift+B → Test: check30** (or run `bash tools/run.sh check30` / `tools\run.ps1 check30`). At first you'll see `Exercises: 0 / 10 passed`. Rerun after each exercise.
+3. **Time-box this check to 165 minutes:** set a timer, work from E1 to E10, and move on when an exercise's budget expires. The exercises are ordered from easiest to hardest and can be completed independently. Record unfinished exercises and the ones that took longest.
 4. Report **all pass / partial / stuck** in the tracker when time is up. Use the reread table to choose your next practice.
 
 The earlier readings to keep nearby are Python Tutorial §5 (data structures), §7.2 (files), and §8 (exceptions); the `csv`, `dataclasses`, `subprocess`, `typing.Protocol`, `collections.deque`, `struct`, and `zlib.crc32` documentation; pytest “Get started” and “How to write and report assertions”; and the day 24 serial-number arithmetic overview. Each exercise identifies the relevant part precisely.
@@ -216,6 +216,26 @@ For a nonduplicate, remove seq from missing if present. On the first arrival, se
 
 **Reread:** d24, “Serial number arithmetic” overview and `collections.deque` docs; RFC 1982 §3 is optional background. This contract explicitly resolves the half-range case and defines what enters the duplicate window.
 
+### E10 — Throttle repeated alarms (medium+, ~15 min)
+
+**Goal:** Keep the station's alarm display from flooding the operator. A **throttle** limits how often an action is allowed. Decide whether to display each incoming alarm using only the alarms already allowed in a moving time window.
+
+**Signatures:** `AlarmThrottle(clock: Callable[[], int], window_ms: int, max_alarms: int)`, `allow() -> bool`, and `__len__() -> int` (called by `len(throttle)`).
+
+The supplied `clock` is a callable returning integer milliseconds and never going backwards. Pass this function into the constructor and call it to get the current time; the tests use a fake clock so no real waiting is needed. A millisecond is one thousandth of a second. Each instance starts with its own empty alarm history.
+
+Require `window_ms` and `max_alarms` to be positive integers, else raise `ValueError`. Reject booleans as well as floats, strings, and other non-integers: Python treats `bool` as a kind of `int`, but `True` is not a valid setting here. Do not validate the supplied clock's return values.
+
+On each `allow()` call, read `now` from the clock and remove expired allowed alarms. An earlier allowed alarm at time `t` counts **exactly while `now - t < window_ms`**; it expires when `now - t == window_ms`. If fewer than `max_alarms` allowed alarms remain, record `now` and return `True`. Otherwise return `False` and record nothing. Multiple allowed alarms in the same millisecond each occupy a slot. A rejected alarm must not extend the wait for the next allowed alarm.
+
+Use a deque of allowed alarm times, oldest first, and remove expired times from its left. Store at most `max_alarms` times, including during a long burst of rejected alarms. `len(throttle)` returns the number of stored times without reading the clock or expiring anything; expiry happens in `allow()`. Callers only inspect this length. Each stored time should be appended and removed once, rather than scanning the whole history on every call. The speed check makes 200,000 `allow()` calls in under 2 seconds.
+
+**Example:** With `window_ms=100` and `max_alarms=2`, calls at clock times `[0, 40, 99, 100, 140]` return `[True, True, False, True, True]` and leave `len(throttle) == 2`. At 100 ms the alarm from 0 ms has expired; the rejected alarm at 99 ms used no slot.
+
+**Watch out:** This window counts allowed alarms, not attempts. Expire all old entries before checking capacity, including after a long idle gap.
+
+**Reread:** d24, events-in-the-last-N-ms counter (deque over time, injected clock); d13, `collections.deque` docs (`append`, `popleft`).
+
 ## If you failed Ek, reread dXX
 
 | Failed exercise | Reread days and focus |
@@ -229,3 +249,4 @@ For a nonduplicate, remove seq from missing if present. On the first arrival, se
 | E7 | d05 exception propagation; d18 cleanup even when setup fails |
 | E8 | d23 binary formats, byte order, lengths, and CRC |
 | E9 | d24 gaps, duplicate windows, wraparound, and late recovery |
+| E10 | d24 events-in-the-last-N-ms counter (deque over time, injected clock); d13 deques |

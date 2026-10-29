@@ -1,10 +1,10 @@
 # r5 — Week 5 review
 
-**Time:** about 60 minutes · **Read first:** no new reading; review d04 (CSV) and d23 (CRC), plus d29–d34: Missing Semester, "Command-line Environment" and "Shell Tools and Scripting"; *The Linux Command Line*, chapters on writing your first script, flow control, and positional parameters; Python's `subprocess`, `signal`, `configparser`, and `tomllib` documentation; freedesktop.org's `systemd.service`, `systemd.unit`, and `journalctl` man pages; Wikipedia's "Finite-state machine" overview; *A Common-Sense Guide to DSA*, graphs chapter; *Pro Git*, branching basics and "Contributing to a Project"; GitHub Docs, "Building and testing Python". · **You edit:** `starter/review5.py` and `starter/station_summary.sh`.
+**Time:** about 60 minutes · **Read first:** no new reading; review d04 (CSV) and d23 (CRC), plus d29–d34: Missing Semester, "Command-line Environment" and "Shell Tools and Scripting"; *The Linux Command Line*, chapters on writing your first script, flow control, and positional parameters; Python's `subprocess`, `signal`, and `argparse` documentation and Argparse Tutorial; Wikipedia's "Finite-state machine" overview; *A Common-Sense Guide to DSA*, graphs chapter; *Pro Git*, branching basics and "Contributing to a Project"; GitHub Docs, "Building and testing Python". · **You edit:** `starter/review5.py` and `starter/station_summary.sh`.
 
 ## What you're building
 
-A chassis test station needs to run a diagnostic tool, summarize saved outcomes, check its service settings, and release instrument resources when a sequence stops. This set mixes this week with earlier weeks: process tools and service checks, CSV outcome files, and checked telemetry replies. Finish these independent review tasks, including applying two code-review comments to a measurement checker. These are local simulations: nothing starts a real service or contacts an instrument.
+A chassis test station needs to run a diagnostic tool, summarize saved outcomes, select an operator command, and release instrument resources when a sequence stops. This set mixes this week with earlier weeks: process tools and command parsing, CSV outcome files, and checked telemetry replies. Finish these independent review tasks, including applying two code-review comments to a measurement checker. These are local simulations: nothing contacts a real instrument.
 
 ## How this works
 
@@ -16,7 +16,17 @@ A chassis test station needs to run a diagnostic tool, summarize saved outcomes,
 
 **Bash** is a command interpreter used on Linux; Git Bash also works on Windows. A **positional parameter**, such as `$1`, is a script argument. Quote file arguments so spaces stay inside one path. `set -euo pipefail` stops on unhandled command failures, unset variables, or a failed command in a pipeline (commands connected with `|`). Install Bash or use Codespaces for E2; a skipped exercise counts as unfinished.
 
-An **INI file** groups `key=value` settings under `[section]` headers. A **systemd service** is a background program managed by Linux's service manager; its **unit file** describes how to run it. `configparser` reads INI text. A **state machine** describes named stages and the moves between them. A **callback** is a function passed into another function; **cleanup** releases resources after work stops. A `finally` block runs when execution leaves its matching `try` block, even after an exception. **NaN** means "not a number"; NaN and positive/negative infinity are **nonfinite** values. `math.isfinite(x)` identifies ordinary finite numbers.
+A **CLI** (command-line interface) accepts words typed in a terminal. A **parser** turns those words into named values. An `argparse.Namespace` stores those values as attributes, such as `args.station`.
+
+```python
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument("--channel", default="CH1")
+args = parser.parse_args(["--channel", "CH2"])
+assert args.channel == "CH2"
+```
+
+A **state machine** describes named stages and the moves between them. A **callback** is a function passed into another function; **cleanup** releases resources after work stops. A `finally` block runs when execution leaves its matching `try` block, even after an exception. **NaN** means "not a number"; NaN and positive/negative infinity are **nonfinite** values. `math.isfinite(x)` identifies ordinary finite numbers.
 
 ```python
 from collections.abc import Callable
@@ -57,27 +67,24 @@ Require exactly one argument naming an existing regular file, assumed readable. 
 
 **Reread:** d31, Missing Semester "Shell Tools and Scripting", quoting and loops; *The Linux Command Line*, flow control and positional parameters.
 
-### E3 — Review a service file (easy, ~5 min)
+### E3 — Select an operator command (easy, ~8 min)
 
-**Goal:** Check a small station service policy without running systemd.
+**Goal:** Parse a command without starting a test or contacting hardware.
 
-**Signature:** `def service_problems(text: str) -> list[str]`
+**Signature:** `def parse_command(argv: list[str]) -> argparse.Namespace`
 
-The supplied `_service_settings(text)` helper handles parsing; use its returned dictionary to check the three policy rules. Leave the helper unchanged. It parses INI text with `configparser`, with interpolation (substitution of `%` placeholders) disabled. Section and key names are case-sensitive. Surrounding setting whitespace is removed by the parser. Inputs have no repeated sections/keys or `[DEFAULT]` settings. Allow missing sections and keys; ignore unrelated settings. Check these rules in this order and return the corresponding exact message for each broken rule:
+Use `argparse` with required **subcommands** (the first word selects a different operation):
 
-| Rule in `[Service]` | Message |
-| --- | --- |
-| `User` is present, nonempty, and not exactly `root` or `0` | `User must be non-root` |
-| `ExecStart` is present and its value starts with `/` | `ExecStart must be absolute` |
-| `Restart` equals `on-failure` | `Restart must be on-failure` |
+- `run --station NAME [--dry-run]`: return attributes `command="run"`, `station=NAME`, and `dry_run` as a Boolean, default `False`. A **dry run** previews work without operating hardware; here it is only a parsed flag.
+- `show --station NAME --instrument ID`: return attributes `command="show"`, `station=NAME`, and `instrument=ID`.
 
-`User` names the account running the service; numeric user ID `0` is root too. `ExecStart` is its launch command; an **absolute path** here simply starts with `/`. `Restart=on-failure` requests restarting after an unsuccessful exit. Don't check whether the account or command exists. A missing `[Service]` fails all three rules. Malformed INI syntax must propagate a `configparser.Error`, rather than becoming policy messages.
+`argv` contains only argument words, with no program filename. Preserve string values exactly and do not modify the list. Options can appear in either order after their subcommand. Successful parsing prints nothing. Missing required arguments, unknown commands, and unknown options must follow argparse's usual behavior: print a diagnostic to standard error (the terminal's error stream) and raise `SystemExit` with code `2`. Ordinary `--help` keeps argparse's usual help behavior. Error/help wording and irrelevant attributes for the other command are not checked.
 
-**Example:** `[Service]\nUser=station\nExecStart=/opt/station/probe\nRestart=on-failure\n` → `[]`.
+**Example:** `parse_command(["run", "--station", "bench-2", "--dry-run"]).dry_run` → `True`
 
-**Watch out:** The supplied parser preserves exact key names and literal percent signs. Use missing-key defaults when checking the policy.
+**Watch out:** A store-true flag takes no value. Do not read the real process arguments; parse the supplied `argv`.
 
-**Reread:** d32, Python `configparser` docs, `read_string`, mapping access, `optionxform`, and interpolation; `systemd.service`, `ExecStart`, `Restart`; `systemd.unit`, section format.
+**Reread:** d32, Python **Argparse Tutorial**, optional arguments and `store_true`; **argparse** documentation, subcommands (`add_subparsers`).
 
 ### E4 — Stop a sequence and release instruments (medium, ~11 min)
 

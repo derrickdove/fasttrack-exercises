@@ -1,0 +1,17 @@
+# Offline supply replies for check45 E2; no network or hardware is used.
+spec: "1.0"
+devices:
+  station_supply:
+    eom:
+      TCPIP INSTR:
+        q: "\n"
+        r: "\n"
+    dialogues:
+      - q: "MEAS:VOLT?"
+        r: "3.3125"
+      - q: "VOLT 3.312"
+      - q: "OUTP 1"
+      - q: "OUTP 0"
+resources:
+  TCPIP::192.0.2.45::INSTR:
+    device: station_supply

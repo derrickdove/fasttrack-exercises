@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+import configparser
 from copy import deepcopy
 from pathlib import Path
 
@@ -9,42 +10,47 @@ from starter.review6 import (
     create_app,
     decode_status,
     excursion_counts,
-    parse_command,
+    service_problems,
     parse_error_reply,
     setup_order,
     scan_current,
 )
 
 
-@pytest.mark.parametrize("extra, expected", [([], False), (["--dry-run"], True)])
-def test_e1_run_flag(extra: list[str], expected: bool) -> None:
-    args = parse_command(["run", "--station", "bench-2", *extra])
-    assert (args.command, args.station, args.dry_run) == ("run", "bench-2", expected)
-    assert type(args.dry_run) is bool, "dry_run must be a Boolean"
+PROBLEMS = ["User must be non-root", "ExecStart must be absolute", "Restart must be on-failure"]
 
 
-def test_e1_show_order_and_input(capsys: pytest.CaptureFixture[str]) -> None:
-    argv = ["show", "--instrument", "PSU_1", "--station", " bench 2 "]
-    original = argv.copy()
-    args = parse_command(argv)
-    assert (args.command, args.station, args.instrument) == ("show", " bench 2 ", "PSU_1")
-    assert argv == original, "parsing must not change the caller's argument list"
-    captured = capsys.readouterr()
-    assert (captured.out, captured.err) == ("", ""), "successful parsing should be quiet"
+def test_e1_valid_service_and_literal_percent() -> None:
+    text = "[Unit]\nDescription=Station\n[Service]\nUser = station\nExecStart = /opt/station/probe --tag=%i\nRestart = on-failure\nOther=ignored\n"
+    assert service_problems(text) == [], "valid service settings and a literal percent must pass"
 
 
-@pytest.mark.parametrize("argv", [
-    [], ["run"], ["show", "--station", "A"], ["reset"],
-    ["run", "--station", "A", "--unknown"],
-    ["run", "--station"], ["show", "--instrument", "psu"],
-])
-def test_e1_reject_bad_arguments(argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
-    with pytest.raises(SystemExit) as error:
-        parse_command(argv)
-    assert error.value.code == 2, "argument errors use argparse exit code 2"
-    captured = capsys.readouterr()
-    assert captured.err, "argparse should explain the error on stderr"
-    assert captured.out == "", "argument errors should not print to stdout"
+@pytest.mark.parametrize("text", ["", "[Unit]\nDescription=Station\n", "[Service]\n", "[service]\nUser=station\n"])
+def test_e1_missing_service_settings(text: str) -> None:
+    assert service_problems(text) == PROBLEMS, "missing case-sensitive settings fail in User/ExecStart/Restart order"
+
+
+@pytest.mark.parametrize(
+    ("user", "command", "restart", "expected"),
+    [("root", "/opt/probe", "on-failure", PROBLEMS[:1]),
+     ("0", "/opt/probe", "on-failure", PROBLEMS[:1]),
+     ("", "/opt/probe", "on-failure", PROBLEMS[:1]),
+     ("station", "probe", "on-failure", PROBLEMS[1:2]),
+     ("station", "", "on-failure", PROBLEMS[1:2]),
+     ("station", "/opt/probe", "always", PROBLEMS[2:]),
+     ("root", "probe", "", PROBLEMS),
+     ("Root", "/not/installed", "on-failure", [])],
+)
+def test_e1_policy_rules(user: str, command: str, restart: str, expected: list[str]) -> None:
+    text = f"[Service]\nUser={user}\nExecStart={command}\nRestart={restart}\n"
+    got = service_problems(text)
+    assert got == expected, f"for {text!r}, expected {expected}, got {got}"
+
+
+def test_e1_case_sensitive_keys_and_parse_errors() -> None:
+    assert service_problems("[Service]\nuser=station\nexecstart=/opt/probe\nrestart=on-failure\n") == PROBLEMS
+    with pytest.raises(configparser.Error):
+        service_problems("[Service\nUser=station\n")
 
 
 @pytest.mark.parametrize("value, active", [

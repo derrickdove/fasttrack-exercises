@@ -1,124 +1,136 @@
-# d36 — Operator CLI with argparse
+# d36 — systemd services and config files
 
-**Time:** about 45 minutes · **Read first:** [Python Argparse Tutorial](https://docs.python.org/3/howto/argparse.html) (help, errors, and subcommands), [argparse documentation: Sub-commands](https://docs.python.org/3/library/argparse.html#sub-commands), and **Usability for operators: clear errors, safe prompts, no stack traces** — "Reread your CLI's error messages as if you were a technician at 2 a.m. Fix any that would confuse you." · **You edit:** `starter/opcli.py`
+**Time:** about 45 minutes · **Read first:** [systemd.service: what a unit file says](https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html), [systemd.unit](https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html), [journalctl](https://www.freedesktop.org/software/systemd/man/latest/journalctl.html), [tomllib](https://docs.python.org/3/library/tomllib.html) and [configparser](https://docs.python.org/3/library/configparser.html) · **You edit:** `starter/chassis-demo.service` and `starter/units.py`
 
 ## What you're building
 
-A **test station** is the bench of instruments and software used to check hardware. You will give its technician a **command-line interface (CLI)**: a tool controlled by typed commands. This set uses supplied simulated voltage readings, so no hardware is connected or switched on.
+A chassis test station needs a predictable way to start its Python process and load its instrument settings. You will describe that process in a service file, preserve repeated settings while reading files, and give the operator useful configuration errors. These checks read local files on Windows or Linux; they never install or start a service.
 
 ## How this works
 
-1. Replace the four `raise NotImplementedError(...)` lines in `starter/opcli.py`. Keep the supplied `STATIONS`, `_OperatorParser`, and `_run_station`; don't edit `tests/`.
-2. Press **Ctrl+Shift+B → Test: d36** (or run `bash tools/run.sh d36` / `tools\run.ps1 d36` from the repository root). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise. E2 uses E1; E3 and E4 can be solved independently.
-3. Report **all pass / partial / stuck** in the tracker.
+1. For E1, replace the entire placeholder in `starter/chassis-demo.service`. For E2–E4, replace the `raise NotImplementedError(...)` lines in `starter/units.py`. Don't edit `tests/`.
+2. Press Ctrl+Shift+B → **Test: d36** (or run `bash tools/run.sh d36` / `tools\run.ps1 d36`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise. The E1 placeholder marker makes its file-only exercise report `NotImplementedError` until you replace it.
+3. Report all pass / partial / stuck in the tracker.
 
-An **argument** is one piece of command-line text; `argv` is a list of those strings without the program name. An **option** is a named argument such as `--station`; a **subcommand** such as `run` selects an action. `argparse` is Python's standard-library argument parser; `parse_args` returns a **Namespace**, an object holding parsed values as attributes. A **flag** such as `--dry-run` becomes a Boolean (True/False) rather than consuming a value.
+**systemd** is a Linux manager that starts and supervises processes. A **service** is a process it manages. A **unit file** describes something systemd manages; a `.service` file describes a service. A **section** is a group headed by `[Name]`; a **directive** is a `Key=value` setting within it. A **target** groups units into a startup milestone. The **root** user (numeric user ID `0`) has unrestricted system privileges; a station process should use a separate account.
 
-**stdout** is the normal output stream; **stderr** is the stream for problems (`print(message, file=sys.stderr)`). An **exit code** is an integer telling a caller how the command ended. `SystemExit` is the exception argparse uses after printing help; a **traceback** is Python's internal error listing, which an operator should not have to read.
+**Parsing** turns file text into Python values. **Validation** checks those values against a contract. Python's `configparser` reads section/key files, but by default changes key names to lowercase and cannot preserve all repeated assignments. E1 uses `ConfigParser(strict=False)` with case preserved, interpolation disabled, and `=` as the delimiter (the character separating key and value); repeated keys then keep only their last value. E2 writes a small parser to keep every value. **Interpolation** means replacing special placeholders inside values; our parser treats values as literal text instead.
+
+A **nested dictionary** is a dictionary containing other dictionaries. A `list[str]` is a list of strings; repeated directives become lists. `setdefault(key, default)` inserts the default only when the key is absent, then returns the stored value:
 
 ```python
-import argparse
-parser = argparse.ArgumentParser()
-parser.add_argument("--channel", default="CH1")
-args = parser.parse_args(["--channel", "CH2"])
-print(args.channel)  # CH2
+commands = {}
+commands.setdefault("Query", []).append("MEAS:VOLT?")
+commands.setdefault("Query", []).append("SYST:ERR?")
+# {"Query": ["MEAS:VOLT?", "SYST:ERR?"]}
 ```
 
-The supplied station dictionary preserves this order: `bench-A` reads `5.0` volts (V), `bench-B` reads `4.0` V, and `bench-offline` reads `None`, meaning the instrument cannot provide a measurement. A **limit** is an acceptable bound: supplied `_run_station(limits_path, station, dry_run)` reads a **UTF-8** (a text encoding) **JSON** (a format for storing data as text) file such as `{"low": 4.5, "high": 5.5}`. It accepts exactly those two keys with **finite** numbers (neither infinity nor NaN, meaning not-a-number), excluding Booleans, and requires `low <= high`. Bounds are inclusive: equality passes.
-
-The helper returns `PASS` (inside bounds), `FAIL` (outside), or `ERROR` (offline). A **dry run** validates the file but does not measure; the helper returns `READY` even for an offline station. Missing/unreadable files raise `OSError`; invalid encoding, JSON, or limits raise `ValueError`. These helpers are complete; your work is the operator interface.
+**TOML** is a configuration text format with explicit strings, numbers, lists, and tables. A **table** is a group of named values, written `[station]`; `[[instruments]]` starts another table in a list of instruments. `tomllib.load` reads a file opened in binary mode (`"rb"`) and returns a dictionary. A **key path** locates a nested value: `instruments[1].resource` means the second instrument's resource. `dict[str, Any]` means string keys whose values may have different types; `Any` comes from `typing`.
 
 ## Exercises
 
-### E1 — Give the operator three commands (easy, ~12 min)
+### E1 — Describe the station service (easy, ~8 min)
 
-**Goal:** Build an argparse parser with these commands.
+**Goal:** Replace `starter/chassis-demo.service` with a unit that follows the deployment checklist below. This is a text-file exercise with no Python function to write.
 
-**Signature:** `def build_parser() -> argparse.ArgumentParser`
-
-Use the supplied `_OperatorParser` instead of `argparse.ArgumentParser`. It changes argparse's `error(message)` behavior to raise `ValueError(message)` without printing or exiting; that lets E2 produce one clear error line. Subparsers created with `add_parser` automatically use this same parser class.
-
-| Command | Required arguments | Optional arguments |
+| Section | Directive | Required value |
 | --- | --- | --- |
-| `run` | `--limits PATH --station NAME` | `--dry-run` |
-| `list` | none | none |
-| `show` | `--station NAME` | none |
+| `Unit` | `Description` | Any nonempty description of the station |
+| `Unit` | `After` | Whitespace-separated target names including `network-online.target` |
+| `Unit` | `Wants` | Whitespace-separated target names including `network-online.target` |
+| `Service` | `Type` | `simple` |
+| `Service` | `ExecStart` | Absolute Linux path to `python` or `python3`, then `-m chassis`, then optional arguments |
+| `Service` | `Restart` | `on-failure` |
+| `Service` | `RestartSec` | A positive integer number of seconds, such as `3` |
+| `Service` | `User` | Any nonempty account name other than `root` or `0` |
+| `Install` | `WantedBy` | Whitespace-separated target names including `multi-user.target` |
 
-- Set the program name (`prog`) to `station`. Require a subcommand and store it as `args.command`.
-- Store `limits` and `station` as strings. Accept only station names from `STATIONS` for both `run` and `show`.
-- `args.dry_run` is `False` by default and `True` when the flag appears. Options may appear in either order after the subcommand; paths and names stay as supplied.
-- Keep standard `-h` / `--help` support at the top level and for every subcommand. Top-level help names all three commands; run help explains its three options.
-- Missing required arguments, unknown subcommands/stations/options, and unexpected positional text raise `ValueError` without output. Do not replace standard help: it prints help to stdout and raises `SystemExit(0)`.
+**Example:** `Description=Rack 7 measurement worker` gives the service an operator-readable label. Choose the remaining lines from the checklist.
 
-**Example:** `build_parser().parse_args(["run", "--limits", "rail limits.json", "--station", "bench-A", "--dry-run"])` gives attributes `command="run"`, `limits="rail limits.json"`, `station="bench-A"`, `dry_run=True`.
+`After` orders this service after the named unit; `Wants` asks systemd to start that unit too. `network-online.target` marks network readiness according to the station's network setup. `Type=simple` means systemd starts the process directly. `ExecStart` gives the command, and `-m chassis` runs the Python module named `chassis`. `Restart=on-failure` retries after a process failure; `RestartSec` delays that retry. `WantedBy=multi-user.target` connects an enabled service to the usual non-graphical operating state. **Enabling** a service means arranging for its startup at boot.
 
-**Watch out:** An option that is required for `run` must not become required for `list`.
+**Watch out:** Use exact section/key capitalization. Write each required directive once. Use an unquoted absolute Linux path with no spaces, such as `/opt/station/bin/python3`; it need not exist on this computer. Extra arguments are split on whitespace; quoted commands and shell wrappers are outside this exercise. Extra settings are allowed. The tests inspect the file structurally, without requiring the account or chassis package to exist. On a real station, `journalctl -u chassis-demo.service` displays the service's **journal**, its collected log messages; you do not need to run this command here.
 
-**Reread:** Argparse Tutorial, "Introducing Positional Arguments" and "Introducing Optional Arguments"; argparse documentation, "Sub-commands" (`add_subparsers`, `dest`, `required`).
+**Reread:** systemd.service, `Type=`, `ExecStart=`, `Restart=`, `RestartSec=`; systemd.unit, `Description=`, `Wants=`, `After=`, and `[Install]`; journalctl, `-u` / `--unit=`. `User=` is an execution setting linked from systemd.service.
 
-### E2 — Return useful outcomes, not tracebacks (medium, ~17 min)
+### E2 — Preserve repeated directives (medium, ~12 min)
 
-**Goal:** Dispatch the parsed command and translate outcomes into exit codes. **Dispatch** means choosing the code for the requested subcommand.
+**Goal:** Read a UTF-8 unit file (UTF-8 is the text-to-bytes encoding) into section names, then keys, then lists of values.
 
-**Signature:** `def main(argv: list[str] | None = None) -> int`
+**Signature:** `def parse_unit(path: str | Path) -> dict[str, dict[str, list[str]]]`
 
-Call `build_parser().parse_args(argv)`. Passing `None` uses the real command-line arguments. Return an integer; do not exit from inside `main`.
+**Example:** File text `[Service]\nEnvironment=MODE=demo\nEnvironment=RACK=7\n` → `{"Service": {"Environment": ["MODE=demo", "RACK=7"]}}`. Here `\n` represents a newline.
 
-| Request / outcome | Exact output (each ends in a newline) | Return |
-| --- | --- | --- |
-| `list` | One name per line on stdout, in `STATIONS` order | `0` |
-| `show --station NAME` | `NAME: VALUE V`, or `NAME: offline` if its reading is `None`, on stdout | `0` |
-| `run` → helper returns `PASS` | `NAME: PASS` on stdout | `0` |
-| `run` → helper returns `FAIL` | `NAME: FAIL` on stdout | `1` |
-| `run --dry-run` → `READY` | `NAME: READY` on stdout | `0` |
-| `run` → helper returns `ERROR` | `error: NAME: measurement unavailable` on stderr | `2` |
-| Bad usage, or helper raises `ValueError` / `OSError` | `error: MESSAGE` on stderr | `3` |
-| Top-level or subcommand help | argparse's help on stdout | `0` |
+Contract:
 
-For `run`, call `_run_station(args.limits, args.station, args.dry_run)` exactly once. Use the supplied dictionary directly for `list` and `show`; neither reads a file. `show` uses the ordinary string form of the reading (for example `bench-A: 5.0 V`). Neither `main` nor its run helper asks for confirmation; E4 practices that separately.
+- Accept a string path or `pathlib.Path`. Strip surrounding whitespace on every line. Skip blank lines and whole-line comments starting with `#` or `;` after stripping.
+- A stripped line beginning with `[` and ending with `]` is a section heading. Strip the name inside the brackets; it must not be empty. Preserve capitalization. Repeated section headings reuse the same dictionary. Keep empty sections.
+- Every other non-comment line must have a current section and contain `=`. Split at the first `=` only; strip surrounding whitespace from key and value. The key must not be empty. Append the value to that key's list, preserving assignment order. An empty value is still an entry: `[""]`.
+- Keep all characters inside values, including additional `=`, `%`, `#`, and `;`. There are no inline comments, placeholder substitutions, or special reset behavior for empty values.
+- A comment-only or empty file returns `{}`. An invalid line raises `ValueError` whose message contains `line N`, with the physical line number starting at 1 (including comments and blanks). A missing file propagates `FileNotFoundError`.
 
-On errors, stdout must be empty. On success, FAIL, dry run, or help, stderr must be empty. For usage/input errors, MESSAGE is the exception text with whitespace collapsed to single spaces and leading/trailing whitespace removed (for example, `" ".join(str(error).split())`). This keeps every error to exactly one `error:` line, even if the original exception contains newlines. Keep the useful diagnostic, including any filename in the exception. Do not print usage or a traceback with an error. Catch help's `SystemExit(0)` and return `0` after argparse prints its help.
+**Watch out:** This is a single-line subset of unit syntax. It does not join continued lines or interpret commands and systemd placeholders. `configparser(strict=False)` loses earlier repeated values, so use line iteration and dictionaries for E2. No dependency on E1 is needed.
 
-**Example:** With `{"low": 4.5, "high": 5.5}` in `rail.json`, `main(["run", "--limits", "rail.json", "--station", "bench-B"])` prints `bench-B: FAIL` and returns `1`.
+**Reread:** configparser, "Supported INI File Structure", "Customizing Parser Behaviour" (`strict`, `optionxform`, `interpolation`); systemd.unit, the unit-file syntax introduction. **INI** means the section/key text format described by configparser.
 
-**Watch out:** Code `2` means the test system could not measure; code `3` means fix the command or input file. This follows the capstone's block 5 code meanings. `_OperatorParser` supplies the needed hook because argparse normally exits with code 2 on bad usage.
+### E3 — Give the operator a deployment checklist (medium, ~12 min)
 
-**Reread:** Argparse Tutorial, the missing-argument/error examples and `--help` examples; argparse documentation, "Sub-commands"; **Usability for operators**, reread every error as a technician at 2 a.m.
+**Goal:** Check the parsed dictionary without starting the service or changing the dictionary. Return every problem in the order below, at most one problem per row. Tests supply dictionaries directly, so E3 does not depend on E2.
 
-### E3 — Align station results (easy, ~9 min)
+**Signature:** `def validate_unit(parsed: dict[str, dict[str, list[str]]]) -> list[str]`
 
-**Goal:** Format a terminal table, a text grid whose column starts line up. This helper returns text; it does not print and is independent of E2's fixed outputs.
+**Example:** An otherwise valid unit with `User=["root"]` and no `Restart` → `["Restart missing", "User is root"]`.
 
-**Signature:** `def format_table(rows: list[dict[str, object]], columns: list[str]) -> str`
+Input has E2's dictionary/list/string shape. Missing sections and keys are allowed. For `After`, `Wants`, and `WantedBy`, combine tokens (words separated by whitespace) from **all** values and check for an exact target token. For every other required key use only its final value, stripped; an absent key, empty list, or blank final value counts as missing. Ignore extra sections and keys.
 
-The `columns` list gives dictionary keys, their display order, and the header labels. For each cell use `str(row.get(column, ""))`: a missing key becomes empty text; an explicit `None` becomes `"None"`. Ignore keys absent from `columns`. Preserve row order and do not change either input.
+| Check, in this order | Problem string |
+| --- | --- |
+| Final `Unit.Description` is missing | `Description missing` |
+| `Unit.After` lacks the network target | `After must include network-online.target` |
+| `Unit.Wants` lacks the network target | `Wants must include network-online.target` |
+| Final `Service.Type` is not `simple`, including missing | `Type must be simple` |
+| Final `Service.ExecStart` fails E1's command rule, including missing | `ExecStart must run an absolute python -m chassis command` |
+| Final `Service.Restart` is missing | `Restart missing` |
+| Otherwise, `Service.Restart` is not `on-failure` | `Restart must be on-failure` |
+| Final `Service.RestartSec` is missing | `RestartSec missing` |
+| Otherwise, `int(value)` fails or is at most zero | `RestartSec must be positive whole seconds` |
+| Final `Service.User` is missing | `User missing` |
+| Otherwise, `Service.User` is `root` or `0` | `User is root` |
+| `Install.WantedBy` lacks the boot target | `WantedBy must include multi-user.target` |
 
-Each column's width is the longest string length among its header and cells. **Left-align** means add spaces to the right of shorter cells until they reach that width; `str.ljust(width)` does this. Join padded columns with two spaces, strip trailing spaces from each completed line, then join lines with `"\n"`. Include the header first, no separator line, and do not append an extra newline. A fully empty final row is an empty final line, so that special case naturally ends with `"\n"`. Empty rows still produce the header; empty columns produce `""` regardless of rows. Inputs contain printable ASCII (ordinary terminal characters) with no embedded whitespace in headers or cell strings; string length is sufficient here.
+**Watch out:** Return `[]` when all checks pass. Whole seconds here use Python's `int` conversion: reject `0.5` and `3s`. This checklist deliberately covers fewer choices than systemd supports. It does not interpret empty assignments as dependency resets, verify accounts, or check paths on disk. Do not mutate (change) the input dictionary or its lists.
 
-**Example:** `format_table([{"station": "A", "state": "PASS"}, {"station": "long-bench", "state": "FAIL"}], ["station", "state"])` returns:
+**Reread:** systemd.service, `Type=`, `ExecStart=`, `Restart=`, and `RestartSec=`; systemd.unit, `Wants=`, `After=`, `[Install]`.
 
-```text
-station     state
-A           PASS
-long-bench  FAIL
+### E4 — Load instrument settings with useful errors (medium, ~13 min)
+
+**Goal:** Load TOML with `tomllib` and check a small station schema. A **schema** describes required keys and the types of their values. This exercise uses the station/instrument portion of the deployment configuration.
+
+**Signature:** `def load_station_toml(path: str | Path) -> dict[str, Any]`
+
+**Example file:**
+
+```toml
+[station]
+name = "Rack 7"
+
+[[instruments]]
+id = "psu1"
+kind = "psu"
+resource = "TCPIP::10.0.0.5::5025::SOCKET"
 ```
 
-**Watch out:** Measure widths using the header too. Remove trailing spaces when the last cell is missing; do not reorder or modify dictionaries.
+This returns `{"station": {"name": "Rack 7"}, "instruments": [{"id": "psu1", "kind": "psu", "resource": "TCPIP::10.0.0.5::5025::SOCKET"}]}`. A **resource** is the instrument address string; this loader stores it without connecting. `psu` identifies a power supply; `dmm` commonly identifies a digital multimeter.
 
-**Reread:** **Usability for operators**, check whether a technician can scan station names and results without guessing which value belongs to which column.
+Validate in this order, stopping at the first problem:
 
-### E4 — Ask safely before an operator action (easy, ~7 min)
+1. `station` must exist and be a dictionary (a TOML table). On failure raise `ValueError` containing `station`.
+2. `station.name` must exist and be a string. On failure name `station.name`.
+3. `instruments` must exist and be a list. On failure name `instruments`.
+4. Visit instruments in list order, with indexes starting at 0. Each item must be a dictionary; otherwise name `instruments[i]`. In each item check `id`, then `kind`, then `resource`: each must exist and be a string. Name the full path on failure, for example `instruments[1].resource`.
 
-**Goal:** Ask once for permission before a future station action such as enabling a **power supply's** output (an instrument that provides controlled voltage and current).
+Return the complete parsed dictionary, preserving unknown keys, values, and instrument order. Empty strings and an empty instrument list are valid. Only key presence and Python types are checked: no uniqueness, allowed-kind, address, or cross-reference checks. Accept strings and `Path` objects as paths. Open in binary mode for `tomllib.load`. Propagate `tomllib.TOMLDecodeError` for invalid TOML text and `FileNotFoundError` for a missing file; only schema errors need a key path. `TOMLDecodeError` is itself a subclass of `ValueError`.
 
-**Signature:** `def confirm(prompt: str, input_fn: Callable[[str], str] = input) -> bool`
+**Watch out:** Missing keys must produce your useful `ValueError`, rather than an accidental `KeyError`. If several settings are wrong, follow the validation order above. A TOML boolean like `true` is not a string.
 
-`Callable[[str], str]` means a function taking one string and returning one string. `input_fn` is **dependency injection**: passing in a function lets tests simulate a person without waiting at the keyboard. With no override, Python's `input` is used.
-
-Call `input_fn` exactly once with `prompt + " [y/N] "`. The capital `N` advertises that doing nothing means no. Strip leading/trailing whitespace from its reply and lowercase it. Return `True` only for `"y"` or `"yes"`; return `False` for every other reply, including an empty reply. If the function raises `EOFError` (**end of file**, meaning input was closed), return `False`. Do not print separately, retry, or perform an action; the supplied input function owns displaying the prompt.
-
-**Example:** `confirm("Enable output?", lambda text: " YES ")` returns `True`. With an empty reply it returns `False`.
-
-**Watch out:** Never treat a nonempty reply such as `"sure"` as consent.
-
-**Reread:** **Usability for operators**, "safe prompts": make the default safe and make the accepted confirmation explicit.
+**Reread:** tomllib, `load`, the example, and the conversion table (TOML table → `dict`, array → `list`, string → `str`).

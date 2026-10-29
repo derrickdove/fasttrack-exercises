@@ -1,233 +1,258 @@
+"""Offline station deployment checks: no Linux service is installed or started."""
+from configparser import ConfigParser
+from copy import deepcopy
 from pathlib import Path
-import sys
+import tomllib
 
 import pytest
 
-from starter import opcli
-from starter.opcli import build_parser, confirm, format_table, main
+from starter.units import load_station_toml, parse_unit, validate_unit
 
 
-def test_e1_run_arguments() -> None:
-    args = build_parser().parse_args([
-        "run", "--limits", "rail limits.json", "--station", "bench-A", "--dry-run",
-    ])
-    assert (args.command, args.limits, args.station, args.dry_run) == (
-        "run", "rail limits.json", "bench-A", True,
-    ), "run must preserve option values and enable the dry-run flag"
+@pytest.fixture
+def service_file() -> ConfigParser:
+    path = Path(__file__).resolve().parents[1] / "starter" / "chassis-demo.service"
+    text = path.read_text(encoding="utf-8")
+    if "# NotImplementedError: E1:" in text:
+        raise NotImplementedError("E1: Replace the service file placeholder using README.md")
+    parser = ConfigParser(strict=False, interpolation=None, delimiters=("=",))
+    parser.optionxform = str
+    parser.read_string(text)
+    return parser
 
 
-def test_e1_defaults_and_other_commands() -> None:
-    parser = build_parser()
-    args = parser.parse_args(["run", "--station", "bench-B", "--limits", "x.json"])
-    assert args.dry_run is False, "measurement is the default when --dry-run is absent"
-    assert parser.parse_args(["list"]).command == "list"
-    shown = parser.parse_args(["show", "--station", "bench-offline"])
-    assert (shown.command, shown.station) == ("show", "bench-offline")
+def test_e1_network_ordering(service_file: ConfigParser) -> None:
+    assert service_file.has_section("Unit"), "Add a [Unit] section"
+    unit = service_file["Unit"]
+    assert unit.get("Description", "").strip(), "Describe the station service"
+    for key in ("After", "Wants"):
+        assert "network-online.target" in unit.get(key, "").split(), f"{key} must name network-online.target"
 
 
-@pytest.mark.parametrize("argv", [
-    [], ["missing"], ["run"], ["run", "--station", "bench-A"],
-    ["run", "--limits", "rail.json"], ["show"],
-    ["show", "--station", "unknown"], ["list", "extra"],
-    ["run", "--limits", "x", "--station", "unknown"],
-    ["run", "--limits", "x", "--station", "bench-A", "--bogus"],
-    ["run", "--limits", "x", "--station", "bench-A", "--dry-run", "yes"],
+def test_e1_service_policy(service_file: ConfigParser) -> None:
+    assert service_file.has_section("Service"), "Add a [Service] section"
+    service = service_file["Service"]
+    assert service.get("Type") == "simple", "Use Type=simple for the station process"
+    command = service.get("ExecStart", "").split()
+    assert len(command) >= 3, "ExecStart needs the Python path, -m, and chassis"
+    assert command[0].startswith("/"), "Use an absolute Linux Python path"
+    assert command[0].rsplit("/", 1)[-1] in ("python", "python3"), "Use python or python3"
+    assert command[1:3] == ["-m", "chassis"], "Start the chassis module"
+    assert service.get("Restart") == "on-failure", "Restart the station after a failure"
+    assert int(service.get("RestartSec", "0")) > 0, "RestartSec must be positive whole seconds"
+    assert service.get("User", "").strip() not in ("", "root", "0"), "Choose a named non-root service user"
+
+
+def test_e1_boot_target(service_file: ConfigParser) -> None:
+    assert service_file.has_section("Install"), "Add an [Install] section"
+    assert "multi-user.target" in service_file["Install"].get("WantedBy", "").split(), "Use the normal multi-user boot target"
+
+
+def test_e2_sections_and_whitespace(tmp_path: Path) -> None:
+    path = tmp_path / "station.service"
+    path.write_text("  # station comment\n; another comment\n\n[ Unit ]\n Description = Rack 7 \n[Service]\nType=simple\n", encoding="utf-8")
+    expected = {"Unit": {"Description": ["Rack 7"]}, "Service": {"Type": ["simple"]}}
+    assert parse_unit(str(path)) == expected, "Strip surrounding whitespace and skip whole-line comments"
+
+
+def test_e2_repeats_empty_values_and_literal_text(tmp_path: Path) -> None:
+    path = tmp_path / "repeat.service"
+    path.write_text("[Service]\nEnvironment=MODE=demo\nEnvironment=\nEnvironment=LOAD=100% # literal; text\nUser=chassis\nuser=other\n[Service]\nEnvironment=NEXT=2\n", encoding="utf-8")
+    expected = {"Service": {"Environment": ["MODE=demo", "", "LOAD=100% # literal; text", "NEXT=2"], "User": ["chassis"], "user": ["other"]}}
+    assert parse_unit(path) == expected, "Keep every assignment, case, empty value, and text after the first ="
+
+
+@pytest.mark.parametrize("character", ["\v", "\f", "\x1c", "\x1d", "\x1e", "\u0085", "\u2028", "\u2029"])
+def test_e2_preserves_literal_characters_inside_values(tmp_path: Path, character: str) -> None:
+    path = tmp_path / "literal.service"
+    value = f"LABEL=alpha{character}beta"
+    path.write_text(f"[Service]\nEnvironment={value}\n", encoding="utf-8")
+    assert parse_unit(path) == {"Service": {"Environment": [value]}}, "Keep all characters inside values"
+
+
+def test_e2_empty_file_and_empty_sections(tmp_path: Path) -> None:
+    path = tmp_path / "empty.service"
+    path.write_text("# no settings\n", encoding="utf-8")
+    assert parse_unit(path) == {}, "A comment-only file has no sections"
+    path.write_text("[Unit]\n[Service]\n", encoding="utf-8")
+    assert parse_unit(path) == {"Unit": {}, "Service": {}}, "Keep empty sections"
+
+
+@pytest.mark.parametrize("text, line", [
+    ("# heading\nUser=chassis\n", 2),
+    ("[Service]\nRestart on-failure\n", 2),
+    ("[Service]\n = value\n", 2),
+    ("[ ]\n", 1),
+    ("[Service\n", 1),
 ])
-def test_e1_usage_errors_raise_without_printing(argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
-    with pytest.raises(ValueError):
-        build_parser().parse_args(argv)
-    captured = capsys.readouterr()
-    assert captured.out == captured.err == "", "E1 must leave error formatting to main"
+def test_e2_bad_lines_name_line_number(tmp_path: Path, text: str, line: int) -> None:
+    path = tmp_path / "broken.service"
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(ValueError, match=rf"line {line}\b"):
+        parse_unit(path)
 
 
-@pytest.mark.parametrize(("argv", "words"), [
-    (["--help"], ["run", "list", "show"]),
-    (["run", "--help"], ["--limits", "--station", "--dry-run"]),
-    (["list", "-h"], ["list"]), (["show", "-h"], ["--station"]),
-])
-def test_e1_help(argv: list[str], words: list[str], capsys: pytest.CaptureFixture[str]) -> None:
-    with pytest.raises(SystemExit) as stopped:
-        build_parser().parse_args(argv)
-    assert stopped.value.code == 0
-    captured = capsys.readouterr()
-    assert captured.out.startswith("usage: station"), "help must identify the operator tool"
-    assert all(word in captured.out for word in words), "help must expose the command options"
-    assert captured.err == ""
+def test_e2_missing_file(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        parse_unit(tmp_path / "absent.service")
 
 
-@pytest.mark.parametrize(("station", "bounds", "dry_run", "expected_code", "expected_out", "expected_err"), [
-    ("bench-A", (4.5, 5.5), False, 0, "bench-A: PASS\n", ""),
-    ("bench-A", (5.0, 5.0), False, 0, "bench-A: PASS\n", ""),
-    ("bench-A", (0.0, 10**400), False, 0, "bench-A: PASS\n", ""),
-    ("bench-B", (4.5, 5.5), False, 1, "bench-B: FAIL\n", ""),
-    ("bench-A", (1.0, 4.0), False, 1, "bench-A: FAIL\n", ""),
-    ("bench-offline", (4.5, 5.5), False, 2, "", "error: bench-offline: measurement unavailable\n"),
-    ("bench-B", (4.5, 5.5), True, 0, "bench-B: READY\n", ""),
-    ("bench-offline", (4.5, 5.5), True, 0, "bench-offline: READY\n", ""),
-])
-def test_e2_run_outcomes(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], station: str,
-    bounds: tuple[float, float], dry_run: bool, expected_code: int,
-    expected_out: str, expected_err: str,
-) -> None:
-    limits = tmp_path / "rail limits.json"
-    limits.write_text(f'{{"low": {bounds[0]}, "high": {bounds[1]}}}', encoding="utf-8")
-    argv = ["run", "--limits", str(limits), "--station", station]
-    if dry_run:
-        argv.append("--dry-run")
-    result = main(argv)
-    captured = capsys.readouterr()
-    assert type(result) is int and result == expected_code, "return the documented integer exit code"
-    assert captured.out == expected_out
-    assert captured.err == expected_err
+@pytest.fixture
+def valid_unit() -> dict[str, dict[str, list[str]]]:
+    return {
+        "Unit": {"Description": ["Rack 7"], "After": ["network-online.target"], "Wants": ["network-online.target"]},
+        "Service": {"Type": ["simple"], "ExecStart": ["/opt/station/python -m chassis --help"], "Restart": ["on-failure"], "RestartSec": ["3"], "User": ["chassis"]},
+        "Install": {"WantedBy": ["multi-user.target"]},
+    }
 
 
-@pytest.mark.parametrize(("argv", "output"), [
-    (["list"], "bench-A\nbench-B\nbench-offline\n"),
-    (["show", "--station", "bench-A"], "bench-A: 5.0 V\n"),
-    (["show", "--station", "bench-B"], "bench-B: 4.0 V\n"),
-    (["show", "--station", "bench-offline"], "bench-offline: offline\n"),
-])
-def test_e2_list_and_show(argv: list[str], output: str, capsys: pytest.CaptureFixture[str]) -> None:
-    assert main(argv) == 0
-    captured = capsys.readouterr()
-    assert captured.out == output
-    assert captured.err == ""
+def test_e3_valid_unit_and_no_mutation(valid_unit: dict[str, dict[str, list[str]]]) -> None:
+    before = deepcopy(valid_unit)
+    assert validate_unit(valid_unit) == [], "A valid station unit has no problems"
+    assert valid_unit == before, "Checking a unit must not change it"
 
 
-@pytest.mark.parametrize(("argv", "clue"), [
-    ([], "command"), (["unknown"], "unknown"),
-    (["run", "--station", "bench-A"], "--limits"),
-    (["run", "--limits", "x"], "--station"),
-    (["show", "--station", "unknown"], "unknown"),
-    (["list", "--bogus"], "--bogus"),
-])
-def test_e2_usage_errors(argv: list[str], clue: str, capsys: pytest.CaptureFixture[str]) -> None:
-    assert main(argv) == 3, "usage mistakes use code 3, not argparse's default code 2"
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert captured.err.startswith("error: ") and len(captured.err.splitlines()) == 1
-    assert clue in captured.err, "keep the diagnostic that helps the operator fix the command"
-    assert "Traceback" not in captured.err and "usage:" not in captured.err
-
-
-@pytest.mark.parametrize("content", [
-    None, "not JSON", '{"low": 8, "high": 2}', '{"low": true, "high": 6}',
-    '{"low": 0}', '{"low": "4", "high": 6}', '{"low": 0, "high": Infinity}',
-    b"\xff",
-])
-def test_e2_input_errors_even_in_dry_run(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], content: str | bytes | None,
-) -> None:
-    limits = tmp_path / "bad limits.json"
-    if isinstance(content, bytes):
-        limits.write_bytes(content)
-    elif content is not None:
-        limits.write_text(content, encoding="utf-8")
-    assert main(["run", "--limits", str(limits), "--station", "bench-A", "--dry-run"]) == 3
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert captured.err.startswith("error: ") and len(captured.err.splitlines()) == 1
-    assert "Traceback" not in captured.err
-    if content is None:
-        assert limits.name in captured.err, "a missing-file message must retain its filename"
-
-
-@pytest.mark.parametrize("argv", [["--help"], ["run", "--help"], ["list", "-h"], ["show", "-h"]])
-def test_e2_help_and_real_argv(
-    argv: list[str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
-) -> None:
-    assert main(argv) == 0, "main must return rather than leak help's SystemExit"
-    captured = capsys.readouterr()
-    assert captured.out.startswith("usage: station") and captured.err == ""
-    monkeypatch.setattr(sys, "argv", ["station", "list"])
-    assert main(None) == 0
-    captured = capsys.readouterr()
-    assert captured.out == "bench-A\nbench-B\nbench-offline\n" and captured.err == ""
-
-
-def test_e2_dispatch_and_multiline_diagnostic(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
-) -> None:
-    calls: list[tuple[str, str, bool]] = []
-
-    def backend(path: str, station: str, dry_run: bool) -> str:
-        calls.append((path, station, dry_run))
-        raise ValueError("  limits rail.json:\n  expected numeric bounds\t ")
-
-    monkeypatch.setattr(opcli, "_run_station", backend)
-    assert main(["run", "--limits", "rail.json", "--station", "bench-A", "--dry-run"]) == 3
-    assert calls == [("rail.json", "bench-A", True)], "dispatch exactly once with parsed arguments"
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert captured.err == "error: limits rail.json: expected numeric bounds\n"
-
-
-def test_e3_align_and_preserve_inputs(capsys: pytest.CaptureFixture[str]) -> None:
-    rows: list[dict[str, object]] = [
-        {"station": "A", "state": "PASS"}, {"station": "long-bench", "state": "FAIL"},
+def test_e3_empty_unit_reports_checklist_in_order() -> None:
+    expected = [
+        "Description missing",
+        "After must include network-online.target",
+        "Wants must include network-online.target",
+        "Type must be simple",
+        "ExecStart must run an absolute python -m chassis command",
+        "Restart missing",
+        "RestartSec missing",
+        "User missing",
+        "WantedBy must include multi-user.target",
     ]
-    original = [row.copy() for row in rows]
-    columns = ["station", "state"]
-    result = format_table(rows, columns)
-    assert result == "station     state\nA           PASS\nlong-bench  FAIL"
-    assert rows == original and columns == ["station", "state"], "formatting must not change source data"
-    assert capsys.readouterr().out == "", "return the table rather than printing it"
+    assert validate_unit({}) == expected, "Report every missing setting in checklist order"
 
 
-def test_e3_requested_order_and_conversions() -> None:
-    rows: list[dict[str, object]] = [
-        {"station": "A", "value": 5.25, "ignored": "do-not-display"},
-        {"station": "B", "value": None}, {"station": "C", "value": False},
-    ]
-    assert format_table(rows, ["value", "station"]) == (
-        "value  station\n5.25   A\nNone   B\nFalse  C"
-    ), "column order comes from columns, and values use str()"
-
-
-def test_e3_missing_cells_and_no_trailing_spaces() -> None:
-    rows: list[dict[str, object]] = [{"state": "PASS"}, {"station": "A"}, {}]
-    assert format_table(rows, ["station", "state"]) == "station  state\n         PASS\nA\n"
-    assert format_table([{"volts": 5}], ["volts"]) == "volts\n5"
-
-
-@pytest.mark.parametrize(("rows", "columns", "expected"), [
-    ([], ["station", "state"], "station  state"),
-    ([], [], ""), ([{"station": "A"}], [], ""),
+@pytest.mark.parametrize("section, key, message", [
+    ("Unit", "Description", "Description missing"),
+    ("Unit", "After", "After must include network-online.target"),
+    ("Unit", "Wants", "Wants must include network-online.target"),
+    ("Service", "Type", "Type must be simple"),
+    ("Service", "ExecStart", "ExecStart must run an absolute python -m chassis command"),
+    ("Service", "Restart", "Restart missing"),
+    ("Service", "RestartSec", "RestartSec missing"),
+    ("Service", "User", "User missing"),
+    ("Install", "WantedBy", "WantedBy must include multi-user.target"),
 ])
-def test_e3_empty_inputs(rows: list[dict[str, object]], columns: list[str], expected: str) -> None:
-    assert format_table(rows, columns) == expected
+@pytest.mark.parametrize("values", [None, [], ["  "]])
+def test_e3_missing_and_blank_settings(valid_unit: dict[str, dict[str, list[str]]], section: str, key: str, message: str, values: list[str] | None) -> None:
+    if values is None:
+        del valid_unit[section][key]
+    else:
+        valid_unit[section][key] = values
+    assert validate_unit(valid_unit) == [message], f"Name the missing {section}.{key} setting"
 
 
-@pytest.mark.parametrize("reply", ["y", "yes", "Y", "YES", "  YeS ", "\ty\n"])
-def test_e4_explicit_yes(reply: str) -> None:
-    assert confirm("Enable output?", lambda prompt: reply) is True
+@pytest.mark.parametrize("section, key, value, message", [
+    ("Service", "User", "root", "User is root"),
+    ("Service", "User", "0", "User is root"),
+    ("Service", "Type", "forking", "Type must be simple"),
+    ("Service", "Restart", "always", "Restart must be on-failure"),
+    ("Service", "RestartSec", "0", "RestartSec must be positive whole seconds"),
+    ("Service", "RestartSec", "-2", "RestartSec must be positive whole seconds"),
+    ("Service", "RestartSec", "0.5", "RestartSec must be positive whole seconds"),
+    ("Service", "RestartSec", "3s", "RestartSec must be positive whole seconds"),
+    ("Service", "ExecStart", "python -m chassis", "ExecStart must run an absolute python -m chassis command"),
+    ("Service", "ExecStart", "/usr/bin/python -m unrelated", "ExecStart must run an absolute python -m chassis command"),
+    ("Service", "ExecStart", "/usr/bin/echo python -m chassis", "ExecStart must run an absolute python -m chassis command"),
+    ("Unit", "After", "not-network-online.target", "After must include network-online.target"),
+    ("Install", "WantedBy", "graphical.target", "WantedBy must include multi-user.target"),
+])
+def test_e3_invalid_values(valid_unit: dict[str, dict[str, list[str]]], section: str, key: str, value: str, message: str) -> None:
+    valid_unit[section][key] = [value]
+    assert validate_unit(valid_unit) == [message], f"Reject {section}.{key}={value!r}"
 
 
-@pytest.mark.parametrize("reply", ["", " ", "n", "NO", "sure", "yes please", "yep", "1", "y es"])
-def test_e4_every_other_reply_is_no(reply: str) -> None:
-    assert confirm("Enable output?", lambda prompt: reply) is False
+def test_e3_repeated_settings(valid_unit: dict[str, dict[str, list[str]]]) -> None:
+    valid_unit["Unit"]["After"] = ["network-online.target", "time-sync.target"]
+    valid_unit["Unit"]["Wants"] = ["time-sync.target", "network-online.target"]
+    valid_unit["Install"]["WantedBy"] = ["multi-user.target", "graphical.target"]
+    valid_unit["Service"]["User"] = ["root", " chassis "]
+    valid_unit["Service"]["Restart"] = ["always", " on-failure "]
+    valid_unit["Service"]["ExecStart"] = ["/usr/bin/python3 -m chassis"]
+    valid_unit["Other"] = {"Extra": ["ignored"]}
+    assert validate_unit(valid_unit) == [], "Combine dependency lists; use the last scalar value; ignore extra settings"
+    valid_unit["Service"]["User"].append("root")
+    assert validate_unit(valid_unit) == ["User is root"], "The final User assignment controls this checklist"
 
 
-def test_e4_prompt_once_and_no_extra_output(capsys: pytest.CaptureFixture[str]) -> None:
-    prompts: list[str] = []
+@pytest.fixture
+def station_text() -> str:
+    return '''[station]
+name = "Rack 7"
+operator_note = "Keep this extra key"
 
-    def input_fn(prompt: str) -> str:
-        prompts.append(prompt)
-        return "no"
+[[instruments]]
+id = "psu1"
+kind = "psu"
+resource = "TCPIP::10.0.0.5::5025::SOCKET"
 
-    assert confirm("Enable PSU output?", input_fn) is False
-    assert prompts == ["Enable PSU output? [y/N] "], "show the safe default and ask only once"
-    captured = capsys.readouterr()
-    assert captured.out == captured.err == "", "the input function owns displaying the prompt"
+[[instruments]]
+id = "dmm1"
+kind = "dmm"
+resource = "TCPIP::10.0.0.6::5025::SOCKET"
+'''
 
 
-def test_e4_closed_input_is_safe() -> None:
-    prompts: list[str] = []
+def test_e4_loads_complete_dict(tmp_path: Path, station_text: str) -> None:
+    path = tmp_path / "station.toml"
+    path.write_text(station_text, encoding="utf-8")
+    assert load_station_toml(str(path)) == tomllib.loads(station_text), "Return all loaded data, including extra keys"
 
-    def closed_input(prompt: str) -> str:
-        prompts.append(prompt)
-        raise EOFError
 
-    assert confirm("Enable output?", closed_input) is False, "closed input must never enable output"
-    assert prompts == ["Enable output? [y/N] "]
+@pytest.mark.parametrize("text, key_path", [
+    ('instruments = []\n', "station"),
+    ('station = "Rack 7"\ninstruments = []\n', "station"),
+    ('[station]\n', "station.name"),
+    ('[station]\nname = true\n', "station.name"),
+    ('[station]\nname = 7\n', "station.name"),
+    ('[station]\nname = "A"\n', "instruments"),
+    ('instruments = "psu1"\n[station]\nname = "A"\n', "instruments"),
+    ('instruments = {}\n[station]\nname = "A"\n', "instruments"),
+    ('instruments = [7]\n[station]\nname = "A"\n', "instruments[0]"),
+])
+def test_e4_container_and_station_errors(tmp_path: Path, text: str, key_path: str) -> None:
+    path = tmp_path / "station.toml"
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(ValueError) as caught:
+        load_station_toml(path)
+    assert key_path in str(caught.value), f"Name the failing key path {key_path!r}"
+
+
+@pytest.mark.parametrize("key", ["id", "kind", "resource"])
+@pytest.mark.parametrize("replacement", [None, "42", "false", "[]", "{}"])
+def test_e4_instrument_field_errors(tmp_path: Path, station_text: str, key: str, replacement: str | None) -> None:
+    # Damage only the second instrument, so its index must be reported.
+    first, second = station_text.rsplit("[[instruments]]", 1)
+    lines = second.splitlines()
+    lines = [line if not line.startswith(key + " =") else (f"{key} = {replacement}" if replacement is not None else "") for line in lines]
+    path = tmp_path / "station.toml"
+    path.write_text(first + "[[instruments]]" + "\n".join(lines), encoding="utf-8")
+    with pytest.raises(ValueError) as caught:
+        load_station_toml(path)
+    expected = f"instruments[1].{key}"
+    assert expected in str(caught.value), f"Report the exact instrument field {expected}"
+
+
+def test_e4_empty_list_and_strings_are_valid(tmp_path: Path) -> None:
+    path = tmp_path / "station.toml"
+    path.write_text('instruments = []\n[station]\nname = ""\n', encoding="utf-8")
+    assert load_station_toml(path) == {"station": {"name": ""}, "instruments": []}, "This loader checks types, allowing empty strings and an empty instrument list"
+    path.write_text('[station]\nname = "A"\n[[instruments]]\nid = ""\nkind = "simulator"\nresource = ""\n', encoding="utf-8")
+    assert load_station_toml(path)["instruments"][0]["kind"] == "simulator", "Kind is a string here; deployment policy is outside this exercise"
+
+
+def test_e4_bad_toml(tmp_path: Path) -> None:
+    path = tmp_path / "broken.toml"
+    path.write_text("[station\nname = ?", encoding="utf-8")
+    with pytest.raises(tomllib.TOMLDecodeError):
+        load_station_toml(path)
+
+
+def test_e4_missing_file(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        load_station_toml(tmp_path / "absent.toml")

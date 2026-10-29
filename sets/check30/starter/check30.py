@@ -107,3 +107,18 @@ class GapTracker:
 
     def update(self, seq: int) -> list[int]:
         raise NotImplementedError("E9: implement the README contract")
+
+
+class AlarmThrottle:
+    """E10: Limit allowed alarms in a time window using an injected clock."""
+
+    def __init__(self, clock: Callable[[], int], window_ms: int, max_alarms: int) -> None:
+        raise NotImplementedError("E10: validate settings and initialize the alarm deque")
+
+    def allow(self) -> bool:
+        """Expire old alarms; record this alarm only if there is room."""
+        raise NotImplementedError("E10: implement the README contract")
+
+    def __len__(self) -> int:
+        """Return the number of stored allowed alarm times without reading the clock."""
+        raise NotImplementedError("E10: return the number of stored alarm times")

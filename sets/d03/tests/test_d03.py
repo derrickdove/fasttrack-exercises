@@ -1,3 +1,4 @@
+from itertools import product
 from time import perf_counter
 
 import pytest
@@ -6,6 +7,7 @@ from starter.channels import (
     channel_stats,
     duplicate_serials,
     group_by_channel,
+    is_valid_loop,
     missing_channels,
 )
 
@@ -152,3 +154,82 @@ def test_e4_input_and_calls_are_independent():
     assert got == ["SN-2"], "Recognize a later occurrence with different case"
     assert serials == original, "Do not uppercase or reorder the input list"
     assert duplicate_serials(["sn-2"]) == [], "Do not carry seen serials between calls"
+
+
+@pytest.mark.parametrize(
+    ("commands", "expected"),
+    [
+        ("F", False),
+        ("LRF", False),
+        ("L", True),
+        ("FLLF", True),
+        ("LF", True),
+        ("FFRFFRFFRFFR", True),
+        ("FRF", True),
+    ],
+)
+def test_e5_readme_examples(commands, expected):
+    got = is_valid_loop(commands)
+    assert got is expected, f"for commands {commands!r}, expected {expected}, got {got!r}"
+
+
+def _brute_force_loop(commands):
+    x, y = 0, 0
+    dx, dy = 0, 1
+    for _ in range(4):
+        for command in commands:
+            if command == "L":
+                dx, dy = -dy, dx
+            elif command == "R":
+                dx, dy = dy, -dx
+            else:
+                x += dx
+                y += dy
+    return (x, y) == (0, 0)
+
+
+def test_e5_all_short_command_strings():
+    for length in range(1, 5):
+        for letters in product("LRF", repeat=length):
+            commands = "".join(letters)
+            expected = _brute_force_loop(commands)
+            got = is_valid_loop(commands)
+            assert got is expected, f"four-pass simulation for {commands!r}: expected {expected}, got {got!r}"
+
+
+def test_e5_empty_commands_rejected():
+    with pytest.raises(ValueError):
+        is_valid_loop("")
+
+
+@pytest.mark.parametrize(
+    ("commands", "bad_character"),
+    [
+        ("l", "l"),
+        ("r", "r"),
+        ("f", "f"),
+        ("FX", "X"),
+        ("L?", "?"),
+        ("FLLF!", "!"),
+        ("RRRR0", "0"),
+        ("FR F", " "),
+        ("FR\n", "\n"),
+        ("FR\t", "\t"),
+    ],
+)
+def test_e5_bad_character_named(commands, bad_character):
+    with pytest.raises(ValueError) as caught:
+        is_valid_loop(commands)
+    message = str(caught.value)
+    assert bad_character in message or repr(bad_character)[1:-1] in message, (
+        f"Name the invalid character {bad_character!r} in the ValueError message, got {message!r}"
+    )
+
+
+def test_e5_fast_enough():
+    commands = "FR" * 5_000
+    started = perf_counter()
+    got = is_valid_loop(commands)
+    elapsed = perf_counter() - started
+    assert got is True, "The 10,000-character command string repeats a bounded square path"
+    assert elapsed < 1.0, f"Loop check took {elapsed:.3f}s; simulate at most four passes (limit 1s)"

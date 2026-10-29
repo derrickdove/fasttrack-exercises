@@ -66,3 +66,31 @@ PsuDriver::PsuDriver(Session* session) noexcept : session_(session) {}
 PsuDriver::~PsuDriver() noexcept {
     // E4: Teardown is missing. Close a present session without letting errors escape.
 }
+
+// Supplied for E5: this file-scope static helper has internal linkage.
+[[maybe_unused]] static std::string taggedCommand(int sequence, const std::string& command) {
+    return std::to_string(sequence) + ": " + command;
+}
+
+// Supplied: one shared counter, initially zero, rather than a field per object.
+int PsuCommandDriver::openCount_ = 0;
+
+int nextSequence() {
+    throw std::logic_error("NotImplementedError: E5: retain and increment a local static sequence");
+}
+
+PsuCommandDriver::PsuCommandDriver() {
+    throw std::logic_error("NotImplementedError: E5: count this newly opened driver");
+}
+
+PsuCommandDriver::~PsuCommandDriver() noexcept {
+    // E5: Decrease the shared count. A noexcept destructor must not throw.
+}
+
+int PsuCommandDriver::openCount() {
+    throw std::logic_error("NotImplementedError: E5: return the shared open count");
+}
+
+std::string PsuCommandDriver::tagCommand(const std::string& /*command*/) {
+    throw std::logic_error("NotImplementedError: E5: tag a command using the supplied helper");
+}

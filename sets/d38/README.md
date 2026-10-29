@@ -1,6 +1,6 @@
 # d38 — Docker and Ansible: a test station as files
 
-**Time:** about 45 minutes · **Read first:** Docker [Get started](https://docs.docker.com/get-started/) and the [Dockerfile reference](https://docs.docker.com/reference/dockerfile/); Ansible [Getting started](https://docs.ansible.com/ansible/latest/getting_started/index.html), [Intro to playbooks](https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_intro.html), and [Roles](https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_reuse_roles.html) · **You edit:** `starter/Dockerfile`, `starter/playbook.yml`, `starter/inventory.ini`, and `starter/deploycheck.py`
+**Time:** about 57 minutes · **Read first:** Docker [Get started](https://docs.docker.com/get-started/) and the [Dockerfile reference](https://docs.docker.com/reference/dockerfile/); Ansible [Getting started](https://docs.ansible.com/ansible/latest/getting_started/index.html), [Intro to playbooks](https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_intro.html), and [Roles](https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_reuse_roles.html) · **You edit:** `starter/Dockerfile`, `starter/playbook.yml`, `starter/inventory.ini`, and `starter/deploycheck.py`
 
 ## What you're building
 
@@ -9,7 +9,7 @@ An operator needs the same chassis tester software on every bench computer. You 
 ## How this works
 
 1. E1–E3: replace the placeholder comments in the three deployment files. E4: replace `raise NotImplementedError(...)` in `starter/deploycheck.py`. Don't edit `tests/` or the empty `starter/__init__.py`.
-2. Press **Ctrl+Shift+B → Test: d38** (or run `bash tools/run.sh d38` / `tools\run.ps1 d38`). At first you'll see `Exercises: 0 / 4 passed`. Comment-only deployment files deliberately report `NotImplementedError`; once filled in, they get structural assertions. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d38** (or run `bash tools/run.sh d38` / `tools\run.ps1 d38`). At first you'll see `Exercises: 0 / 5 passed`. Comment-only deployment files deliberately report `NotImplementedError`; once filled in, they get structural assertions. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A **deployment** is putting software and configuration on a computer. A Docker **image** is a packaged filesystem and startup recipe; a **container** is a running instance of that image. A **Dockerfile** lists instructions for constructing an image. A **base image** supplies the starting filesystem; its **tag**, such as `3.12-slim`, selects a version and variant. **Root** is Linux's unrestricted administrator account; the station process should use another account.
@@ -101,3 +101,40 @@ print(plays[0]["hosts"])  # diagnostics
 **Watch out:** This is a small review rule, not a proof that a deployment is idempotent. It accepts any present `changed_when` value, even `true`. Inputs use direct tasks only: no roles, nested task blocks, handlers (tasks triggered by changes), task includes, short module aliases, or inline `creates=...`/`removes=...` inside command strings. All guarded paths use explicit YAML keys. Tests use temporary playbooks, so E4 can pass before E2 is finished.
 
 **Reread:** Ansible Intro to playbooks, “Desired state and idempotency”; Getting started, “Creating a playbook.”
+
+### E5 — Check an Ansible role layout (easy–medium, ~12 min)
+
+**Goal:** Implement `role_problems` in `starter/deploycheck.py` by replacing its `raise NotImplementedError(...)` line. The team groups station setup into reusable roles. Check the supplied folders in `data/roles/` before a role reaches a bench computer. You only read files; you never run Ansible.
+
+A role's `tasks/main.yml` is its starting task list. `defaults/main.yml` holds default variable values (settings that callers may replace). `handlers/main.yml` lists named handlers, such as a service restart. A task's **notification**, written as `notify`, names a handler to trigger when that task changes something. This check only matches the names in the files; it does not predict whether a task will change anything.
+
+**Signature:** `def role_problems(role_dir: Path) -> list[str]`
+
+**Exact contract:**
+
+1. `role_dir` is a `pathlib.Path` pointing to an existing role folder. Report `"tasks/main.yml: missing"` when that file is absent, but keep checking the other files. `defaults/main.yml` and `handlers/main.yml` are optional; their absence alone is fine.
+2. Read each inspected file as UTF-8 and load it with `yaml.safe_load`. If `defaults/main.yml` is present but does not load as a mapping (`dict`), report `"defaults/main.yml: expected a mapping"`. An empty mapping (`{}`) is valid; an empty/comment-only file loads as `None` and is invalid.
+3. Inspect every file directly inside `tasks/` whose extension is `.yml`, including `main.yml`. Ignore nested folders, other extensions, and all other role files. Each task file must load as a list; otherwise report `"tasks/<file>.yml: expected a list"` and skip its tasks. An empty list (`[]`) is valid; an empty/comment-only file is invalid.
+4. Items in each task list are mappings. Count tasks starting at 1 separately in each file. A task needs a nonempty string `name`; a missing key, `null`, a non-string, or a string containing only whitespace (spaces, tabs, or newlines) counts as no name. Report `"tasks/<file>.yml: task <number> has no name"`. Continue checking that task's notifications too.
+5. When present, `handlers/main.yml` is a list of mappings with unique, nonempty string `name` values; you may assume that shape. `[]` is allowed. A task's `notify` is either one handler-name string or a list of such strings; a missing `notify` means no notifications. You may assume those shapes too. Match handler names exactly, including case and spaces, across all inspected task files.
+6. For each task, report each distinct missing handler once as `"tasks/<file>.yml: task <number> notifies unknown handler '<name>'"`. If two tasks notify the same missing handler, report it once for each task. For each defined handler that no inspected task notifies, report `"handlers/main.yml: handler '<name>' is never notified"`. Duplicate notifications within one task cause no extra messages. A notification in a task without a name still counts.
+7. Return all messages in ascending string order, using `sorted`. Use `/` in message paths on Windows and Linux, never include `role_dir` itself, and replace the angle-bracket placeholders above with the actual filename, number, or handler name. No problems means `[]`.
+8. Let file-reading errors (`OSError`) and invalid YAML errors (`yaml.YAMLError`) propagate. You do not need to validate other input shapes. There are no nested task blocks, task includes (instructions to load another task file), or handler aliases (`listen`, an alternative notification name). Do not follow references or evaluate modules.
+
+**Example:** with your working directory set to `sets/d38/`, using the supplied role folders:
+
+```python
+from pathlib import Path
+from starter.deploycheck import role_problems
+roles = Path("data/roles")
+role_problems(roles / "good")
+# []
+role_problems(roles / "notify_mismatch")
+# ["handlers/main.yml: handler 'Restart station' is never notified",
+#  'tasks/main.yml: task 1 has no name',
+#  "tasks/main.yml: task 2 notifies unknown handler 'Reload driver'"]
+```
+
+**Watch out:** Task and handler names serve different purposes: a task's `notify` must match a handler's `name`, not another task's name. Use `isinstance(value, dict)` or `isinstance(value, list)` to check the loaded document shape before iterating. Missing `tasks/main.yml` is a problem even if other task files exist. Use fresh collections on each call.
+
+**Reread:** Ansible Roles, “Role directory structure”; Intro to playbooks, “Handlers: running operations on change” (linked from that guide).

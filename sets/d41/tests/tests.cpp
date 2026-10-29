@@ -152,3 +152,66 @@ TEST_CASE("E4 preserve the original station failure during stack unwinding") {
     }
     CHECK(session.closes == 1);
 }
+
+TEST_CASE("E5 share the sequence across direct calls and command drivers") {
+    // This is the only test case allocating sequence numbers: no ordering dependency.
+    CHECK(nextSequence() == 1);
+    CHECK(nextSequence() == 2);
+    {
+        PsuCommandDriver first;
+        PsuCommandDriver second;
+        CHECK(first.tagCommand("VOLT 12.500\n") == "3: VOLT 12.500\n");
+        CHECK(second.tagCommand("OUTP 1") == "4: OUTP 1");
+        CHECK(first.tagCommand("") == "5: ");
+    }
+    // Destroying the drivers does not reset the sequence.
+    CHECK(nextSequence() == 6);
+    {
+        PsuCommandDriver reopened;
+        CHECK(reopened.tagCommand("MEAS:VOLT?\n") == "7: MEAS:VOLT?\n");
+    }
+    CHECK(nextSequence() == 8);
+}
+
+TEST_CASE("E5 count open PSU command drivers in nested scopes") {
+    CHECK(PsuCommandDriver::openCount() == 0);
+    {
+        PsuCommandDriver outer;
+        CHECK(PsuCommandDriver::openCount() == 1);
+        {
+            PsuCommandDriver inner;
+            CHECK(PsuCommandDriver::openCount() == 2);
+            CHECK(outer.openCount() == 2);
+            {
+                PsuCommandDriver third;
+                CHECK(PsuCommandDriver::openCount() == 3);
+            }
+            CHECK(PsuCommandDriver::openCount() == 2);
+        }
+        CHECK(PsuCommandDriver::openCount() == 1);
+        {
+            PsuCommandDriver replacement;
+            CHECK(PsuCommandDriver::openCount() == 2);
+        }
+        CHECK(PsuCommandDriver::openCount() == 1);
+    }
+    CHECK(PsuCommandDriver::openCount() == 0);
+}
+
+TEST_CASE("E5 restore the open count when a station step throws") {
+    CHECK(std::is_nothrow_destructible<PsuCommandDriver>::value);
+    CHECK_FALSE(std::is_copy_constructible<PsuCommandDriver>::value);
+    CHECK(PsuCommandDriver::openCount() == 0);
+    {
+        PsuCommandDriver outer;
+        try {
+            PsuCommandDriver inner;
+            CHECK(PsuCommandDriver::openCount() == 2);
+            throw std::runtime_error("step failed");
+        } catch (const std::runtime_error& error) {
+            CHECK(std::string(error.what()) == "step failed");
+        }
+        CHECK(PsuCommandDriver::openCount() == 1);
+    }
+    CHECK(PsuCommandDriver::openCount() == 0);
+}

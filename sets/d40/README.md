@@ -1,6 +1,6 @@
 # d40 — Reading C: registers, bits and structs
 
-**Time:** about 45 minutes (5 minutes to orient, then 40 minutes of exercises) · **Read first:** learncpp O.2, [Bitwise operators](https://www.learncpp.com/cpp-tutorial/bitwise-operators/), and O.3, [Bit manipulation with bitwise operators and bit masks](https://www.learncpp.com/cpp-tutorial/bit-manipulation-with-bitwise-operators-and-bit-masks/); learncpp 13.7, Introduction to structs; *C++ Primer*, chapter 4, the section on bitwise operators (your book; read for understanding, you won't write C++ until tomorrow) · **You edit:** `starter/registers.py`
+**Time:** about 53 minutes (5 minutes to orient, then 48 minutes of exercises) · **Read first:** learncpp O.2, [Bitwise operators](https://www.learncpp.com/cpp-tutorial/bitwise-operators/), and O.3, [Bit manipulation with bitwise operators and bit masks](https://www.learncpp.com/cpp-tutorial/bit-manipulation-with-bitwise-operators-and-bit-masks/); learncpp 13.7, Introduction to structs; *C++ Primer*, chapter 4, the section on bitwise operators (your book; read for understanding, you won't write C++ until tomorrow); Wikipedia, [Endianness](https://en.wikipedia.org/wiki/Endianness) · **You edit:** `starter/registers.py`
 
 ## What you're building
 
@@ -9,7 +9,7 @@ A chassis test station needs to interpret a power supply unit (PSU) driver's sta
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/registers.py`. Don't edit `tests/`, `data/psu_regs.h`, or the supplied answer choices.
-2. Press **Ctrl+Shift+B → Test: d40** (or run `bash tools/run.sh d40` / `tools\run.ps1 d40`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d40** (or run `bash tools/run.sh d40` / `tools\run.ps1 d40`). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A **header** (`.h`) describes C names and data layouts; `#define` gives a name to a value or expression. A **register** is a small hardware storage location represented here by an integer. A **bit** is a binary digit, 0 or 1; a **byte** has eight bits, numbered 0 through 7 from right to left. **Hexadecimal** (prefix `0x`) writes numbers in base 16; **binary** (prefix `0b`) writes them in base 2.
@@ -96,3 +96,77 @@ Only exact input strings are accepted: any other string, including an empty stri
 **Watch out:** One card writes a byte; the others read or convert values. On the cast card, conversion keeps the lowest eight bits of `raw`. On the hardware card, `status_reg` points to a volatile byte even though the word `volatile` is in the supplied context rather than on the line itself.
 
 **Reread:** learncpp 13.7, member selection; *C++ Primer*, chapter 4, bitwise operators, for the cast's lowest-eight-bits effect. Use the pointer, cast, and volatile definitions above and the header's E4 context; no additional pointer chapter is required today.
+
+### E5 — Byte order on the wire (QUIZ, easy, ~8 min)
+
+**Goal:** Choose the right byte order when the station receives telemetry (measurements sent from a device).
+
+**Signature:** `def endian_answers() -> dict[str, str]`
+
+Return a dictionary with exactly the keys `"Q1"`, `"Q2"`, `"Q3"`, and `"Q4"`. Each value is the uppercase letter of your chosen option, such as `"A"`; return one answer per question. Dictionary order does not matter.
+
+A 16-bit integer occupies two bytes. **Big-endian** puts the highest-value byte first; **little-endian** puts the lowest-value byte first. In memory, "first" means the lower memory address (the numbered location of a byte); on the wire, it means the byte sent first. Byte pairs below are written in hexadecimal. Byte order changes the order of whole bytes, not the bits inside each byte.
+
+**Q1.** A PSU driver stores the 16-bit value `0x1234` in big-endian memory. Which bytes appear from the lower address to the higher address?
+
+- A. `34 12`
+- B. `12 34`
+- C. `00 12 00 34`
+- D. `21 43`
+
+<details>
+<summary>Why it matters on the job (Q1)</summary>
+
+Reading a memory dump (a list of stored bytes) helps you compare the driver's value with the device's specification.
+</details>
+
+**Q2.** A network protocol (agreed rules for exchanging data) says a telemetry field uses "network byte order." Which byte order does that mean?
+
+- A. The sending computer's native byte order (its default order for storing numbers).
+- B. The receiving computer's native byte order.
+- C. Little-endian.
+- D. Big-endian.
+
+<details>
+<summary>Why it matters on the job (Q2)</summary>
+
+A shared format lets test stations exchange measurements across different kinds of computers.
+</details>
+
+**Q3.** You are inspecting native memory on an x86 test PC or most ARM test PCs; x86 and ARM are processor families, and PC means personal computer. Which byte order do these machines normally use?
+
+- A. Little-endian.
+- B. Big-endian.
+- C. Whichever byte order the connected instrument uses.
+
+<details>
+<summary>Why it matters on the job (Q3)</summary>
+
+Knowing the station's memory layout helps you investigate differences between stored and received data.
+</details>
+
+**Q4.** A big-endian unsigned telemetry field containing `0x0102` arrives as `b"\x01\x02"`. On a little-endian PC, what does `struct.unpack("<H", b"\x01\x02")[0]` produce?
+
+- A. `0x0102` = 258, because Python detects the sender's byte order.
+- B. It raises `struct.error` (a binary-format error) because the sender and PC use different byte orders.
+- C. `0x0201` = 513, because the bytes are interpreted in the opposite order.
+
+<details>
+<summary>Why it matters on the job (Q4)</summary>
+
+A decoding mistake can turn a valid measurement into a misleading limit failure.
+</details>
+
+**Example (worked):** This different telemetry value shows the same two bytes decoded in two ways. `>` selects big-endian; `<` selects little-endian; `H` is an unsigned two-byte integer. `unpack` returns a tuple, so `[0]` selects its first (and here only) value.
+
+```python
+import struct
+
+wire = b"\x03\x04"  # the big-endian encoding of 0x0304
+print(struct.unpack(">H", wire)[0])  # 772
+print(struct.unpack("<H", wire)[0])  # 1027
+```
+
+**Watch out:** An explicit `<` or `>` tells `struct` how to interpret the bytes regardless of the PC's native byte order. Follow the device's field specification; the E3 frame and another device's telemetry can use different orders.
+
+**Reread:** Wikipedia, *Endianness*, the opening definition and the "Overview", "Hardware", and "Networking" sections; use the day's bitwise and struct readings to review how two bytes form one number.

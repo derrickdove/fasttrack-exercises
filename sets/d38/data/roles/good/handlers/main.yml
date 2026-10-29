@@ -1,0 +1,6 @@
+- name: Restart telemetry
+  ansible.builtin.systemd_service:
+    name: chassis-telemetry
+    state: restarted
+- name: Reload driver
+  ansible.builtin.command: chassis-driver reload

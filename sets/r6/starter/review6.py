@@ -1,6 +1,6 @@
 """Operator-tool review for a chassis test station."""
 
-import argparse
+import configparser
 import heapq
 import csv
 from pathlib import Path
@@ -17,9 +17,23 @@ class Transport(Protocol):
     def query(self, command: str) -> str: ...
 
 
-def parse_command(argv: list[str]) -> argparse.Namespace:
-    """E1: Parse the run/show operator commands described in the README."""
-    raise NotImplementedError("E1: build an argparse parser with required subcommands")
+class _ServiceParser(configparser.ConfigParser):
+    """Supplied: preserve systemd's case-sensitive setting names."""
+
+    def optionxform(self, optionstr: str) -> str:
+        return optionstr
+
+
+def _service_settings(text: str) -> dict[str, str]:
+    """Supplied: parse literal INI values; return {} for a missing Service section."""
+    parser = _ServiceParser(interpolation=None)
+    parser.read_string(text)
+    return dict(parser["Service"]) if parser.has_section("Service") else {}
+
+
+def service_problems(text: str) -> list[str]:
+    """E1: check User, ExecStart, and Restart in an INI service definition."""
+    raise NotImplementedError("E1: return service problems in the documented order")
 
 
 def decode_status(value: int) -> dict[str, bool]:

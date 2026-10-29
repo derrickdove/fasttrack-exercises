@@ -1,0 +1,11 @@
+- name: Install telemetry settings
+  ansible.builtin.copy:
+    src: telemetry.yml
+    dest: /etc/chassis/telemetry.yml
+  notify: Restart telemetry
+- name: Install station driver
+  ansible.builtin.pip:
+    name: chassis-driver
+  notify:
+    - Restart telemetry
+    - Reload driver

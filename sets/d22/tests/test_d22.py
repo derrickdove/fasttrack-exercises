@@ -258,3 +258,46 @@ def test_e4_send_error_propagates() -> None:
         echo_once(receiver)
     receiver.settimeout.assert_not_called()
     receiver.close.assert_not_called()
+
+
+def test_e5_q1_high_rate_telemetry() -> None:
+    answers = udp.transport_answers()
+    if (
+        not isinstance(answers, dict)
+        or set(answers) != {"Q1", "Q2", "Q3", "Q4"}
+        or answers.get("Q1") != "B"
+    ):
+        pytest.fail(
+            "Q1: Return the four question ids and reread Beej, Two Types of "
+            "Internet Sockets, on time-sensitive datagrams.",
+            pytrace=False,
+        )
+
+
+def test_e5_q2_power_supply_commands() -> None:
+    answers = udp.transport_answers()
+    if not isinstance(answers, dict) or answers.get("Q2") != "C":
+        pytest.fail(
+            "Q2: Reread Beej, Two Types of Internet Sockets, on reliable delivery.",
+            pytrace=False,
+        )
+
+
+def test_e5_q3_udp_ordering_and_delivery() -> None:
+    answers = udp.transport_answers()
+    if not isinstance(answers, dict) or answers.get("Q3") != "A":
+        pytest.fail(
+            "Q3: Reread Beej, Two Types of Internet Sockets, on datagram "
+            "guarantees and packet numbering.",
+            pytrace=False,
+        )
+
+
+def test_e5_q4_message_boundaries() -> None:
+    answers = udp.transport_answers()
+    if not isinstance(answers, dict) or answers.get("Q4") != "D":
+        pytest.fail(
+            "Q4: Reread Beej, Two Types of Internet Sockets, and Son of Data "
+            "Encapsulation, on stream data and message lengths.",
+            pytrace=False,
+        )

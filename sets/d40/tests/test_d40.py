@@ -1,7 +1,10 @@
 import pytest
 
 from starter.registers import clear_bits, decode_status, explain, field, set_bits, unpack_status_frame
+from starter.registers import endian_answers
 
+
+_ENDIAN_ANSWERS = {"Q1": "B", "Q2": "D", "Q3": "A", "Q4": "C"}
 
 @pytest.mark.parametrize(
     ("byte", "expected"),
@@ -140,3 +143,26 @@ def test_e4_member_cast_and_volatile_read(line: str, expected: str) -> None:
 def test_e4_reject_unknown_lines(line: str) -> None:
     with pytest.raises(ValueError):
         explain(line)
+
+
+def test_e5_q1_big_endian_memory() -> None:
+    answers = endian_answers()
+    assert isinstance(answers, dict), "E5: Return a dictionary as described in the README"
+    assert set(answers) == {"Q1", "Q2", "Q3", "Q4"}, "E5: Return exactly the four question IDs"
+    correct = answers.get("Q1") == _ENDIAN_ANSWERS["Q1"]
+    assert correct, "Q1: Reread Endianness, Overview, and compare the byte positions"
+
+
+def test_e5_q2_network_byte_order() -> None:
+    correct = endian_answers().get("Q2") == _ENDIAN_ANSWERS["Q2"]
+    assert correct, "Q2: Reread Endianness, Networking, for the agreed network convention"
+
+
+def test_e5_q3_test_pc_native_order() -> None:
+    correct = endian_answers().get("Q3") == _ENDIAN_ANSWERS["Q3"]
+    assert correct, "Q3: Reread Endianness, Hardware, for x86 and ARM byte order"
+
+
+def test_e5_q4_wrong_unpack_order() -> None:
+    correct = endian_answers().get("Q4") == _ENDIAN_ANSWERS["Q4"]
+    assert correct, "Q4: Reread Endianness, Overview, and the README's worked struct example"

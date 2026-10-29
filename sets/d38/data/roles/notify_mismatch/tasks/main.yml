@@ -1,0 +1,9 @@
+- ansible.builtin.copy:
+    src: telemetry.yml
+    dest: /etc/chassis/telemetry.yml
+  notify: Restart telemetry
+- name: Reload instrument driver
+  ansible.builtin.command: chassis-driver reload
+  notify:
+    - Reload driver
+    - Reload driver

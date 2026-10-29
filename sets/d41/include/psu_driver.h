@@ -30,3 +30,20 @@ public:
 private:
     Session* session_;
 };
+
+// E5: a small command-log driver, independent of E4's borrowed session.
+int nextSequence();
+
+class PsuCommandDriver {
+public:
+    PsuCommandDriver();
+    ~PsuCommandDriver() noexcept;
+    PsuCommandDriver(const PsuCommandDriver&) = delete;
+    PsuCommandDriver& operator=(const PsuCommandDriver&) = delete;
+
+    static int openCount();
+    std::string tagCommand(const std::string& command);
+
+private:
+    static int openCount_;
+};

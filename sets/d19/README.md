@@ -1,6 +1,6 @@
 # d19 — Serial devices with pyserial
 
-**Time:** about 45 minutes · **Read first:** [SparkFun: Serial Communication](https://learn.sparkfun.com/tutorials/serial-communication/all) (baud, framing, UART); [pySerial: Short introduction](https://pyserial.readthedocs.io/en/latest/shortintro.html) and [URL handlers: loop://](https://pyserial.readthedocs.io/en/latest/urlhandler.html#loop); [Linux device management: udev overview](https://en.wikipedia.org/wiki/Udev) · **You edit:** `starter/serial_sensor.py`
+**Time:** about 55 minutes · **Read first:** [SparkFun: Serial Communication](https://learn.sparkfun.com/tutorials/serial-communication/all) (baud, framing, UART); [SparkFun: Serial Peripheral Interface (SPI)](https://learn.sparkfun.com/tutorials/serial-peripheral-interface-spi/all); [SparkFun: I2C](https://learn.sparkfun.com/tutorials/i2c/all); [pySerial: Short introduction](https://pyserial.readthedocs.io/en/latest/shortintro.html) and [URL handlers: loop://](https://pyserial.readthedocs.io/en/latest/urlhandler.html#loop); [Linux device management: udev overview](https://en.wikipedia.org/wiki/Udev) · **You edit:** `starter/serial_sensor.py`
 
 ## What you're building
 
@@ -9,7 +9,7 @@ A chassis test station reads temperature and pressure from a serial sensor. You 
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/serial_sensor.py`. Don't edit `tests/`.
-2. Press Ctrl+Shift+B → **Test: d19** (or run `bash tools/run.sh d19` / `tools\run.ps1 d19`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+2. Press Ctrl+Shift+B → **Test: d19** (or run `bash tools/run.sh d19` / `tools\run.ps1 d19`). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A **serial connection** carries bits one after another. A **UART** (universal asynchronous receiver/transmitter) converts bytes to serial signals; **baud** measures signal changes per second. **8N1** means eight data bits, no parity bit (an extra error-checking bit), and one stop bit. pySerial defaults to 9600 baud and 8N1; keep those defaults here.
@@ -82,3 +82,78 @@ The payload is one or more comma-separated label/value pairs, such as `TMP,23.5,
 **Watch out:** `count` is an integer. Zero returns `([], 0)` without reading; a negative count raises `ValueError` without reading. Stop immediately after enough good frames so later bytes remain unread. Let `TimeoutError` and connection errors propagate; do not retry silence forever or return partial results on timeout. Keep the port open. A bad complete line is counted once, including a blank line; a partial line counts once before a later empty read causes a timeout.
 
 **Reread:** pySerial Short introduction, “Readline” (why a timeout is essential) and URL handlers, “loop://”.
+
+### E5 — UART, SPI and I2C (easy, ~10 min)
+
+**Goal:** Choose a connection for a new avionics box (aircraft or spacecraft electronics) on the bench. A **bus** is a set of wires and communication rules connecting devices. Alongside UART, compare **SPI** (Serial Peripheral Interface) and **I2C** (Inter-Integrated Circuit) using the readings above.
+
+**Signature:** `def bus_answers() -> dict[str, str]`
+
+Return a dictionary with exactly the keys `"Q1"` through `"Q5"`. Each value is the uppercase letter of your chosen option (`"A"`, `"B"`, `"C"`, or `"D"` where offered). Choose one option per question. This is a reading check; no connection or hardware is needed.
+
+**Example:** `sorted(bus_answers())` → `["Q1", "Q2", "Q3", "Q4", "Q5"]`. `sorted` returns the dictionary's keys in order; the values are your answer letters.
+
+**Q1.** The box sends serial data asynchronously: there is no shared clock wire carrying a repeating timing signal between sender and receiver. Which interface is this?
+
+- A. SPI
+- B. I2C
+- C. UART
+
+<details>
+<summary>Why it matters on the job</summary>
+
+Recognizing the timing scheme helps you choose the right bench connection.
+</details>
+
+**Q2.** Several devices share data and clock wires, but each has its own **chip-select** line (a wire that activates that device for a transfer). Which bus normally uses this arrangement?
+
+- A. I2C
+- B. SPI
+- C. UART
+
+<details>
+<summary>Why it matters on the job</summary>
+
+Selecting the wrong device can send a valid command to the wrong box.
+</details>
+
+**Q3.** A sensor connection has two signal wires, clock and data, plus a common ground (the shared voltage reference). Transfers use a device **address** (a number selecting the receiver) and **ACK** (an acknowledgment signal that a byte was received); which bus is it?
+
+- A. I2C
+- B. UART
+- C. SPI
+
+<details>
+<summary>Why it matters on the job</summary>
+
+Understanding how a sensor is selected and confirms receipt helps locate a failed transfer.
+</details>
+
+**Q4.** The station must send commands while receiving data at the same time, called **full duplex**. Which pair supports this with separate send and receive data wires in the usual wiring?
+
+- A. UART and I2C
+- B. UART and SPI
+- C. SPI and I2C
+
+<details>
+<summary>Why it matters on the job</summary>
+
+Knowing whether traffic can flow both ways at once prevents incorrect timing assumptions.
+</details>
+
+**Q5.** A standard USB (Universal Serial Bus) to serial adapter appears as `/dev/ttyUSB0` on the Linux test PC and connects to the box's TX/RX pins (transmit/receive). The box uses 115200 baud but the adapter uses 9600; which pair describes the box-side interface and a likely received result?
+
+- A. UART; readable replies arriving more slowly
+- B. I2C; a missing address acknowledgment
+- C. UART; garbled received bytes or framing errors (the receiver misses the expected stop bit)
+- D. SPI; a missing chip-select signal
+
+<details>
+<summary>Why it matters on the job</summary>
+
+Checking communication settings early can save hours of debugging valid device software.
+</details>
+
+**Watch out:** Use question IDs as keys, not bus names. Return letters, not option text. Both sides must use compatible settings; readable text is not guaranteed when they disagree. The question about full duplex asks for a pair, since more than one interface supports it.
+
+**Reread:** SparkFun Serial Communication, “Synchronous vs. Asynchronous”, “Half/Full-Duplex”, “Baud Rate” and “UARTs”; the SPI tutorial's chip-select and data-signal discussions; the I2C tutorial's address and ACK message discussion.

@@ -1,6 +1,6 @@
 # d41 - Reading and changing C++ driver code
 
-**Time:** about 50 minutes (including 5 minutes to read the supplied code) | **Read first:** learncpp 12.7, [Introduction to pointers](https://www.learncpp.com/cpp-tutorial/introduction-to-pointers/); learncpp 14.2, [Introduction to classes](https://www.learncpp.com/cpp-tutorial/introduction-to-classes/); *The Linux Command Line*, chapter 11, [The Environment](https://linuxcommand.org/tlcl.php) (variables and PATH). Companion: *C++ Primer*, chapter 7, Classes. **You edit:** `starter/psu_driver.cpp`.
+**Time:** about 62 minutes (including 5 minutes to read the supplied code) | **Read first:** learncpp 12.7, [Introduction to pointers](https://www.learncpp.com/cpp-tutorial/introduction-to-pointers/); learncpp 14.2, [Introduction to classes](https://www.learncpp.com/cpp-tutorial/introduction-to-classes/); *The Linux Command Line*, chapter 11, [The Environment](https://linuxcommand.org/tlcl.php) (variables and PATH). Companion: *C++ Primer*, chapter 7, Classes. **You edit:** `starter/psu_driver.cpp`.
 
 ## What you're building
 
@@ -8,8 +8,8 @@ A **driver** translates station software requests into instrument operations. Th
 
 ## How this works
 
-1. Read `include/psu_driver.h` (the declarations: names and types) and `starter/psu_driver.cpp` (the definitions: executable bodies). Change only the four E1-E4 bodies in the `.cpp` file. For E2 and E3, restore the commented parameter names (`/*reply*/` becomes `reply`) and replace the `throw std::logic_error(...)` stubs. E1 has a seeded bug; E4 has missing teardown. Keep the supplied helpers and declarations. Don't edit `tests/`.
-2. Press **Ctrl+Shift+B -> Test: d41**, or run `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d41` on Windows / `bash tools/run.sh d41` on Linux or Mac. At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise. Each exercise has several test cases; every case must pass.
+1. Read `include/psu_driver.h` (the declarations: names and types) and `starter/psu_driver.cpp` (the definitions: executable bodies). Change only the E1-E5 bodies in the `.cpp` file, including the E5 destructor. For E2 and E3, restore the commented parameter names (`/*reply*/` becomes `reply`) and replace the `throw std::logic_error(...)` stubs. E1 has a seeded bug; E4 has missing teardown. Keep the supplied helpers and declarations. Don't edit `tests/`.
+2. Press **Ctrl+Shift+B -> Test: d41**, or run `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d41` on Windows / `bash tools/run.sh d41` on Linux or Mac. At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise. Each exercise has several test cases; every case must pass.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A **compiler** turns C++ source into a program. The runner uses C++20 (the language edition), preferring Visual Studio's C++ tools on Windows and otherwise `g++` from PATH; Linux/Mac use `clang++` or `g++`. Install Visual Studio Build Tools with **Desktop development with C++**, or a GCC/Clang C++ compiler, if the runner reports none. Python 3.12+ runs the shared build helper; no extra Python packages are needed for this set. **doctest** is the bundled C++ test library, separate from Python's similarly named library.
@@ -104,3 +104,47 @@ const std::string state = label.substr(colon + 1); // "READY"
 **Watch out:** Checking the pointer must happen before using `->`. A destructor still runs during failure handling; an escaping cleanup exception would terminate the station process.
 
 **Reread:** learncpp 12.7, pointers and dereferencing (using a pointed-to object); learncpp 14.2, class members and access; *C++ Primer* ch. 7, class interfaces and constructors.
+
+### E5 - What `static` means in C and C++ (easy-medium, ~12 min)
+
+**Goal:** Give every PSU command a shared sequence number (a number that increases for each command), and count how many PSU command-driver objects are open. Use the separate `PsuCommandDriver` class so E4's session cleanup stays as it is. This small driver prepares command-log text; it does not contact hardware.
+
+**Signature:** `int nextSequence()`; `PsuCommandDriver::PsuCommandDriver()`; `PsuCommandDriver::~PsuCommandDriver() noexcept`; `int PsuCommandDriver::openCount()`; `std::string PsuCommandDriver::tagCommand(const std::string& command)`. The `static` keyword on `openCount()` belongs in the supplied class declaration; omit it in the `.cpp` definition.
+
+**Three meanings of `static`:**
+
+- A **function-local static variable** is declared inside a function. It is initialized once, the first time execution reaches its declaration, and keeps its value between calls. An ordinary local variable is initialized afresh on each call. For example, `static bool ready = false;` inside a function retains later changes to `ready`.
+- A **static data member** belongs to the class and is shared by all its objects. Here, the private `openCount_` is that shared variable; its supplied `.cpp` definition starts it at zero. A **static member function**, such as `openCount()`, can read it without needing an object: call `PsuCommandDriver::openCount()`. The `::` operator names a member of a class.
+- A **file-scope static function** is declared outside every function and class. Its name has **internal linkage**, meaning other `.cpp` files cannot call that helper by its name. The supplied `taggedCommand(sequence, command)` helper demonstrates this: it is defined only in `psu_driver.cpp`, with `static` before its return type. This restricts the name's visibility; it does not make the function remember values. Function-local and file-scope `static` also exist in C; classes and static class members are C++ features.
+
+**Contract:** Replace the E5 throwing stubs in `starter/psu_driver.cpp` and fill in the E5 destructor's missing decrement. Keep E1-E4 and the supplied E5 helper, header, and zero-initialized counter definition.
+
+1. `nextSequence()` must use a function-local `static int`, initially zero. Increment it before returning, so calls return 1, 2, 3, and so on. There is one sequence shared by direct calls and every driver object. Constructing or destroying a driver must not reset or consume a sequence number.
+2. Each successfully constructed `PsuCommandDriver` adds one to `openCount_`; its destructor subtracts one. Here, **open** means constructed and not yet destroyed, even if no commands have been tagged. `openCount()` returns the current shared count without changing it; it starts at zero. Nested blocks and stack unwinding must restore the previous count. No session calls or exceptions are needed. Copying these objects is already disabled in the header.
+3. Each `tagCommand(command)` call takes exactly one number from `nextSequence()` and passes that number and `command` to the supplied file-scope `taggedCommand` helper. Return its result: decimal sequence number, colon, one space, then the command text unchanged. Preserve any newline already in the command; add none. Empty text is valid and still takes one sequence number. Tagging does not change the open count.
+
+Calls in this exercise run one at a time, and sequence numbers remain within the range of `int`.
+
+**Example:** In a fresh program, before any other sequence calls:
+
+```cpp
+nextSequence(); // 1
+nextSequence(); // 2
+PsuCommandDriver::openCount(); // 0
+{
+    PsuCommandDriver outer;
+    PsuCommandDriver::openCount(); // 1
+    outer.tagCommand("VOLT 12.500\n"); // "3: VOLT 12.500\n"
+    {
+        PsuCommandDriver inner;
+        PsuCommandDriver::openCount(); // 2
+    }
+    PsuCommandDriver::openCount(); // 1
+}
+PsuCommandDriver::openCount(); // 0
+nextSequence(); // 4: destroying drivers did not reset the sequence
+```
+
+**Watch out:** `++value` increments before producing the value; `value++` produces the old value before incrementing. A plain local sequence variable would restart on every call. A non-static count field would give each object its own count. Keep the destructor non-throwing: its starter is a missing-operation comment, like E4, rather than a throwing stub because it is `noexcept`.
+
+**Reread:** The three meanings above; learncpp 14.2, class declarations and definitions; *C++ Primer* ch. 7, static class members.

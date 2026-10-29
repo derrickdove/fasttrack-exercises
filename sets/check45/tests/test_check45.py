@@ -8,9 +8,12 @@ from pathlib import Path
 from typing import Callable
 
 import pytest
+import pyvisa
+from pyvisa.constants import StatusCode
+from pyvisa.errors import VisaIOError
 
 from starter.check45 import (
-    Snapshot, StationConfig, SupplyDriver, audit_sequences, decode_snapshot,
+    Snapshot, StationConfig, StationSupply, VisaTimeout, audit_sequences, decode_snapshot,
     execute_steps, interlock_reasons, judge_samples, main, service_findings,
     validate_config, write_run_report,
 )
@@ -63,23 +66,26 @@ def test_e1_rejects_unknown_key(config: dict[str, object]) -> None:
         validate_config(config)
 
 
-class ScriptedTransport:
+class ScriptedResource:
     def __init__(self, replies: list[str | Exception]) -> None:
+        self.timeout = 0
+        self.read_termination = ""
+        self.write_termination = ""
         self.replies = list(replies)
         self.events: list[tuple[object, ...]] = []
         self.write_error: OSError | None = None
         self.close_error: OSError | None = None
 
-    def query(self, command: str, timeout_s: float) -> str:
-        self.events.append(("query", command, timeout_s))
+    def query(self, cmd: str) -> str:
+        self.events.append(("query", cmd))
         assert self.replies, "driver made more queries than allowed"
         reply = self.replies.pop(0)
         if isinstance(reply, Exception):
             raise reply
         return reply
 
-    def write(self, command: str) -> None:
-        self.events.append(("write", command))
+    def write(self, cmd: str) -> None:
+        self.events.append(("write", cmd))
         if self.write_error is not None:
             raise self.write_error
 
@@ -89,61 +95,174 @@ class ScriptedTransport:
             raise self.close_error
 
 
-@pytest.mark.parametrize("reply,expected", [
-    (" 3300 mV\r\n", 3.3), ("-25mV", -0.025), ("+1.2e1 V", 12.0), ("0V", 0.0),
+class FakeResourceManager:
+    def __init__(self, resource: ScriptedResource) -> None:
+        self.resource = resource
+        self.opened: list[str] = []
+
+    def open_resource(self, name: str) -> ScriptedResource:
+        self.opened.append(name)
+        return self.resource
+
+
+@pytest.mark.parametrize("settings,timeout", [
+    ({"ip": "192.0.2.45", "max_voltage": 12.5}, 2000),
+    ({"ip": "bench-9", "timeout_ms": 1, "max_voltage": 1}, 1),
+    ({"ip": "192.0.2.46", "timeout_ms": 6000, "max_voltage": 24}, 6000),
 ])
-def test_e2_voltage_units_and_transport_contract(reply: str, expected: float) -> None:
-    transport = ScriptedTransport([reply])
-    driver = SupplyDriver(transport, 0.125)
-    assert transport.events == [], "opening the driver must not issue commands"
-    assert driver.read_voltage() == pytest.approx(expected)
-    assert transport.events == [("query", "MEAS:VOLT?", 0.125)]
+def test_e2_configures_resource_before_use(settings: dict[str, object], timeout: int) -> None:
+    before = settings.copy()
+    resource = ScriptedResource([])
+    rm = FakeResourceManager(resource)
+    supply = StationSupply.from_config(settings, rm)
+    assert isinstance(supply, StationSupply)
+    assert rm.opened == [f"TCPIP::{settings['ip']}::INSTR"]
+    assert resource.timeout == timeout, "VISA timeout is in milliseconds"
+    assert (resource.read_termination, resource.write_termination) == ("\n", "\n")
+    assert resource.events == [], "configuration must not query or energize hardware"
+    assert settings == before, "do not change the caller's config"
+    supply.close()
 
 
-def test_e2_retries_only_one_timeout() -> None:
-    transport = ScriptedTransport([TimeoutError("first"), "500mV"])
-    assert SupplyDriver(transport, 0.2).read_voltage() == 0.5
-    assert transport.events == [("query", "MEAS:VOLT?", 0.2)] * 2
-    exhausted = ScriptedTransport([TimeoutError("first"), TimeoutError("second")])
-    driver = SupplyDriver(exhausted, 0.2)
-    with pytest.raises(TimeoutError, match="second"):
-        driver.read_voltage()
-    assert len(exhausted.events) == 2
+@pytest.mark.parametrize("key,value,missing", [
+    ("ip", None, True), ("max_voltage", None, True),
+    ("ip", "", False), ("ip", 9, False), ("ip", None, False),
+    ("timeout_ms", 0, False), ("timeout_ms", -1, False),
+    ("timeout_ms", True, False), ("timeout_ms", False, False),
+    ("timeout_ms", 2000.0, False), ("timeout_ms", "2000", False),
+    ("timeout_ms", None, False), ("max_voltage", 0, False),
+    ("max_voltage", -0.1, False), ("max_voltage", math.nan, False),
+    ("max_voltage", math.inf, False), ("max_voltage", -math.inf, False),
+    ("max_voltage", "12", False), ("max_voltage", None, False),
+    ("max_voltage", True, False), ("max_voltage", False, False),
+    ("timout_ms", 250, False),
+])
+def test_e2_invalid_config_never_opens(key: str, value: object, missing: bool) -> None:
+    settings: dict[str, object] = {"ip": "192.0.2.45", "max_voltage": 12.5}
+    if missing:
+        del settings[key]
+    else:
+        settings[key] = value
+    before = settings.copy()
+    resource = ScriptedResource([])
+    rm = FakeResourceManager(resource)
+    with pytest.raises(ValueError, match=key):
+        StationSupply.from_config(settings, rm)
+    assert rm.opened == [], f"invalid {key} must be rejected before opening"
+    assert resource.events == []
+    assert settings == before
 
 
-@pytest.mark.parametrize("reply", ["", "3.3", "1A", "NaNV", "infmV", "1e999V", "badV"])
-def test_e2_bad_reply_is_not_retried(reply: str) -> None:
-    transport = ScriptedTransport([reply])
-    driver = SupplyDriver(transport, 0.1)
-    with pytest.raises(ValueError):
-        driver.read_voltage()
-    assert len(transport.events) == 1
+@pytest.mark.parametrize("replies,expected,queries", [
+    ([" 3.3125\r\n"], 3.3125, 1), (["-2.5e-2"], -0.025, 1), (["0"], 0.0, 1),
+    ([VisaTimeout("first"), "12.034"], 12.034, 2),
+    ([VisaIOError(StatusCode.error_timeout), "12.034"], 12.034, 2),
+    ([VisaIOError(StatusCode.error_timeout), VisaIOError(StatusCode.error_timeout)], VisaIOError, 2),
+    ([VisaIOError(StatusCode.error_resource_not_found)], VisaIOError, 1),
+    ([VisaIOError(StatusCode.error_timeout), VisaIOError(StatusCode.error_resource_not_found)], VisaIOError, 2),
+    ([VisaIOError(StatusCode.error_timeout), "bad"], ValueError, 2),
+    ([VisaTimeout("first"), VisaTimeout("second")], VisaTimeout, 2),
+    ([OSError("link down")], OSError, 1),
+    ([TimeoutError("not VisaTimeout")], TimeoutError, 1),
+    (["bad"], ValueError, 1), ([""], ValueError, 1), (["3.3 V"], ValueError, 1),
+    ([VisaTimeout("first"), "bad"], ValueError, 2),
+    ([VisaTimeout("first"), OSError("link down")], OSError, 2),
+])
+def test_e2_reads_and_retries_only_visa_timeout(
+    replies: list[str | Exception], expected: float | type[Exception], queries: int,
+) -> None:
+    resource = ScriptedResource(replies)
+    supply = StationSupply.from_config(
+        {"ip": "192.0.2.45", "max_voltage": 12.5}, FakeResourceManager(resource),
+    )
+    if isinstance(expected, type):
+        with pytest.raises(expected) as caught:
+            supply.read_voltage()
+        if isinstance(replies[-1], Exception):
+            assert caught.value is replies[-1], "propagate the resource's exception"
+    else:
+        assert supply.read_voltage() == pytest.approx(expected)
+    assert resource.events == [("query", "MEAS:VOLT?")] * queries
+    supply.close()
 
 
-def test_e2_io_error_and_shutdown_cleanup() -> None:
-    transport = ScriptedTransport([OSError("link down")])
-    driver = SupplyDriver(transport, 0.1)
-    with pytest.raises(OSError, match="link down"):
-        driver.read_voltage()
-    assert len(transport.events) == 1
-    driver.shutdown()
-    assert transport.events[-2:] == [("write", "OUTP OFF"), ("close",)]
-    transport.write_error = OSError("cannot disable")
-    with pytest.raises(OSError, match="cannot disable"):
-        driver.shutdown()
-    assert transport.events[-2:] == [("write", "OUTP OFF"), ("close",)]
-    transport.close_error = OSError("cannot close")
-    with pytest.raises(OSError, match="cannot close"):
-        driver.shutdown()
-    assert transport.events[-2:] == [("write", "OUTP OFF"), ("close",)]
+@pytest.mark.parametrize("maximum,volts,command", [
+    (12.5, 0.0, "VOLT 0.000"), (12.5, 12.5, "VOLT 12.500"),
+    (12.5, 3.3125, "VOLT 3.312"), (12.5, -0.001, None),
+    (12.5, 12.5001, "VOLT 12.500"), (12.5, -0.0001, "VOLT -0.000"),
+    (12.5, 12.501, None), (12.5, math.nan, None),
+    (12.5, math.inf, None), (12.5, -math.inf, None),
+    (12.3456, 12.3456, None), (12.3456, 12.345, "VOLT 12.345"),
+    (12.3454, 12.3454, "VOLT 12.345"),
+])
+def test_e2_commands_validate_before_writing(
+    maximum: float, volts: float, command: str | None,
+) -> None:
+    resource = ScriptedResource([])
+    supply = StationSupply.from_config(
+        {"ip": "192.0.2.45", "max_voltage": maximum}, FakeResourceManager(resource),
+    )
+    if command is None:
+        with pytest.raises(ValueError):
+            supply.set_voltage(volts)
+        assert resource.events == [], "unsafe voltage must never reach the instrument"
+    else:
+        supply.set_voltage(volts)
+        assert resource.events == [("write", command)]
+    resource.events.clear()
+    supply.enable_output(True)
+    supply.enable_output(False)
+    assert resource.events == [("write", "OUTP 1"), ("write", "OUTP 0")]
+    for bad in (0, 1, 2, "1", None, 1.0, [], object()):
+        with pytest.raises(TypeError):
+            supply.enable_output(bad)
+    assert resource.events == [("write", "OUTP 1"), ("write", "OUTP 0")], "bad flags must not write"
+    supply.close()
+    supply.close()
+    assert resource.events[-1:] == [("close",)]
+    assert resource.events.count(("close",)) == 1, "close must be idempotent"
 
 
-@pytest.mark.parametrize("timeout", [0.0, -0.1, math.inf, -math.inf, math.nan])
-def test_e2_invalid_timeout(timeout: float) -> None:
-    transport = ScriptedTransport([])
-    with pytest.raises(ValueError):
-        SupplyDriver(transport, timeout)
-    assert transport.events == []
+@pytest.mark.parametrize("block_error", [None, RuntimeError("step failed"), KeyboardInterrupt()])
+@pytest.mark.parametrize("write_fails,close_fails", [(False, False), (True, False), (False, True), (True, True)])
+def test_e2_context_disables_then_closes_and_preserves_block_error(
+    block_error: BaseException | None, write_fails: bool, close_fails: bool,
+) -> None:
+    resource = ScriptedResource([])
+    resource.write_error = OSError("cannot disable") if write_fails else None
+    resource.close_error = OSError("cannot close") if close_fails else None
+    supply = StationSupply.from_config(
+        {"ip": "192.0.2.45", "max_voltage": 12.5}, FakeResourceManager(resource),
+    )
+
+    def run_block() -> None:
+        with supply as entered:
+            assert entered is supply, "__enter__ returns the supply"
+            if block_error is not None:
+                raise block_error
+
+    expected = block_error or resource.close_error or resource.write_error
+    if expected is None:
+        run_block()
+    else:
+        with pytest.raises(type(expected)) as caught:
+            run_block()
+        assert caught.value is expected, "a block exception must survive cleanup failures"
+    assert resource.events == [("write", "OUTP 0"), ("close",)]
+    supply.close()
+    assert resource.events == [("write", "OUTP 0"), ("close",)], "exit already closed the supply"
+
+
+def test_e2_real_pyvisa_sim_resource() -> None:
+    definition = Path(__file__).resolve().parents[1] / "data" / "station_supply.yaml"
+    rm = pyvisa.ResourceManager(f"{definition}@sim")
+    try:
+        with StationSupply.from_config({"ip": "192.0.2.45", "max_voltage": 12.5}, rm) as supply:
+            supply.set_voltage(3.3125)
+            supply.enable_output(True)
+            assert supply.read_voltage() == 3.3125
+    finally:
+        rm.close()
 
 
 @pytest.mark.parametrize("samples,required,expected", [

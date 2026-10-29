@@ -1,6 +1,6 @@
 # d43 — Debugging across the hardware–software boundary
 
-**Time:** about 45 minutes · **Read first:** SparkFun, [How to Use a Multimeter](https://learn.sparkfun.com/tutorials/how-to-use-a-multimeter/all), *How to Use an Oscilloscope*, and *How to Read a Datasheet* (apply that reading to the invented excerpt below); *The Pragmatic Programmer*, topic **Debugging** — your book. · **You edit:** `starter/flaky_driver.py` and `starter/notes.md`.
+**Time:** about 65 minutes · **Read first:** SparkFun, [How to Use a Multimeter](https://learn.sparkfun.com/tutorials/how-to-use-a-multimeter/all), *How to Use an Oscilloscope*, and *How to Read a Datasheet* (apply that reading to the invented excerpt below); *The Pragmatic Programmer*, topic **Debugging** — your book; Python, [time.perf_counter](https://docs.python.org/3/library/time.html#time.perf_counter). · **You edit:** `starter/flaky_driver.py` and `starter/notes.md`.
 
 ## What you're building
 
@@ -9,7 +9,7 @@ A chassis test station powers connected equipment (the load), reads its supply v
 ## How this works
 
 1. Replace the four `raise NotImplementedError(...)` lines in `starter/flaky_driver.py`. Each function's docstring (its embedded description) includes the old, buggy code for diagnosis; those excerpts are deliberately not executable so every exercise starts unfinished. Don't edit `tests/`.
-2. Press **Ctrl+Shift+B → Test: d43** (or run `bash tools/run.sh d43` / `tools\run.ps1 d43`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d43** (or run `bash tools/run.sh d43` / `tools\run.ps1 d43`). At first you'll see `Exercises: 0 / 6 passed`. Rerun after each exercise.
 3. Fill the short evidence table in `starter/notes.md` as you go. It is a manual notebook, not an extra graded exercise. Report **all pass / partial / stuck** in the tracker.
 
 A **driver** translates software requests into equipment commands. A **datasheet** states an instrument's supported ranges, accuracy, and interface rules. A **multimeter** measures quantities such as steady voltage; an **oscilloscope** displays voltage over time, using a **trigger** (a condition that starts a capture) to catch a brief event. Neither a passing software test nor a correct display alone proves the physical voltage is correct: compare independent evidence.
@@ -176,3 +176,151 @@ E4 does not call E1–E3; the supplied sample callback owns measurement details.
 **Reread:** *The Pragmatic Programmer*, topic **Debugging**, tracing the failure
 and checking assumptions about control flow; SparkFun, *How to Use an Oscilloscope*,
 observing the output over time to check the physical effect of a software command.
+
+### E5 — Measure the slowest station step (medium, ~12 min)
+
+**Goal:** Summarize how long a test step takes and check its deadline (the latest
+allowed completion time). For E5 and E6, edit the new `starter/timing.py` file;
+the four earlier repairs and their notebook still work as described above.
+
+**Signature:**
+
+```python
+def measure(fn: Callable[[], object], runs: int, clock: Callable[[], float] = time.perf_counter) -> dict[str, float]
+def meets_deadline(stats: dict[str, float], deadline_ms: float) -> bool
+```
+
+**Contract:** `Callable[[], object]` means a function that takes no arguments and
+may return any value. `clock` takes no arguments and returns a time in seconds.
+Its readings are finite and never go backwards; subtract two readings to get
+elapsed time. The default `time.perf_counter` is Python's high-resolution clock
+for elapsed durations (it can distinguish short intervals), including time spent waiting. Its absolute starting
+value has no meaning here. Tests pass a fake clock with scripted readings, so
+no equipment, sleeps, or real speed measurements are needed.
+
+`runs` is an integer. If it is below 1, raise `ValueError` before calling either
+callback. Otherwise, repeat exactly `runs` times: read `clock()`, call `fn()`
+once, then read `clock()` again. Ignore the return from `fn`; record
+`(end - start) * 1000` in milliseconds. Exclude gaps between runs. If either
+callback raises, stop immediately and let the same exception propagate; do not
+retry or return partial statistics. Do not round durations.
+
+Return a dictionary with exactly these four string keys and float values:
+
+- `min`: the shortest duration.
+- `median`: the middle sorted duration; for an even count, the arithmetic mean
+  (sum divided by count) of the two middle durations. `statistics.median` can do this.
+- `p99`: the 99th percentile, a duration at or below which at least 99% of the
+  measured calls fall. Use the **nearest-rank** rule: sort durations from smallest
+  to largest, then select index `ceil(0.99 * n) - 1`, where `n` is their count.
+  `math.ceil` rounds up to an integer; list indexes start at zero.
+- `max`: the longest duration, the worst case observed in these runs.
+
+With one run, all four values are that duration. Zero durations and repeated
+values are valid. For small samples, p99 can equal max.
+
+`meets_deadline` returns `True` exactly when `stats["max"] <= deadline_ms`.
+Assume that key exists and both numbers are finite and nonnegative; other
+keys are optional and must not affect the decision. Leave `stats` unchanged.
+Equality meets the deadline.
+
+**Example:** This fake supplies seconds; each pair brackets one call.
+
+```python
+clock_values = iter([0.0, 0.125, 1.0, 1.5, 2.0, 2.25, 3.0, 4.0])
+stats = measure(lambda: None, 4, lambda: next(clock_values))
+# {"min": 125.0, "median": 375.0, "p99": 1000.0, "max": 1000.0}
+meets_deadline(stats, 1000.0)  # True
+meets_deadline(stats, 999.0)   # False
+```
+
+`iter` creates an iterator that supplies values one at a time; `next` takes its
+next value. `lambda: ...` makes a small function with no arguments here.
+
+**Watch out:** A low average can hide one missed deadline. P99 describes the
+slow end of typical measurements, but can still exclude the slowest calls;
+use max when checking whether every measured call met the limit. Even max is
+only an observed worst case, not proof that future calls cannot take longer.
+Do not time the whole batch and divide: that loses individual slow calls.
+
+**Reread:** *The Pragmatic Programmer*, topic **Debugging**, reproducing a failure
+and checking assumptions; Python, `time.perf_counter`, elapsed-time measurement.
+
+### E6 — Choose where speed work belongs (medium, ~8 min)
+
+**Goal:** Choose a language and an optimization (a change to reduce execution time
+or resource use) using timing evidence from the station.
+
+**Signature:** `def speed_answers() -> dict[str, str]`
+
+**Contract:** Return exactly the keys `"Q1"`, `"Q2"`, and `"Q3"`, each mapped to
+the uppercase letter of your chosen option (`"A"`, `"B"`, `"C"`, or `"D"`).
+One answer per question; do not return the option text.
+
+**Example:** `sorted(speed_answers())` returns `["Q1", "Q2", "Q3"]`.
+`sorted` returns the keys in alphabetical order here; choose the answer values yourself.
+
+Use the **Debugging** and `time.perf_counter` readings to reason through the
+scenarios below.
+
+**Language choice:** To **profile** code is to measure where its execution time
+goes. **Compiled code** is translated into machine instructions before it runs;
+C and C++ are commonly used this way.
+
+**Q1.** A new station step has a response-time requirement but no timing measurements
+yet. Which approach should guide the choice between Python and C/C++?
+
+- A. Start in C/C++ because equipment-control software always needs compiled code.
+- B. Start in Python; measure against the requirement and profile before deciding to change language.
+- C. Start in Python and accept it if the average is below the deadline, regardless of slower calls.
+- D. Pick whichever language has the shortest source file; code size predicts response time.
+
+<details>
+<summary>Why it matters on the job</summary>
+Language decisions affect both station maintenance and whether a step meets its requirements.
+</details>
+
+**A slow loop:** A **hot loop** is a repeated section that accounts for much of
+the runtime. To **vectorize** means to express work on many values as a library
+operation instead of a Python loop. A **C-backed library** exposes operations
+to Python but executes the underlying computation in compiled C or C++.
+This quiz needs no new library installation.
+
+**Q2.** Measurements show that one Python loop processing captured readings misses
+the step's deadline. What is the next useful approach?
+
+- A. Rewrite the entire station application in C++ before measuring any smaller change.
+- B. Remove the timeout so the loop can always finish successfully.
+- C. Profile and measure the loop, then try a C-backed operation or move only that piece to C/C++ and measure again.
+- D. Run several copies of the unchanged loop at once; that always makes a single result arrive sooner.
+
+<details>
+<summary>Why it matters on the job</summary>
+A targeted speed change needs evidence that it solves the delay and preserves the measurement result.
+</details>
+
+**Timing evidence:** The **operating system (OS)** manages programs and hardware;
+**scheduling** is its choice of which work gets processor time. **Jitter** is
+variation in timing between runs. **Target hardware** is the actual station computer
+and equipment; **under load** means running its expected competing work too.
+
+**Q3.** A step meets its deadline in repeated runs on a busy Windows laptop. Why
+is that insufficient proof of the worst case on the station?
+
+- A. OS scheduling and jitter vary with hardware and competing work; measure on the target station under load.
+- B. A busy laptop is automatically more demanding than every station, so it already proves the bound.
+- C. `perf_counter` removes scheduling delays, so only the number of Python statements matters.
+- D. More laptop repetitions eventually guarantee a worst-case bound for any station computer.
+
+<details>
+<summary>Why it matters on the job</summary>
+Timing evidence must support the conditions under which the station will actually operate.
+</details>
+
+**Watch out:** Passing timing tests on one computer is evidence about those
+runs. Keep the requirement, the measured result, and the measurement conditions
+clear when explaining a language or optimization decision.
+
+**Reread:** *The Pragmatic Programmer*, topic **Debugging**, checking assumptions
+and isolating the cause; Python, `time.perf_counter`; the E6 notes **Language
+choice**, **A slow loop**, and **Timing evidence** above.

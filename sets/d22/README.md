@@ -1,6 +1,6 @@
 # d22 — UDP basics: send and receive datagrams
 
-**Time:** about 45 minutes · **Read first:** [Beej's Guide to Network Programming](https://beej.us/guide/bgnet/html/split/), sockets, TCP vs UDP, and datagram sockets; [Wireshark User's Guide](https://www.wireshark.org/docs/wsug_html_chunked/), capturing and filtering concepts. Also consult Python's [Socket Programming HOWTO](https://docs.python.org/3/howto/sockets.html) and [`socket` docs, SOCK_DGRAM](https://docs.python.org/3/library/socket.html#socket.SOCK_DGRAM). · **You edit:** `starter/udp.py`
+**Time:** about 53 minutes · **Read first:** [Beej's Guide to Network Programming](https://beej.us/guide/bgnet/html/split/), sockets, TCP vs UDP, and datagram sockets; [Wireshark User's Guide](https://www.wireshark.org/docs/wsug_html_chunked/), capturing and filtering concepts. Also consult Python's [Socket Programming HOWTO](https://docs.python.org/3/howto/sockets.html) and [`socket` docs, SOCK_DGRAM](https://docs.python.org/3/library/socket.html#socket.SOCK_DGRAM). · **You edit:** `starter/udp.py`
 
 ## What you're building
 
@@ -9,7 +9,7 @@ A chassis test station collects **telemetry**, measurements sent by an instrumen
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/udp.py`. Don't edit `tests/`.
-2. Press **Ctrl+Shift+B → Test: d22** (or run `bash tools/run.sh d22` / `tools\run.ps1 d22`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d22** (or run `bash tools/run.sh d22` / `tools\run.ps1 d22`). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A **socket** is an operating-system handle for sending or receiving network data. An **IP address** identifies a network interface; `127.0.0.1` is **loopback**, an address that stays on your own computer. A **port** is a number identifying a socket's destination on that computer. An **address tuple** is a fixed pair `(host, port)`, such as `("127.0.0.1", 42000)`; the example port is illustrative, and tests always ask the operating system to choose a free port with `0`.
@@ -80,3 +80,71 @@ All addresses in this set use IPv4 loopback. Inputs have the stated types; no ex
 **Watch out:** An **echo** is a reply containing the received data (uppercased here). Use `recvfrom(65535)` and one `sendto` call. Preserve an empty message as an empty reply. Leave additional messages queued. The caller supplies a positive timeout; keep that timeout unchanged, leave the socket open, and propagate receive/send errors, including `socket.timeout`. Don't use E2: the reply must come from this receiver's address.
 
 **Reread:** Beej, the sender/receiver example in “Datagram Sockets” and the address returned by `recvfrom()`; Wireshark, the packet-details view, UDP source and destination ports (the sender and receiver port numbers).
+
+### E5 — TCP or UDP? (QUIZ, easy, ~8 min)
+
+**Goal:** Choose a transport protocol (the rules for moving data between programs) for each test-station situation. Return a dictionary mapping exactly the question ids `"Q1"`, `"Q2"`, `"Q3"`, and `"Q4"` to your chosen uppercase option letters (`"A"`, `"B"`, `"C"`, or `"D"`). Each question has one correct option; return letters, not option text.
+
+**Signature:** `def transport_answers() -> dict[str, str]`
+
+**Example:** `sorted(transport_answers())` → `['Q1', 'Q2', 'Q3', 'Q4']`. Here `sorted` lists the dictionary's keys in order; the values are your four answer letters.
+
+**Watch out:** This is a concept check: return answers without opening sockets. SCPI (Standard Commands for Programmable Instruments) is a text command language used by instruments. A **sequence number** is an increasing number attached to each sent sample so a receiver can spot gaps or arrivals out of order. **Message boundaries** mark where one application message ends and the next begins; a **byte stream** is a continuous sequence of bytes. Reliable transport alone does not prove a power supply executed a command: the station must also check the instrument's reply or state and handle connection errors.
+
+**Q1.** A sensor sends a high-rate telemetry stream; occasional missing samples are acceptable, and a late sample is useless because a newer one replaces it. Which transport best matches this requirement?
+
+- A. TCP, because it drops old bytes instead of retrying delivery.
+- B. UDP, because the station can use fresh samples without waiting for lost samples to be resent.
+- C. TCP, because each send becomes exactly one received message.
+- D. UDP, because it guarantees that every sample arrives before its deadline.
+
+<details>
+<summary>Why it matters on the job — Q1</summary>
+
+A live station display needs a transport choice that matches how quickly measurements become stale.
+
+</details>
+
+**Q2.** A bench power supply accepts SCPI over either TCP or UDP, and silently losing a command is unacceptable. Which transport should the driver choose before adding instrument reply checks and error handling?
+
+- A. UDP, because a successful send proves the instrument received the command.
+- B. UDP, because commands are short enough to guarantee delivery.
+- C. TCP, because it provides reliable, ordered byte delivery while the connection works.
+- D. Either, because both provide the same delivery guarantees on a local network.
+
+<details>
+<summary>Why it matters on the job — Q2</summary>
+
+A missing power-supply command can leave the next test step using the wrong instrument state.
+
+</details>
+
+**Q3.** A UDP telemetry receiver must detect missing samples and samples that arrive out of order. Which guarantees are absent, and what must the application add?
+
+- A. UDP guarantees neither delivery nor ordering; include sequence numbers in sent samples and track them at the receiver to detect gaps and older arrivals.
+- B. UDP guarantees delivery but not ordering; the receiver only needs to sort every batch by arrival time.
+- C. UDP guarantees ordering but not delivery; the receiver only needs a longer timeout to recover every missing sample.
+- D. UDP guarantees both; sequence numbers are only needed to convert bytes to text.
+
+<details>
+<summary>Why it matters on the job — Q3</summary>
+
+The operator needs to distinguish a steady measurement from a display that has missed updates.
+
+</details>
+
+**Q4.** An instrument sends two measurement messages in two sends, using either TCP or UDP, and the receiver's UDP buffer is large enough for either message. What does preserving message boundaries mean here?
+
+- A. TCP and UDP both ensure that each receive returns exactly one complete sent message.
+- B. TCP preserves each sent message, while UDP may combine both datagrams into one received message.
+- C. Neither preserves messages; both require a newline to tell the receiver when a network message ends.
+- D. TCP is a byte stream, so receives can split or combine sent messages; UDP keeps each datagram separate.
+
+<details>
+<summary>Why it matters on the job — Q4</summary>
+
+A driver must know when it has a complete measurement before trying to interpret its contents.
+
+</details>
+
+**Reread:** Beej's Guide, “Two Types of Internet Sockets” for stream sockets, datagrams, reliability, and packet numbering; “Son of Data Encapsulation” for handling message lengths over a stream. Revisit the datagram `sendto()` / `recvfrom()` examples from this day's reading.

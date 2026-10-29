@@ -4,6 +4,7 @@ import pytest
 import serial
 
 from starter.serial_sensor import (
+    bus_answers,
     open_loopback,
     parse_sensor_line,
     read_frames,
@@ -177,3 +178,31 @@ def test_e4_propagate_connection_failure(port: serial.Serial) -> None:
     port.close()
     with pytest.raises(serial.SerialException):
         read_frames(port, 1)
+
+
+def test_e5_q1_asynchronous_bus() -> None:
+    answers = bus_answers()
+    assert isinstance(answers, dict), "Return a dictionary of question IDs and option letters"
+    assert set(answers) == {"Q1", "Q2", "Q3", "Q4", "Q5"}, "Return exactly Q1 through Q5"
+    if answers.get("Q1") != "C":
+        pytest.fail("Q1: reread SparkFun Serial Communication, Synchronous vs. Asynchronous", pytrace=False)
+
+
+def test_e5_q2_chip_select() -> None:
+    if bus_answers().get("Q2") != "B":
+        pytest.fail("Q2: reread SparkFun SPI, the chip-select signal discussion", pytrace=False)
+
+
+def test_e5_q3_address_and_ack() -> None:
+    if bus_answers().get("Q3") != "A":
+        pytest.fail("Q3: reread SparkFun I2C, the address and ACK message discussion", pytrace=False)
+
+
+def test_e5_q4_full_duplex() -> None:
+    if bus_answers().get("Q4") != "B":
+        pytest.fail("Q4: reread SparkFun Serial Communication, Half/Full-Duplex, and SPI data signals", pytrace=False)
+
+
+def test_e5_q5_usb_adapter_and_baud() -> None:
+    if bus_answers().get("Q5") != "C":
+        pytest.fail("Q5: reread SparkFun Serial Communication, UARTs and Baud Rate", pytrace=False)

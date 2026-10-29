@@ -446,3 +446,87 @@ def test_e9_half_range_is_late_and_gap_lists_are_independent() -> None:
     gaps.clear()
     assert tracker.missing == {101, 102}, "returned gap lists must not alias retained state"
 
+
+
+class FakeAlarmClock:
+    def __init__(self, now: int = 0) -> None:
+        self.now = now
+
+    def __call__(self) -> int:
+        return self.now
+
+
+def test_e10_same_millisecond_burst() -> None:
+    clock = FakeAlarmClock()
+    throttle = learner.AlarmThrottle(clock, 100, 2)
+    assert len(throttle) == 0, "each throttle starts empty"
+    assert throttle.allow() is True
+    assert throttle.allow() is True, "separate alarms at the same time each use a slot"
+    assert throttle.allow() is False
+    assert throttle.allow() is False
+    assert len(throttle) == 2, "denied alarms must not be stored"
+
+
+def test_e10_sliding_expiry_and_denied_alarms() -> None:
+    clock = FakeAlarmClock()
+    throttle = learner.AlarmThrottle(clock, 100, 2)
+    for now, expected in [(0, True), (40, True), (99, False), (100, True),
+                          (139, False), (140, True), (199, False), (200, True)]:
+        clock.now = now
+        assert throttle.allow() is expected, f"unexpected decision at {now} ms"
+    assert len(throttle) == 2, "only allowed alarms younger than 100 ms remain"
+
+
+def test_e10_one_millisecond_window_idle_jump_and_instances() -> None:
+    clock = FakeAlarmClock(-10)
+    first = learner.AlarmThrottle(clock, 1, 1)
+    second = learner.AlarmThrottle(clock, 1, 1)
+    assert first.allow() is True
+    assert first.allow() is False
+    assert second.allow() is True, "instances must not share alarm history"
+    clock.now = -9
+    assert first.allow() is True, "an alarm expires exactly one window later"
+    assert first.allow() is False
+    clock.now = 1_000_000
+    assert first.allow() is True, "a long idle gap releases capacity"
+    assert len(first) == 1
+
+
+@pytest.mark.parametrize("field", ["window_ms", "max_alarms"])
+@pytest.mark.parametrize("bad", [0, -1, True, False, 1.0, 1.5, "1", None, math.nan, math.inf])
+def test_e10_invalid_configuration(field: str, bad: object) -> None:
+    with pytest.raises(ValueError):
+        if field == "window_ms":
+            learner.AlarmThrottle(FakeAlarmClock(), bad, 1)
+        else:
+            learner.AlarmThrottle(FakeAlarmClock(), 1, bad)
+
+
+def test_e10_storage_bounded_and_all_expired_alarms_removed() -> None:
+    clock = FakeAlarmClock()
+    throttle = learner.AlarmThrottle(clock, 100, 3)
+    for index in range(20_000):
+        assert throttle.allow() is (index < 3)
+        assert len(throttle) == min(index + 1, 3), "storage must never exceed max_alarms"
+    clock.now = 100
+    assert len(throttle) == 3, "len reports stored times; allow performs expiry"
+    assert throttle.allow() is True
+    assert len(throttle) == 1, "remove every expired alarm before recording a new one"
+    assert throttle.allow() is True
+    assert throttle.allow() is True
+    assert throttle.allow() is False
+    assert len(throttle) == 3
+
+
+def test_e10_fast_enough() -> None:
+    clock = FakeAlarmClock()
+    throttle = learner.AlarmThrottle(clock, 20_000, 20_000)
+    started = time.perf_counter()
+    allowed = 0
+    for now in range(200_000):
+        clock.now = now
+        allowed += throttle.allow()
+    elapsed = time.perf_counter() - started
+    assert allowed == 200_000, "expiry must free one slot per millisecond once full"
+    assert len(throttle) == 20_000
+    assert elapsed < 2.0, f"200,000 allow calls took {elapsed:.3f}s; expire from a deque's left"

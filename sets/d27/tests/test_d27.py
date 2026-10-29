@@ -370,3 +370,29 @@ def test_e4_raises_original_first_error_after_all_checks_stop(workers: int) -> N
     assert sorted(finished.get_nowait() for _ in range(3)) == [1, 3, 4], "finish remaining checks before raising"
     with pytest.raises(Empty):
         attempted.get_nowait()
+
+
+from starter.workers import gil_answers
+
+
+def test_e5_q1_bytecode_execution() -> None:
+    answers = gil_answers()
+    if not isinstance(answers, dict) or set(answers) != {"Q1", "Q2", "Q3", "Q4"}:
+        pytest.fail("E5: return a dictionary with exactly Q1-Q4; reread E5's return contract", pytrace=False)
+    if answers.get("Q1") != "B":
+        pytest.fail("Q1: reread the Python glossary, 'global interpreter lock', and threading docs, 'GIL and performance considerations'", pytrace=False)
+
+
+def test_e5_q2_instrument_io_waits() -> None:
+    if gil_answers().get("Q2") != "C":
+        pytest.fail("Q2: reread threading docs, 'GIL and performance considerations', on I/O-bound tasks", pytrace=False)
+
+
+def test_e5_q3_cpu_heavy_waveforms() -> None:
+    if gil_answers().get("Q3") != "A":
+        pytest.fail("Q3: reread the Python glossary, 'global interpreter lock', and threading docs, 'GIL and performance considerations'", pytrace=False)
+
+
+def test_e5_q4_shared_measurement_counter() -> None:
+    if gil_answers().get("Q4") != "D":
+        pytest.fail("Q4: reread threading docs, 'Lock objects', and queue docs, 'Queue objects'", pytrace=False)

@@ -18,3 +18,8 @@ def missing_channels(expected: list[str], seen: list[str]) -> list[str]:
 def duplicate_serials(serials: list[str]) -> list[str]:
     """Return upper-case repeated serials in order of their second appearance."""
     raise NotImplementedError("E4: track seen serials and report each duplicate once")
+
+
+def is_valid_loop(commands: str) -> bool:
+    """Return whether repeating the commands keeps the cart's path bounded."""
+    raise NotImplementedError("E5: track the cart's position and heading over repeated passes")

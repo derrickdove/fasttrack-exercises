@@ -47,3 +47,8 @@ def unpack_status_frame(b: bytes) -> dict[str, int]:
 def explain(line: str) -> str:
     """Match an exact C_LINES entry to a MEANINGS entry; else raise ValueError."""
     raise NotImplementedError("E4: Match each C line to its plain-English meaning")
+
+
+def endian_answers() -> dict[str, str]:
+    """Return Q1..Q4 mapped to uppercase option letters from the README."""
+    raise NotImplementedError("E5: Choose the byte-order answer for each question")

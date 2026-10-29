@@ -1,0 +1,5 @@
+- name: Install calibration limits
+  ansible.builtin.copy:
+    src: limits.csv
+    dest: /etc/chassis/limits.csv
+  notify: Restart telemetry

@@ -1,6 +1,6 @@
 # d39 -- Multi-instrument, multi-UUT configuration
 
-**Time:** about 45 minutes | **Read first:** Python's [tomllib documentation](https://docs.python.org/3/library/tomllib.html) (load and Examples); *A Common-Sense Guide to DSA*, your book's chapter on graphs (topological ordering); [Pro Git 7.6: Rewriting History](https://git-scm.com/book/en/v2/Git-Tools-Rewriting-History) (when not to rewrite shared history) | **You edit:** `starter/topology.py`
+**Time:** about 65 minutes | **Read first:** Python's [tomllib documentation](https://docs.python.org/3/library/tomllib.html) (load and Examples); *A Common-Sense Guide to DSA*, your book's chapter on graphs (topological ordering and breadth-first search); [Pro Git 7.6: Rewriting History](https://git-scm.com/book/en/v2/Git-Tools-Rewriting-History) (when not to rewrite shared history) | **You edit:** `starter/topology.py`
 
 ## What you're building
 
@@ -9,7 +9,7 @@ A **test station** controls measuring equipment while testing several chassis. A
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/topology.py`. Don't edit `tests/` or the supplied `UUT_INSTRUMENTS` mapping.
-2. Press **Ctrl+Shift+B -> Test: d39** (or run `bash tools/run.sh d39` / `tools\run.ps1 d39`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B -> Test: d39** (or run `bash tools/run.sh d39` / `tools\run.ps1 d39`). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A **configuration** is data describing station connections. **TOML** is a text format for that data; `tomllib` is Python's built-in TOML reader. `[[instruments]]` introduces another dictionary in the `instruments` list. A **resource** is a string identifying a reservable connection, including the channel when needed. An **id** is a string naming a record. A **PSU** (power supply unit) provides electrical power; a **channel** is an independently controlled output. A **DMM** (digital multimeter) measures electrical values; a **scope** (oscilloscope) measures signals over time.
@@ -108,3 +108,40 @@ Two windows overlap when `max(start1, start2) < min(end1, end2)`. Touching endpo
 **Watch out:** Use sort + sweep, not all pairs of windows. For this fixed four-UUT station, remember the latest end seen for each UUT. At each start, compare with the other three UUTs; an earlier end greater than this start means overlap. Keep the maximum end when the same UUT appears again. **Big O** describes how work grows with input size. This takes O(n log n) time (sorting dominates as the number `n` of windows grows), while testing every pair takes O(n^2). The speed test gives 80,000 windows a generous 2-second limit; its input is reversed rather than random so every run is reproducible.
 
 **Reread:** your book's graphs chapter: nodes and connections; here shared instruments connect UUTs, and the sweep checks when those connections cause contention (simultaneous demand).
+
+### E5 -- Count clusters of failed test points (medium, ~20 min)
+
+**Goal:** A **harness** is an assembly of wires and connectors; a **pin** is one electrical contact in a connector. A harness test reports a **grid**, a rectangular arrangement of pin results stored as a list of row strings. `"X"` marks a failed pin and `"."` marks a passed pin. Count groups of failures that may share one physical fault, and find the biggest group.
+
+**Signatures:** `count_fault_clusters(grid: list[str]) -> int` and `largest_cluster(grid: list[str]) -> int`
+
+A **cluster** contains failed pins connected by steps up, down, left, or right through other failed pins. Diagonal contact does not connect pins. `count_fault_clusters` returns the number of clusters; `largest_cluster` returns the number of pins in the biggest cluster. Both return `0` when there are no failed pins, including an empty list or equal-length empty rows. Both must raise `ValueError` if rows have different lengths or any character is other than uppercase `X` or `.`. Check the whole grid, including later rows. Leave the input unchanged, and keep separate calls independent.
+
+Here the graph's nodes are failed pins and its edges join side-by-side failures. **Breadth-first search (BFS)** explores one starting pin's neighbours, then their neighbours, until it has found the whole cluster. Use a **queue**, which processes items in the order they were added, and a **visited set**, which remembers pins already discovered. Identify a pin by its **coordinates**, a `(row, column)` tuple of zero-based positions (the first row and column are numbered `0`).
+
+Python's standard-library `collections.deque` is a **double-ended queue**: it supports fast removal and insertion at either end. `append` adds to the right; `popleft` removes and returns the oldest item on the left. This small example shows the queue operations, using pin names instead of coordinates:
+
+```python
+from collections import deque
+pending = deque(["pin-1", "pin-2"])
+visited = {"pin-1", "pin-2"}
+pending.append("pin-3")
+visited.add("pin-3")
+print(pending.popleft())  # pin-1
+```
+
+Scan the grid for an `X` that is not visited. That starts a new cluster: add it to the queue and visited set. Repeatedly remove a queued pin, count it, and add its valid, unvisited failed neighbours. Mark a pin visited when you add it to the queue, so two neighbours cannot add it twice. When the queue is empty, you know that cluster's size. Continue the scan, keeping the visited set across clusters and remembering the largest size. A shared helper for the two functions is allowed.
+
+**Example:** These are separate calls on the same grid:
+
+| `grid` | `count_fault_clusters(grid)` | `largest_cluster(grid)` |
+| --- | --- | --- |
+| `['XX..X', '.X..X', '...X.']` | `3` | `3` |
+| `['X.', '.X']` | `2` | `1` |
+| `['XXX', 'X.X', 'XXX']` | `1` | `8` |
+| `['....', '....']` | `0` | `0` |
+| `[]` | `0` | `0` |
+
+**Watch out:** Check row and column bounds before indexing: negative indexes in Python wrap around to the end and would incorrectly join opposite grid edges. Passed pins never join clusters. Each function must handle a 1000-by-1000 grid of all `X` in under 3 seconds: one cluster containing 1,000,000 pins. Visit each pin at most once during the search. A **recursive** function calls itself; Python limits how many such calls can be nested. A recursive search can hit that recursion limit and raise `RecursionError` on a large grid. Use the queue and a loop instead.
+
+**Reread:** your book's graphs chapter: breadth-first search, its queue, and keeping track of visited nodes.

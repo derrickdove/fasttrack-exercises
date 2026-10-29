@@ -8,7 +8,9 @@ import pytest
 from starter.topology import (
     UUT_INSTRUMENTS,
     conflicts,
+    count_fault_clusters,
     instruments_for,
+    largest_cluster,
     load,
     setup_order,
     validate,
@@ -263,3 +265,67 @@ def test_e4_fast_enough():
     assert got == [("uut-a", "uut-b"), ("uut-a", "uut-d"),
                    ("uut-b", "uut-d"), ("uut-c", "uut-d")]
     assert elapsed <= 2.0, f"80,000 windows took {elapsed:.3f}s; use sort + sweep"
+
+
+@pytest.mark.parametrize("grid, count, largest", [
+    (["XX..X", ".X..X", "...X."], 3, 3),
+    (["XXX", "X.X", "XXX"], 1, 8),
+    (["X.X", "XXX"], 1, 5),
+    (["XX.XXX.X"], 3, 3),
+    (["X", "X", ".", "X"], 2, 2),
+    (["X"], 1, 1),
+])
+def test_e5_examples(grid, count, largest):
+    assert count_fault_clusters(grid) == count, f"wrong cluster count for {grid}"
+    assert largest_cluster(grid) == largest, f"wrong largest cluster for {grid}"
+
+
+@pytest.mark.parametrize("grid, count", [
+    (["X.", ".X"], 2),
+    (["X.X", ".X.", "X.X"], 5),
+])
+def test_e5_diagonal_only_neighbours(grid, count):
+    assert count_fault_clusters(grid) == count, "diagonal pins must stay separate"
+    assert largest_cluster(grid) == 1, "diagonal contact cannot enlarge a cluster"
+
+
+@pytest.mark.parametrize("grid", [[], [""], ["", ""], ["."], ["....", "...."]])
+def test_e5_empty_and_passed(grid):
+    assert count_fault_clusters(grid) == 0, "a grid without failed pins has no clusters"
+    assert largest_cluster(grid) == 0, "a grid without failed pins has largest size zero"
+
+
+@pytest.mark.parametrize("function", [count_fault_clusters, largest_cluster])
+@pytest.mark.parametrize("grid", [
+    ["XX", "X"], ["X", ""], ["", "X"],
+    ["x"], [" "], ["X\n"], ["X?"], ["..", ".?"], ["X", "\u00d7"],
+])
+def test_e5_invalid_grids(function, grid):
+    with pytest.raises(ValueError):
+        function(grid)
+
+
+def test_e5_repeatable_without_mutation():
+    grid = ["XX..X", ".X..X", "...X."]
+    original = list(grid)
+    for _ in range(2):
+        assert count_fault_clusters(grid) == 3
+        assert grid == original, "count_fault_clusters must leave the grid unchanged"
+        assert largest_cluster(grid) == 3
+        assert grid == original, "largest_cluster must leave the grid unchanged"
+    assert largest_cluster(["."]) == 0, "visited pins must not leak between calls"
+    assert count_fault_clusters(["X"]) == 1, "each grid needs a fresh search"
+
+
+@pytest.mark.parametrize("function, expected", [
+    (count_fault_clusters, 1), (largest_cluster, 1_000_000),
+])
+def test_e5_fast_enough(function, expected):
+    grid = ["X" * 1000 for _ in range(1000)]
+    started = time.perf_counter()
+    got = function(grid)
+    elapsed = time.perf_counter() - started
+    assert got == expected, "all one million failed pins belong to one cluster"
+    assert elapsed < 3.0, (
+        f"{function.__name__} took {elapsed:.3f}s; visit each pin once with a queue"
+    )

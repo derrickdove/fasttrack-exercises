@@ -1,0 +1,3 @@
+name: Install station driver
+ansible.builtin.pip:
+  name: chassis-driver

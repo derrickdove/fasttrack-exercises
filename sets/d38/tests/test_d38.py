@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from starter.deploycheck import idempotent_tasks
+from starter.deploycheck import role_problems
 
 STARTER = Path(__file__).resolve().parents[1] / "starter"
 
@@ -267,3 +268,123 @@ def test_e4_file_and_yaml_errors_propagate(tmp_path: Path) -> None:
     path = _write_playbook(tmp_path, "- hosts: [bench\n")
     with pytest.raises(yaml.YAMLError):
         idempotent_tasks(path)
+
+
+@pytest.mark.parametrize(("folder", "expected"), [
+    ("good", []),
+    ("missing_tasks", ["tasks/main.yml: missing"]),
+    ("bad_shapes", [
+        "defaults/main.yml: expected a mapping",
+        "tasks/main.yml: expected a list",
+    ]),
+    ("notify_mismatch", [
+        "handlers/main.yml: handler 'Restart station' is never notified",
+        "tasks/main.yml: task 1 has no name",
+        "tasks/main.yml: task 2 notifies unknown handler 'Reload driver'",
+    ]),
+])
+def test_e5_supplied_roles(folder: str, expected: list[str]) -> None:
+    role_dir = STARTER.parent / "data/roles" / folder
+    got = role_problems(role_dir)
+    assert got == expected, f"For role {folder}, expected {expected!r}, got {got!r}"
+
+
+@pytest.mark.parametrize("with_optional_files", [False, True])
+def test_e5_empty_task_list_and_optional_files(tmp_path: Path, with_optional_files: bool) -> None:
+    (tmp_path / "tasks").mkdir()
+    (tmp_path / "tasks/main.yml").write_text("[]", encoding="utf-8")
+    if with_optional_files:
+        (tmp_path / "defaults").mkdir()
+        (tmp_path / "defaults/main.yml").write_text("{}", encoding="utf-8")
+        (tmp_path / "handlers").mkdir()
+        (tmp_path / "handlers/main.yml").write_text("[]", encoding="utf-8")
+    assert role_problems(tmp_path) == [], "Empty lists/mappings are valid; optional files may be absent"
+    (tmp_path / "tasks/main.yml").unlink()
+    (tmp_path / "tasks/probe.yml").write_text(
+        "- name: Probe station\n  notify: Missing handler\n", encoding="utf-8"
+    )
+    assert role_problems(tmp_path) == [
+        "tasks/main.yml: missing",
+        "tasks/probe.yml: task 1 notifies unknown handler 'Missing handler'",
+    ], "Missing main.yml must not stop checks; without handlers every notification is unknown"
+
+
+@pytest.mark.parametrize("text", ["", "# not filled in", "null", "[]", "telemetry", "9200", "false"])
+def test_e5_defaults_must_be_mapping(tmp_path: Path, text: str) -> None:
+    (tmp_path / "tasks").mkdir()
+    (tmp_path / "tasks/main.yml").write_text("[]", encoding="utf-8")
+    (tmp_path / "defaults").mkdir()
+    (tmp_path / "defaults/main.yml").write_text(text, encoding="utf-8")
+    assert role_problems(tmp_path) == ["defaults/main.yml: expected a mapping"], (
+        f"Present defaults must load as a dict, even when empty/comment-only: {text!r}"
+    )
+
+
+@pytest.mark.parametrize("text", ["", "# no tasks yet", "null", "{}", "station", "false", "9200"])
+def test_e5_every_direct_yml_task_file_must_be_list(tmp_path: Path, text: str) -> None:
+    (tmp_path / "tasks").mkdir()
+    (tmp_path / "tasks/main.yml").write_text("[]", encoding="utf-8")
+    (tmp_path / "tasks/calibrate.yml").write_text(text, encoding="utf-8")
+    (tmp_path / "tasks/notes.txt").write_text("not YAML: [", encoding="utf-8")
+    (tmp_path / "tasks/nested").mkdir()
+    (tmp_path / "tasks/folder.yml").mkdir()
+    (tmp_path / "tasks/nested/ignored.yml").write_text("{}", encoding="utf-8")
+    assert role_problems(tmp_path) == ["tasks/calibrate.yml: expected a list"], (
+        "Check every direct tasks/*.yml file, and ignore other extensions and nested folders"
+    )
+
+
+def test_e5_names_notifications_and_sorted_messages(tmp_path: Path) -> None:
+    (tmp_path / "tasks").mkdir()
+    (tmp_path / "tasks/main.yml").write_text("""
+- name: Install settings
+  notify: [Restart telemetry, Restart telemetry]
+- name: null
+  notify: [restart telemetry, Missing driver, Missing driver]
+- name: '   '
+- name: 17
+- ansible.builtin.command: chassis-id
+""", encoding="utf-8")
+    (tmp_path / "tasks/extra.yml").write_text("""
+- name: Calibrate station
+  notify: Reload driver
+- name: Calibrate station
+  notify: Missing driver
+""", encoding="utf-8")
+    (tmp_path / "handlers").mkdir()
+    (tmp_path / "handlers/main.yml").write_text("""
+- name: Reload driver
+- name: Restart telemetry
+- name: Unused handler
+""", encoding="utf-8")
+    expected = [
+        "handlers/main.yml: handler 'Unused handler' is never notified",
+        "tasks/extra.yml: task 2 notifies unknown handler 'Missing driver'",
+        "tasks/main.yml: task 2 has no name",
+        "tasks/main.yml: task 2 notifies unknown handler 'Missing driver'",
+        "tasks/main.yml: task 2 notifies unknown handler 'restart telemetry'",
+        "tasks/main.yml: task 3 has no name",
+        "tasks/main.yml: task 4 has no name",
+        "tasks/main.yml: task 5 has no name",
+    ]
+    got = role_problems(tmp_path)
+    assert got == expected, f"Keep per-task diagnostics, match names exactly, and sort: {got!r}"
+    assert role_problems(tmp_path) == expected, "Repeated calls must not retain notifications from earlier roles"
+    (tmp_path / "tasks/main.yml").write_text("[]", encoding="utf-8")
+    (tmp_path / "tasks/extra.yml").write_text("[]", encoding="utf-8")
+    assert role_problems(tmp_path) == [
+        "handlers/main.yml: handler 'Reload driver' is never notified",
+        "handlers/main.yml: handler 'Restart telemetry' is never notified",
+        "handlers/main.yml: handler 'Unused handler' is never notified",
+    ], "Each call must collect notifications again from the current files"
+
+
+@pytest.mark.parametrize("relative", ["tasks/main.yml", "defaults/main.yml", "handlers/main.yml"])
+def test_e5_invalid_yaml_propagates(tmp_path: Path, relative: str) -> None:
+    (tmp_path / "tasks").mkdir()
+    (tmp_path / "tasks/main.yml").write_text("[]", encoding="utf-8")
+    path = tmp_path / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("broken: [", encoding="utf-8")
+    with pytest.raises(yaml.YAMLError):
+        role_problems(tmp_path)

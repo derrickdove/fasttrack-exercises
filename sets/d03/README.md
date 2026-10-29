@@ -1,6 +1,6 @@
 # d03 — Channels and readings: collections
 
-**Time:** about 45 minutes · **Read first:** [Python Tutorial §5: Data Structures](https://docs.python.org/3/tutorial/datastructures.html) (lists, tuples, sets, dictionaries); *A Common-Sense Guide to Data Structures and Algorithms*, your book's chapter on hash tables (why dict or set lookup is fast and list search is slow); [The Linux Command Line, ch. 6: Redirection](https://linuxcommand.org/tlcl.php) (redirection and pipes) · **You edit:** `starter/channels.py`
+**Time:** about 65 minutes · **Read first:** [Python Tutorial §5: Data Structures](https://docs.python.org/3/tutorial/datastructures.html) (lists, tuples, sets, dictionaries); *A Common-Sense Guide to Data Structures and Algorithms*, your book's chapter on hash tables (why dict or set lookup is fast and list search is slow); [The Linux Command Line, ch. 6: Redirection](https://linuxcommand.org/tlcl.php) (redirection and pipes) · **You edit:** `starter/channels.py`
 
 ## What you're building
 
@@ -9,7 +9,7 @@ A test station is a computer and instruments used to check hardware. A channel i
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/channels.py`. Don't edit `tests/`.
-2. Press **Ctrl+Shift+B → Test: d03** (or run `bash tools/run.sh d03` / `tools\run.ps1 d03` from the repo root). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d03** (or run `bash tools/run.sh d03` / `tools\run.ps1 d03` from the repo root). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A **collection** holds multiple items:
@@ -81,3 +81,27 @@ From the Linux reading: **redirection** sends a program's output to a file (`>`)
 **Watch out:** Order follows the second occurrence, not the first occurrence or alphabetical order. Third and later occurrences add nothing. Inputs use letters A–Z and a–z, digits, spaces, and hyphens; keep spaces and hyphens exactly as supplied. Empty input or all-unique input returns `[]`. Do not sort or change the input.
 
 **Reread:** Python Tutorial §5.1, More on Lists; §5.4, Sets; your book's hash-table chapter on keeping track of keys already seen.
+
+### E5 — Does the rover command loop come home? (medium, ~20 min)
+
+**Goal:** A **test fixture** is equipment used to hold or position hardware during a test. Its **motion stage** is a small robot cart on the test floor that carries a sensor head. It repeats a command string forever. Return `True` if its path is **bounded** (stays within a fixed, finite area), otherwise `False`. The cart starts at position `(0, 0)` facing north. Its **heading** is the direction it faces. `L` turns 90 degrees left in place, `R` turns 90 degrees right in place, and `F` moves forward one unit in the current heading. Use `(x, y)` for position: east increases `x`, west decreases `x`, north increases `y`, and south decreases `y`.
+
+**Signature:** `def is_valid_loop(commands: str) -> bool`
+
+**Example:**
+
+| Call | Result |
+| --- | --- |
+| `is_valid_loop("F")` | `False` |
+| `is_valid_loop("LRF")` | `False` |
+| `is_valid_loop("L")` | `True` |
+| `is_valid_loop("FLLF")` | `True` |
+| `is_valid_loop("LF")` | `True` |
+| `is_valid_loop("FFRFFRFFRFFR")` | `True` |
+| `is_valid_loop("FRF")` | `True` |
+
+A **pass** runs the entire string once, keeping the previous position and heading for the next pass. After at most four complete passes the cart returns to `(0, 0)` if and only if its path is bounded; heading does not matter for returning home. Each pass changes the heading by a total of 0, 90, 180, or 270 degrees. For `"LF"`, the first pass ends at `(-1, 0)` facing west. The next three passes end at `(-1, -1)` facing south, `(0, -1)` facing east, then `(0, 0)` facing north: a bounded square. You can always run all four passes and check the final position. A tuple can hold a position or a forward step; a set can hold the allowed command letters.
+
+**Watch out:** Empty input raises `ValueError` (reports an error for an unacceptable value). Any character other than `L`, `R`, or `F` raises `ValueError` with a message naming the bad character. Validate the whole string before returning a result, even if an earlier part stays at or returns to the start. Commands are case-sensitive: lowercase letters, spaces, and newlines are invalid. Check after complete passes; neither the initial position nor a temporary visit home during a pass establishes a bounded path. A turn-only string such as `"L"` is valid because it stays at the start. Return a `bool` (`True` or `False`). `test_e5_fast_enough` supplies 10,000 characters and allows less than 1 second for the call; do not try to simulate forever.
+
+**Reread:** Python Tutorial §5.3, Tuples and Sequences; §5.4, Sets.

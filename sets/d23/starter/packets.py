@@ -31,3 +31,8 @@ def parse_packet(b: bytes) -> tuple[int, int, dict[int, float]]:
 def find_packets(stream: bytes) -> list[bytes]:
     """E4: Scan for valid packets, advancing one byte after a rejected start."""
     raise NotImplementedError("E4: Recover valid packets in stream order")
+
+
+def parse_block(reply: bytes, fmt: str = "h", big_endian: bool = True) -> list[int | float]:
+    """E5: Decode a definite-length waveform block; reject malformed bytes or fmt."""
+    raise NotImplementedError("E5: Validate the block header and unpack waveform samples")

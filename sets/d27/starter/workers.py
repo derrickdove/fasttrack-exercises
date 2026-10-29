@@ -47,3 +47,8 @@ class Listener:
 def run_pipeline(items: Iterable[T], workers: int, fn: Callable[[T], R]) -> list[R]:
     """Apply fn in a queue-based thread pool, preserving input order."""
     raise NotImplementedError("E4: queue indexed jobs and shutdown markers; join before returning or raising")
+
+
+def gil_answers() -> dict[str, str]:
+    """Return Q1-Q4 option letters for the CPython GIL concept check."""
+    raise NotImplementedError("E5: return the selected option letter for each GIL question")

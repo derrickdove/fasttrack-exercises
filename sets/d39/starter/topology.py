@@ -1,4 +1,5 @@
 """Station configuration, setup dependencies, and scheduled instrument use."""
+from collections import deque
 import heapq
 from pathlib import Path
 import tomllib
@@ -38,3 +39,13 @@ def setup_order(deps: dict[str, list[str]]) -> list[str]:
 def conflicts(schedule: list[tuple[str, int, int]]) -> list[tuple[str, str]]:
     """Sweep half-open windows using UUT_INSTRUMENTS; return sorted unique pairs."""
     raise NotImplementedError("E4: Sort windows and detect overlapping shared instruments")
+
+
+def count_fault_clusters(grid: list[str]) -> int:
+    """Count groups of X pins joined up/down/left/right; reject invalid grids."""
+    raise NotImplementedError("E5: Validate the grid and count failed-pin clusters")
+
+
+def largest_cluster(grid: list[str]) -> int:
+    """Return the largest failed-pin group size, or zero; reject invalid grids."""
+    raise NotImplementedError("E5: Find the biggest cluster with breadth-first search")

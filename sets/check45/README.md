@@ -1,6 +1,6 @@
 # check45 — Final timed station check
 
-**Time:** about 150 minutes · **Read first:** review day - no new reading; revisit the earlier readings named under each exercise · **You edit:** `starter/check45.py`
+**Time:** about 153 minutes · **Read first:** review day - no new reading; revisit the earlier readings named under each exercise · **You edit:** `starter/check45.py`
 
 ## What you're building
 
@@ -10,7 +10,7 @@ You are checking software for a chassis test station before an operator uses it.
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/check45.py`. Don't edit `tests/`. The supplied `Transport` interface describes an adapter; you do not need to implement its methods. The two supplied data classes are already complete.
 2. Press **Ctrl+Shift+B -> Test: check45** (or run `bash tools/run.sh check45` / `tools\run.ps1 check45`). At first you'll see `Exercises: 0 / 10 passed`. Rerun after each exercise.
-3. Use a 150-minute timer, including reading and test runs. Record the exercises you finish and where you stop. Report **all pass / partial / stuck** in the tracker; use the reread notes afterward.
+3. Use a 153-minute timer, including reading and test runs. Record the exercises you finish and where you stop. Report **all pass / partial / stuck** in the tracker; use the reread notes afterward.
 
 Exercises are independent: attempt any one without completing the others. Only E2's methods belong together. Configuration values from E1 do not automatically control E2 or E8.
 
@@ -50,24 +50,36 @@ For this dynamically typed dictionary, reject booleans, floats, and numeric stri
 
 **Reread:** If you failed E1, reread **d39**, `tomllib` documentation and configuration validation; **d03**, Python Tutorial section 5 (lists, dictionaries, sets, tuples); **d08**, the `typing` introduction.
 
-### E2 - Read a supply and shut it down safely (medium, ~22 min)
+### E2 - Drive a supply from the station config (medium, ~25 min)
 
-**Goal:** Build a **driver**, software that turns instrument operations into commands. Its **transport** sends commands and receives replies, implementing the supplied `Transport` protocol.
+**Goal:** Build a **driver**, software that turns operations into instrument commands, from a station configuration dictionary. This checkpoint combines config validation, a voltage limit, a timeout retry, and automatic cleanup; it does not load a file.
 
-**Signatures:** `SupplyDriver(transport: Transport, timeout_s: float)`; methods `read_voltage() -> float` and `shutdown() -> None`.
+**Signatures:** `StationSupply.from_config(config: dict[str, object], rm: ResourceManagerLike) -> StationSupply` is a `@classmethod`, a method called on the class that creates an instance. Methods: `read_voltage() -> float`, `set_voltage(volts: float) -> None`, `enable_output(on: bool) -> None`, and `close() -> None`; also implement `__enter__` and `__exit__` for `with` blocks. The constructor stores an already-configured resource and its maximum voltage; use `from_config` to create the supply.
 
-- `__init__`: reject a nonfinite or nonpositive timeout with `ValueError`; otherwise store transport and timeout. Make no transport calls.
-- `read_voltage`: call `transport.query("MEAS:VOLT?", timeout_s)`. This SCPI command (Standard Commands for Programmable Instruments) asks for measured voltage. Retry exactly once if the query raises `TimeoutError`, with the same arguments. A second timeout propagates to the caller. Other query exceptions propagate immediately without retrying.
-- Strip surrounding whitespace from the reply. Require a case-sensitive `mV` or `V` suffix; parse the preceding text with `float`. `mV` means millivolts: divide by 1000 to return volts. Return only finite values. Empty, unitless, wrong-unit, malformed, or nonfinite replies raise `ValueError`, without retrying.
-- `shutdown`: call `transport.write("OUTP OFF")`, then `transport.close()`. Always attempt close, even when the write raises. Let errors propagate; if both fail, the close error propagates. Each explicit shutdown call performs both operations; no automatic shutdown or repeated-call suppression is required.
+The supplied `ResourceManagerLike` and `ResourceLike` protocols and `VisaTimeout(Exception)` are complete; do not implement them. A **resource manager** opens an instrument connection with `open_resource(name)`. Its returned **resource** has writable `timeout`, `read_termination`, and `write_termination` attributes, plus `write(cmd)`, `query(cmd) -> str`, and `close()` methods. A **termination** is the character marking the end of a command or reply. A read timeout is either the supplied `VisaTimeout` or a real `pyvisa.errors.VisaIOError` whose `error_code` equals `pyvisa.constants.StatusCode.error_timeout`. Other VISA error codes are not timeouts.
 
-The adapter enforces the timeout; do not implement threads, sleeps, or network connections.
+- `from_config`: accept only `ip`, `timeout_ms`, and `max_voltage`. Require `ip` to be a nonempty string and use it unchanged. `timeout_ms` is optional, defaults to 2000, and must be a positive integer; reject booleans, floats, and numeric strings. A millisecond is 1/1000 second. Require `max_voltage` to be a positive finite `int` or `float`; reject booleans and numeric strings. A missing required key, unknown key, or invalid value raises `ValueError` naming that key. Validate everything before opening anything, without changing the dictionary.
+- Then call `rm.open_resource(f"TCPIP::{ip}::INSTR")`. This **VISA resource string** identifies an instrument reached over TCP/IP through PyVISA. Set the resource's `timeout` to `timeout_ms` and both terminations to `"\n"` (one newline character). Do not send commands while configuring it. The tests supply the manager; do not create your own manager, threads, sleeps, or network connection.
+- `read_voltage`: query `"MEAS:VOLT?"`, a SCPI command (Standard Commands for Programmable Instruments) asking for measured voltage. Convert the numeric reply with `float` and return volts; there is no unit suffix. Retry exactly once on either timeout described above, using the same command. A second timeout propagates. A non-numeric reply raises `ValueError` without retrying; other query exceptions propagate without retrying.
+- `set_voltage`: require a finite value, then round it to three decimal places using `f"{volts:.3f}"`. The rounded value must be from zero through `max_voltage`, inclusive; otherwise raise `ValueError` before any write. Write exactly `f"VOLT {volts:.3f}"`. Check the rounded value, not the original input: with `max_voltage=12.3456`, `set_voltage(12.3456)` must raise because it would command `12.346`; with `max_voltage=12.5`, `set_voltage(12.5001)` writes `"VOLT 12.500"`. A tiny negative input that formats as `"-0.000"` is zero and is allowed.
+- `enable_output`: require exactly a `bool`; write `"OUTP 1"` for `True` and `"OUTP 0"` for `False`. Anything else, including integers 0 and 1, raises `TypeError` before any write. Type hints do not enforce runtime checks, and `bool` is a subclass of `int` in Python.
+- Context manager: `__enter__` returns the supply. On exit, write `"OUTP 0"`, then call `close()`, always attempting close even if the write fails. Never swallow or replace the block's exception, including when cleanup also fails. With no block exception, cleanup errors propagate; if both write and close fail, the close error propagates.
+- `close`: release the resource at most once; repeated calls are no-ops, including after context exit. Mark it closed even if the resource's close call raises. Calling `close()` alone sends no command.
 
-**Example:** query reply `" 3300 mV\r\n"` -> `3.3`.
+**Example:** with config `{"ip": "192.0.2.45", "max_voltage": 12.5}`, the manager opens `"TCPIP::192.0.2.45::INSTR"` with timeout 2000 and newline terminations. `set_voltage(3.3125)` writes `"VOLT 3.312"`; a query reply `"3.3125"` returns `3.3125`. In this example, the first query raises `VisaTimeout` and the second returns that reply:
 
-**Watch out:** A parse failure is not a reason to ask the instrument again.
+```python
+with StationSupply.from_config(config, rm) as supply:
+    supply.set_voltage(3.3125)
+    supply.enable_output(True)
+    voltage = supply.read_voltage()  # 3.3125, after one retry
+```
 
-**Reread:** If you failed E2, reread **d17**, `typing.Protocol` and *The Pragmatic Programmer*, "Decoupling"; **d18**, Python Tutorial section 8.7 (cleanup actions); **d43**, the supplied power-supply datasheet and "Debugging"; **d10**, pytest "How to use fixtures" (a fixture supplies reusable test setup).
+The writes, in order, are `"VOLT 3.312"`, `"OUTP 1"`, `"OUTP 0"`; the resource is then closed once.
+
+**Watch out:** Validate config before opening, and distinguish a read timeout from a bad reply. This exercise uses its own supply config; it does not consume E1's `StationConfig`.
+
+**Reread:** If you failed E2, reread **d17**, the `Psu` class exercises E5-E6, PyVISA resource strings, and terminations; **d18**, cleanup; **d05**, exceptions; **d08**, type hints are not runtime checks.
 
 ### E3 - Judge measurement evidence (medium, ~12 min)
 
@@ -193,7 +205,7 @@ Dry/normal runs write nothing to `err`. Usage errors write nothing to `out`; hel
 
 **Watch out:** Do not read `sys.argv` or print to the real terminal. `contextlib.redirect_stdout` and `redirect_stderr` can route argparse output to supplied streams.
 
-**Reread:** If you failed E8, reread **d36**, Python "Argparse Tutorial"; **d29**, `subprocess` documentation (exit codes); **d05**, Python Tutorial section 8 (exceptions).
+**Reread:** If you failed E8, reread **d32**, Python "Argparse Tutorial"; **d29**, `subprocess` documentation (exit codes); **d05**, Python Tutorial section 8 (exceptions).
 
 ### E9 - Review an offline Linux service definition (easy, ~10 min)
 
@@ -216,7 +228,7 @@ Use values after `configparser` strips surrounding whitespace. Missing `[Service
 
 **Watch out:** Python's config parser normally changes setting names to lowercase. A small subclass overriding `optionxform` can preserve case without changing a method on an existing object.
 
-**Reread:** If you failed E9, reread **d32**, `systemd.service`, `systemd.unit`, and `configparser` documentation; **d31**, *The Linux Command Line* chapters on shell scripts (absolute paths); **d38**, deployment configuration review.
+**Reread:** If you failed E9, reread **d36**, `systemd.service`, `systemd.unit`, and `configparser` documentation; **d31**, *The Linux Command Line* chapters on shell scripts (absolute paths); **d38**, deployment configuration review.
 
 ### E10 - Explain hardware interlocks and stale data (easy, ~10 min)
 
@@ -240,3 +252,18 @@ Ignore other bits; these flags are separate from E4's packet flags. Return `[]` 
 **Watch out:** The door bit has the opposite interpretation from the fault bits.
 
 **Reread:** If you failed E10, reread **d40**, learncpp O.2/O.3 (bitwise operators and masks); **d43**, hardware/software debugging and the supplied datasheet; **d02**, Python Tutorial section 4.1 (conditions).
+
+## If you failed Ek, reread dXX
+
+| Exercise | Reread |
+| --- | --- |
+| E1 | d39 (config validation), d03 (collections), d08 (typing) |
+| E2 | d17 (the Psu class exercises E5-E6, PyVISA resource strings, terminations), d18 (cleanup), d05 (exceptions), d08 (type hints are not runtime checks) |
+| E3 | d02 (conditions and functions), d06 (result states), d09/d11 (pytest) |
+| E4 | d15 (bytes), d23 (struct), d40 (bitwise operations) |
+| E5 | d24 (sequence arithmetic), d03 (dictionary counters), d13 (Big O) |
+| E6 | d33 (states), d18 (cleanup), d27 (clean shutdown) |
+| E7 | d44 (verification), d04 (JSON and paths), d12 (reports) |
+| E8 | d32 (argparse), d29 (exit codes), d05 (exceptions) |
+| E9 | d36 (systemd and configparser), d31 (absolute paths), d38 (deployment) |
+| E10 | d40 (bit masks), d43 (hardware debugging), d02 (conditions) |

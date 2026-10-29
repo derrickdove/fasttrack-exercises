@@ -1,6 +1,6 @@
 # d27 — Concurrency for I/O: threads, queues and clean shutdown
 
-**Time:** about 45 minutes · **Read first:** [Python threading docs: Thread and Event](https://docs.python.org/3/library/threading.html), [Python queue docs](https://docs.python.org/3/library/queue.html), and [Pro Git 7.1: Revision Selection](https://git-scm.com/book/en/v2/Git-Tools-Revision-Selection) · **You edit:** `starter/workers.py`
+**Time:** about 53 minutes · **Read first:** [Python threading docs: Thread and Event](https://docs.python.org/3/library/threading.html), [Python queue docs](https://docs.python.org/3/library/queue.html), [Python glossary: global interpreter lock](https://docs.python.org/3/glossary.html#term-global-interpreter-lock), and [Pro Git 7.1: Revision Selection](https://git-scm.com/book/en/v2/Git-Tools-Revision-Selection) · **You edit:** `starter/workers.py`
 
 ## What you're building
 
@@ -9,7 +9,7 @@ A chassis test station must read instruments and receive telemetry (measurements
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/workers.py`. Don't edit `tests/`.
-2. Press **Ctrl+Shift+B → Test: d27** (or run `bash tools/run.sh d27` / `tools\run.ps1 d27`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d27** (or run `bash tools/run.sh d27` / `tools\run.ps1 d27`). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 **I/O** means input/output, such as waiting for an instrument reply. **Concurrency** means tasks can make progress during one another's waits. A **thread** is a separate flow of execution in the same Python process; `Thread.start()` runs its `run()` method in the background, and `join(timeout=...)` waits for it to finish. `is_alive()` tells you whether it is still running.
@@ -94,3 +94,74 @@ Return results in input order, even when jobs finish in a different order. Catch
 **Reread:** threading docs, “Thread objects”; queue docs, “Queue objects” and the worker-thread example. For investigating a shutdown regression later, reread Pro Git 7.1, “Double Dot” and “Triple Dot”: a **revision** is a saved commit, and a **range** selects commits between revisions for `git log`. For example, `git log HEAD~3..HEAD` lists the last three commits on a straight history. As a companion investigation command, `git blame path` identifies the commits that last changed each line. No Git changes are required for this set.
 
 Optional reading: *The Pragmatic Programmer*, topic on concurrency.
+
+
+### E5 — Threads, processes and the GIL (easy, ~8 min)
+
+**Goal:** Choose how to share instrument work safely between threads and processes. This is a concept check: return your answers rather than starting any workers.
+
+**Signature:** `gil_answers() -> dict[str, str]`.
+
+Return a dictionary with exactly the keys `"Q1"`, `"Q2"`, `"Q3"`, and `"Q4"`. Each value is the uppercase option letter (`"A"`, `"B"`, `"C"`, or `"D"`) you choose for that question.
+
+**Example:** `sorted(gil_answers())` gives `['Q1', 'Q2', 'Q3', 'Q4']`. This shows the question IDs, not the answer letters.
+
+A **process** is a running program with its own memory; threads within it share memory. **CPython** is the usual Python implementation, written in C, a compiled programming language. The **CPU** (central processing unit) performs calculations; a **core** is a CPU execution unit that can work independently of other cores. **Bytecode** is the sequence of instructions CPython executes for Python code. The **global interpreter lock (GIL)** is a lock used inside CPython to control that execution. These questions assume CPython with its GIL enabled; optional builds that disable it are outside this exercise.
+
+**Q1.** Two station worker threads are doing calculations written in Python. What does the GIL mean for executing their Python bytecode within one process?
+
+- **A.** Both threads execute Python bytecode at the same time if the computer has two processor cores.
+- **B.** Only one thread executes Python bytecode at a time in that process.
+- **C.** Only the main thread can execute Python bytecode; workers can only wait for instruments.
+- **D.** A thread holds the GIL until it exits, so another thread cannot make progress before then.
+
+<details>
+<summary>Why it matters on the job — Q1</summary>
+Choosing a worker design starts with understanding how the interpreter schedules station calculations.
+</details>
+
+**Serial** communication sends bytes through a device port; **VISA** (Virtual Instrument Software Architecture) is an interface used to communicate with test instruments.
+
+**Q2.** Several instrument readers spend most of their time waiting on sockets, serial ports, or VISA replies. Why can threads still help even with the GIL?
+
+- **A.** Starting a second instrument thread disables the GIL for the whole process.
+- **B.** Each thread has a separate interpreter and its own GIL, even within the same process.
+- **C.** Blocking I/O waits release the GIL, letting other threads run while a reader waits.
+- **D.** Threads yield the GIL only when code explicitly calls Event.wait(); blocking instrument I/O alone cannot let another thread run.
+
+<details>
+<summary>Why it matters on the job — Q2</summary>
+An operator display should remain responsive while multiple instruments take time to reply.
+</details>
+
+A **waveform** is a sequence of captured signal measurements; an **FFT** (fast Fourier transform) calculates its frequency content. **Multiprocessing** runs work in separate processes. A **C-backed library** performs some work in compiled C code; **NumPy** is one such library for numerical arrays.
+
+**Q3.** FFT calculations on captured waveforms are CPU-heavy: calculation takes most of the time. Which approach can use multiple processor cores despite the GIL?
+
+- **A.** Use multiprocessing, or a C-backed library such as NumPy whose relevant operations release the GIL.
+- **B.** Add more threads running only Python bytecode; each thread automatically gets a separate processor core for simultaneous execution.
+- **C.** Put calculations in a Queue; a Queue automatically starts a separate process for each item.
+- **D.** Use an Event to start all Python calculation threads together; simultaneous starts bypass the GIL.
+
+<details>
+<summary>Why it matters on the job — Q3</summary>
+Waveform analysis must finish quickly enough for the next station test step.
+</details>
+
+A **shared counter** is a number that several threads update. An **atomic** operation cannot be interleaved with another thread's operations partway through. A **Lock** lets one thread at a time enter a protected section of code; a Queue can instead send updates to one thread that owns the counter.
+
+**Q4.** Two reader threads both do `count += 1` after receiving a measurement. Does the GIL make this shared counter update safe without coordination?
+
+- **A.** Yes: the GIL makes every Python statement atomic, including `count += 1`.
+- **B.** Yes: integer values cannot change in place, so updates to a shared integer cannot be lost.
+- **C.** No, but calling `join()` on both readers afterward recovers any lost increments.
+- **D.** No: `count += 1` is not atomic; protect updates with a Lock or send them through a Queue to one counter-owning thread.
+
+<details>
+<summary>Why it matters on the job — Q4</summary>
+Lost measurement counts can make a station report disagree with the readings it collected.
+</details>
+
+**Watch out:** Return option letters, not option text. A single successful threaded run is not proof that a shared update is safe. No NumPy installation or instrument connection is needed for this quiz.
+
+**Reread:** For Q1 and Q3, the Python glossary entry “global interpreter lock” and the threading docs introduction, “GIL and performance considerations”. For Q2, the same threading section on I/O-bound tasks (tasks that spend most of their time waiting for input/output). For Q4, threading docs, “Lock objects”, and queue docs, “Queue objects”.

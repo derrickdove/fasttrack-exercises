@@ -11,6 +11,7 @@ from starter.packets import (
     build_packet,
     find_packets,
     pack_header,
+    parse_block,
     parse_packet,
     unpack_header,
 )
@@ -234,3 +235,96 @@ def test_e4_keep_accepted_packet_with_sync_in_payload() -> None:
     (value_with_sync,) = struct.unpack(">f", b"\xeb\x90\x00\x00")
     packet = _wire(10, 20, [(1, value_with_sync), (2, 1.0)])
     assert find_packets(packet + packet) == [packet, packet], "sync may occur inside a valid reading"
+
+
+def test_e5_default_waveform_and_little_endian() -> None:
+    assert parse_block(b"#14\x00\x01\xff\xfe\n") == [1, -2], "decode the documented big-endian waveform"
+    assert parse_block(b"#14\x01\x00\xfe\xff", big_endian=False) == [1, -2], "honor little-endian samples"
+
+
+@pytest.mark.parametrize("big_endian", [True, False])
+@pytest.mark.parametrize(
+    "fmt,values",
+    [
+        ("b", [-128, -1, 0, 127]),
+        ("B", [0, 10, 128, 255]),
+        ("h", [-32768, -2, 1, 32767]),
+        ("H", [0, 1, 32768, 65535]),
+        ("f", [-2.25, -0.0, 0.1, 123.125]),
+    ],
+)
+def test_e5_formats_and_byte_orders(fmt: str, values: list[int | float], big_endian: bool) -> None:
+    byte_order = ">" if big_endian else "<"
+    data = struct.pack(f"{byte_order}{len(values)}{fmt}", *values)
+    count = str(len(data)).encode("ascii")
+    reply = b"#" + str(len(count)).encode("ascii") + count + data
+    expected = [struct.unpack(byte_order + fmt, struct.pack(byte_order + fmt, value))[0] for value in values]
+    got = parse_block(reply, fmt, big_endian)
+    assert isinstance(got, list), "return a list of samples"
+    assert got == expected, f"wrong decoded values for fmt={fmt!r}, big_endian={big_endian}"
+    expected_type = float if fmt == "f" else int
+    assert all(type(value) is expected_type for value in got), "preserve integer versus float sample types"
+
+
+@pytest.mark.parametrize(
+    "reply,fmt,expected",
+    [
+        (b"#10", "b", []),
+        (b"#10\n", "B", []),
+        (b"#10", "h", []),
+        (b"#10\n", "H", []),
+        (b"#10", "f", []),
+        (b"#200\n", "h", []),
+        (b"#9000000004\x00\x01\xff\xfe", "h", [1, -2]),
+        (b"#11\n", "B", [10]),
+        (b"#11\n\n", "B", [10]),
+        (b"#11\r", "B", [13]),
+        (b"#14#1\n\x00", "B", [35, 49, 10, 0]),
+    ],
+)
+def test_e5_valid_framing(reply: bytes, fmt: str, expected: list[int | float]) -> None:
+    got = parse_block(reply, fmt)
+    assert got == expected, f"use the declared byte boundary for {reply!r}, got {got}"
+
+
+def test_e5_ten_thousand_point_waveform() -> None:
+    values = list(range(-5000, 5000))
+    data = struct.pack(">10000h", *values)
+    got = parse_block(b"#520000" + data + b"\n")
+    assert got == values, "decode all 10,000 samples from a five-digit byte count"
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        b"", b"14ab", b"x#10",                          # Missing initial #.
+        b"#", b"#a", b"#:", b"#/", b"#\xb2", b"#\xff",  # Missing/non-ASCII count width.
+        b"#0", b"#00\n",                                # Indefinite blocks.
+        b"#1", b"#2", b"#21", b"#3\n",                 # Incomplete count digits.
+        b"#1x", b"#2-1", b"#2+1", b"#2 1", b"#21 ", b"#2\x001", b"#1\xb2",
+        b"#14", b"#14\x00\x01", b"#14\x00\x01\n",  # Truncated data.
+        b"#12\x00\x01x", b"#12\x00\x01 ", b"#12\x00\x01\r\n",
+        b"#12\x00\x01\n\n", b"#12\x00\x01\nx", b"#12\x00\x01#10",
+        b"#10x", b"#10\n\n",                           # Extra bytes, even after empty data.
+    ],
+)
+def test_e5_reject_malformed_blocks(reply: bytes) -> None:
+    with pytest.raises(ValueError) as error:
+        parse_block(reply)
+    assert str(error.value).strip(), f"explain why block {reply!r} is malformed"
+
+
+@pytest.mark.parametrize(
+    "reply,fmt",
+    [(b"#10", fmt) for fmt in ("", "i", "d", "2h", ">h", "hh", " h", "s", "x", "c")]
+    + [
+        (b"#11\x00", "h"), (b"#13\x00\x01\x02", "h"),
+        (b"#11\x00", "H"), (b"#13\x00\x01\x02", "H"),
+        (b"#11\x00", "f"), (b"#12\x00\x01", "f"),
+        (b"#13\x00\x01\x02", "f"), (b"#15\x00\x01\x02\x03\x04", "f"),
+    ],
+)
+def test_e5_reject_formats_and_partial_samples(reply: bytes, fmt: str) -> None:
+    with pytest.raises(ValueError) as error:
+        parse_block(reply, fmt)
+    assert str(error.value).strip(), f"explain invalid fmt={fmt!r} or a partial sample"
