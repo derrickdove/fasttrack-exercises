@@ -1,0 +1,36 @@
+# An instrument entry represents one independently reservable resource.
+[[instruments]]
+id = "psu-a"
+kind = "psu"
+resource = "supply-01/channel/1"
+
+[[instruments]]
+id = "psu-b"
+kind = "psu"
+resource = "supply-01/channel/2"
+
+[[instruments]]
+id = "dmm"
+kind = "dmm"
+resource = "meter-01"
+
+[[instruments]]
+id = "scope"
+kind = "scope"
+resource = "scope-01"
+
+[[uuts]]
+id = "uut-a"
+instruments = ["psu-a", "dmm"]
+
+[[uuts]]
+id = "uut-b"
+instruments = ["psu-b", "dmm"]
+
+[[uuts]]
+id = "uut-c"
+instruments = ["scope"]
+
+[[uuts]]
+id = "uut-d"
+instruments = ["dmm", "scope"]

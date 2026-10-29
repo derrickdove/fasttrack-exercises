@@ -113,6 +113,69 @@ class PipelineChecks(unittest.TestCase):
     def report(self):
         return run_report(self.repo, [self.set_dir], self.work)
 
+    def test_interrupted_phase_never_passes(self):
+        for phase in ("setup", "call", "teardown"):
+            with self.subTest(phase=phase):
+                self.write("sets/probe/tests/test_probe.py", "import pytest\n"
+                           "@pytest.fixture\ndef station():\n"
+                           + ("    raise KeyboardInterrupt('setup interrupted')\n" if phase == "setup" else "")
+                           + "    yield\n"
+                           + ("    raise KeyboardInterrupt('teardown interrupted')\n" if phase == "teardown" else "")
+                           + "def test_e1_reading(station):\n"
+                           + ("    raise KeyboardInterrupt('call interrupted')\n" if phase == "call" else "    pass\n"))
+                report = self.report()
+                self.assertEqual((report["passed"], report["total"]), (0, 1), report["output"])
+                self.assertNotEqual(report["returncode"], 0)
+                self.assertNotIn("PASS E1", report["output"])
+                self.assertTrue(report["output"].rstrip().endswith("Exercises: 0 / 1 passed"))
+
+    def test_failure_keeps_learner_traceback_and_captured_output(self):
+        self.write("sets/probe/starter/probe.py", "import sys\ndef reading():\n"
+                   "    print('diagnostic: channel 7')\n"
+                   "    print('instrument warning', file=sys.stderr)\n"
+                   "    print('extra diagnostic\\n' * 100)\n"
+                   "    raise ValueError('bad reading')\n")
+        self.write("sets/probe/tests/test_probe.py", "from starter.probe import reading\n"
+                   "import pytest\nimport sys\n@pytest.fixture\ndef station():\n"
+                   "    print('setup diagnostic', file=sys.stderr)\n    yield\n"
+                   "    print('teardown diagnostic', file=sys.stderr)\n"
+                   "def test_e1_reading(station):\n    assert reading() == 42\n")
+        report = self.report()
+        output = report["output"]
+        self.assertEqual((report["passed"], report["total"]), (0, 1))
+        self.assertIn("FAIL E1: ValueError: bad reading", output)
+        self.assertIn("test_e1_reading", output)
+        self.assertIn("probe.py:6", output)
+        self.assertIn("test_probe.py:10", output)
+        self.assertLess(output.index("probe.py:6"), output.index("test_probe.py:10"))
+        self.assertIn("raise ValueError('bad reading')", output)
+        self.assertIn("diagnostic: channel 7", output)
+        self.assertIn("instrument warning", output)
+        self.assertIn("setup diagnostic", output)
+        self.assertIn("teardown diagnostic", output)
+        self.assertIn("truncated", output)
+        self.assertLess(len(output), 3500)
+        self.assertTrue(output.rstrip().endswith("Exercises: 0 / 1 passed"))
+
+    def test_initial_conftest_import_errors_recover_exercises(self):
+        self.write("sets/probe/conftest.py",
+                   (self.set_dir / "conftest.py").read_text(encoding="utf-8")
+                   + "from starter.probe import reading\n")
+        self.write("sets/probe/tests/test_probe.py", "from starter.probe import reading\n"
+                   "def test_e1_reading():\n    reading()\n"
+                   "def test_e2_reading():\n    reading()\n"
+                   "def test_e2_limit():\n    reading()\n")
+        for code, error in (("def reading(:\n", "SyntaxError"),
+                            ("from missing_station_module import reading\n", "ModuleNotFoundError")):
+            with self.subTest(error=error):
+                self.write("sets/probe/starter/probe.py", code)
+                report = self.report()
+                self.assertEqual((report["passed"], report["total"], report["returncode"]), (0, 2, 1))
+                self.assertTrue(report["errors"])
+                self.assertIn("Your code could not be loaded:", report["output"])
+                self.assertIn(error, report["output"])
+                self.assertTrue(report["output"].rstrip().endswith("Exercises: 0 / 2 passed"))
+
     def test_stub_reference_and_repeat(self):
         result = self.verify("probe", "--repeat", "2")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -170,10 +233,46 @@ class PipelineChecks(unittest.TestCase):
         self.assertIn("bare capstone: 0 / 2; reference: 2 / 2 (2 runs)", result.stdout)
 
     def test_cpp_hook(self):
-        self.write("sets/probe/tests/test_probe.cpp", "// d41 handles this\n")
-        result = self.verify()
-        self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn("C++ set: skipped (handled by the d41 job)", result.stdout)
+        import verify_sets
+
+        starter = "int reading() { return -1; }\n"
+        reference = "int reading() { return 42; }\n"
+        self.write("sets/probe/starter/probe.cpp", starter)
+        self.write("sets/probe/tests/test_probe.cpp", "#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN\n")
+        (self.solutions / "sets/probe/starter/probe.cpp").write_text(reference, encoding="utf-8")
+        failed = {"passed": 0, "total": 1, "returncode": 1, "errors": [], "output": "FAIL E1"}
+        passed = {"passed": 1, "total": 1, "returncode": 0, "errors": [], "output": "PASS E1"}
+        for name, reports, expected, message, sources in (
+            ("repeat", [failed, passed, passed], True,
+             "starter: 0 / 1; reference: 1 / 1 (2 runs)", [starter, reference]),
+            ("completed starter", [passed], False, "starter: 1 / 1 (expected none)", [starter]),
+            ("failed reference", [failed, passed, failed], False,
+             "reference run 2: 0 / 1", [starter, reference]),
+        ):
+            with self.subTest(name=name):
+                compiled = []
+
+                def compile_command(command, **kwargs):
+                    self.assertEqual(command[0], "mock-c++")
+                    for argument in command[1:]:
+                        if Path(argument).name == "probe.cpp":
+                            compiled.append(Path(argument).read_text(encoding="utf-8"))
+                    return subprocess.CompletedProcess(command, 0, "", "")
+
+                output = io.StringIO()
+                with patch.object(verify_sets, "cpp_compiler", return_value=("mock-c++", False, {})) as compiler, \
+                     patch.object(verify_sets.subprocess, "run", side_effect=compile_command) as commands, \
+                     patch.object(verify_sets, "run_cpp_report", side_effect=reports) as report, \
+                     patch.object(verify_sets, "run_report") as python_report, redirect_stdout(output):
+                    result = verify_sets.verify_set(self.repo, self.solutions, "probe", 2, False)
+                self.assertEqual(result, expected)
+                self.assertIn(message, output.getvalue())
+                self.assertEqual(compiled, sources)
+                self.assertEqual(commands.call_count, 3 * len(sources))
+                self.assertEqual(report.call_count, len(reports))
+                compiler.assert_called_once_with()
+                python_report.assert_not_called()
+        self.assertEqual((self.set_dir / "starter/probe.cpp").read_text(encoding="utf-8"), starter)
 
 
 if __name__ == "__main__":

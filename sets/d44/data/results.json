@@ -1,0 +1,9 @@
+[
+  {"req_id": "REQ-01", "test_name": "startup_voltage", "status": "PASS"},
+  {"req_id": "REQ-01", "test_name": "startup_repeat", "status": "PASS"},
+  {"req_id": "REQ-02", "test_name": "command_latency", "status": "FAIL"},
+  {"req_id": "REQ-02", "test_name": "command_retry", "status": "PASS"},
+  {"req_id": "REQ-04", "test_name": "harness_visual", "status": "PASS"},
+  {"req_id": "REQ-06", "test_name": "operator_abort", "status": "PASS"},
+  {"req_id": "RETIRED-99", "test_name": "old_check", "status": "FAIL"}
+]

@@ -1,0 +1,29 @@
+# Fixed replies keep the chassis station exercises repeatable.
+spec: "1.0"
+devices:
+  dmm:
+    eom:
+      GPIB INSTR:
+        q: "\n"
+        r: "\n"
+    dialogues:
+      - q: "*IDN?"
+        r: "Fasttrack,DMM-100,DMM001,1.0"
+      - q: "MEAS:VOLT:DC?"
+        r: "+2.500000E+00"
+  psu:
+    eom:
+      GPIB INSTR:
+        q: "\n"
+        r: "\n"
+    dialogues:
+      - q: "*IDN?"
+        r: "Fasttrack,PSU-200,PSU002,2.1"
+      - q: "MEAS:VOLT:DC?"
+        r: "+1.200000E+01"
+# Deliberately stored out of alphabetical order for the operator's list.
+resources:
+  GPIB0::8::INSTR:
+    device: dmm
+  GPIB0::12::INSTR:
+    device: psu

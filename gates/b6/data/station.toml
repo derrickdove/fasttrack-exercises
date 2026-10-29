@@ -1,0 +1,18 @@
+[station]
+name = "Banc électrique"
+
+[[instruments]]
+id = "psu1"
+kind = "psu"
+resource = "TCPIP::10.0.0.5::5025::SOCKET"
+
+[[instruments]]
+id = "dmm1"
+kind = "dmm"
+resource = "TCPIP::10.0.0.6::5025::SOCKET"
+
+[[uuts]]
+id = "uut1"
+psu = "psu1"
+psu_channel = 1
+dmm = "dmm1"

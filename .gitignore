@@ -5,3 +5,6 @@ __pycache__/
 .mypy_cache/
 *.py[cod]
 *.stamp
+
+# Leftover verifier temp folders
+.verify-*/

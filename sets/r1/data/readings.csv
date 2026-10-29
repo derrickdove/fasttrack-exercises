@@ -1,0 +1,6 @@
+channel,value,unit,low,high
+BUS,28,V,27,29
+BUS,26.9,V,27,29
+
+RETURN,0,A,,0
+"sense,aux",+2.5e-3,A,0,

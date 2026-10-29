@@ -24,6 +24,23 @@ try {
         Write-Host "Gates: $($gates -join ', ') (available as blocks are added)"
         exit 1
     }
+    # C++ sets use the shared compiler/report hook, without Python package setup.
+    if (($sets -contains $Id) -and @(Get-ChildItem -LiteralPath "sets/$Id/tests" -Filter '*.cpp' -File -ErrorAction SilentlyContinue).Count) {
+        $candidates = @()
+        if ($env:FT_PYTHON) { $candidates += $env:FT_PYTHON }
+        $candidates += (Join-Path $root '.venv\Scripts\python.exe'), 'py', 'python', 'python3'
+        foreach ($candidate in $candidates) {
+            if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) { continue }
+            $prefix = @()
+            if ($candidate -eq 'py') { $prefix = @('-3') }
+            & $candidate @prefix -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)' 2>$null
+            if ($LASTEXITCODE -ne 0) { continue }
+            & $candidate @prefix (Join-Path $root 'tools\verify_sets.py') --run-cpp $Id
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            exit 1
+        }
+        throw 'Python 3.12+ was not found. Install Python or set FT_PYTHON to its executable.'
+    }
     $python = Join-Path $root '.venv\Scripts\python.exe'
     if (-not (Test-Path -LiteralPath $python)) {
         Write-Host 'Creating .venv (your local Python environment) ...'

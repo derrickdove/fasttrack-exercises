@@ -27,6 +27,1383 @@
         "panel": "dedicated",
         "clear": true
       }
+    },
+    {
+      "label": "Test: d01",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d01"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d01"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d02",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d02"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d02"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d03",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d03"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d03"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d04",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d04"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d04"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d05",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d05"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d05"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d06",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d06"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d06"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: r1",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "r1"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "r1"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d08",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d08"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d08"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d09",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d09"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d09"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d10",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d10"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d10"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d11",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d11"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d11"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d12",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d12"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d12"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d13",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d13"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d13"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: r2",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "r2"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "r2"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d15",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d15"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d15"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d16",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d16"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d16"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d17",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d17"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d17"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d18",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d18"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d18"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d19",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d19"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d19"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d20",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d20"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d20"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: r3",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "r3"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "r3"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d22",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d22"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d22"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d23",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d23"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d23"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d24",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d24"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d24"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d25",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d25"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d25"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d26",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d26"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d26"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d27",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d27"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d27"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: r4",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "r4"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "r4"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d29",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d29"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d29"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: check30",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "check30"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "check30"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d31",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d31"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d31"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d32",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d32"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d32"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d33",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d33"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d33"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d34",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d34"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d34"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: r5",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "r5"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "r5"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d36",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d36"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d36"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d37",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d37"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d37"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d38",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d38"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d38"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d39",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d39"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d39"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d40",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d40"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d40"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d41",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d41"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d41"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: r6",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "r6"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "r6"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d43",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d43"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d43"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d44",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d44"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d44"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: check45",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "check45"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "check45"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Gate: b1",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "b1"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "b1"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Gate: b2",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "b2"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "b2"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Gate: b3",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "b3"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "b3"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Gate: b4",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "b4"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "b4"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Gate: b5",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "b5"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "b5"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Gate: b6",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "b6"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "b6"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
     }
   ]
 }

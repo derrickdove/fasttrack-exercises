@@ -4,18 +4,19 @@ Small test-driven exercise sets that go with the Engineering Tracker. Each set p
 
 ## Set up once (about 15 minutes)
 
+**Codespaces option:** on this repo's GitHub page choose **Code → Codespaces → Create codespace**. No local installs are needed; skip steps 1-4 below and start at step 5. It opens VS Code with Python and the tools installed, running Linux in your browser. This is recommended for the Linux and shell days: the commands run in a real Linux environment.
+
 1. **Install VS Code** and, from its Extensions panel, the **Python** extension by Microsoft.
 2. **Install Python 3.12 or newer.** On Windows, tick **Add Python to PATH** in the installer, then reopen VS Code. On Linux or Mac, check `python3 --version`; Linux may also need the distribution's `python3-venv` package.
-3. **Get the exercises:** run `git clone https://github.com/derrickdove/fasttrack-exercises.git`, then in VS Code choose **File → Open Folder** on `fasttrack-exercises`. After this, `git pull` gets new sets.
-4. **Prove it works:** press **Ctrl+Shift+B** (Cmd+Shift+B on Mac) and choose **Test: d00-hello**. The first run creates `.venv`, a local folder holding Python and the exercise tools, and installs the tools automatically. It needs internet and can take a few minutes. You should see `Exercises: 1 / 1 passed`.
+3. **Install Git.** On Windows, download [Git for Windows](https://git-scm.com/download/win), run the installer, and keep the option to use Git from the command line. Reopen VS Code after installation so its terminals can find Git. On Linux or Mac, install Git if `git --version` is not available.
+4. **Get the exercises:** in VS Code choose **Terminal → New Terminal** (use PowerShell on Windows). In that terminal, run `git clone https://github.com/derrickdove/fasttrack-exercises.git`, then in VS Code choose **File → Open Folder** on `fasttrack-exercises`. After this, `git pull` gets new sets.
+5. **Prove it works:** press **Ctrl+Shift+B** (Cmd+Shift+B on Mac) and choose **Test: d00-hello**. The first run creates `.venv`, a local folder holding Python and the exercise tools, and installs the tools automatically. It needs internet and can take a few minutes. You should see `Exercises: 1 / 1 passed`.
 
 Use Ctrl+Shift+B to run a set's tests. Save your changes before running. You don't need to activate `.venv` or install packages by hand.
 
-**Codespaces option:** on this repo's GitHub page choose **Code → Codespaces → Create codespace**. It opens VS Code with Python and the tools installed, running Linux in your browser. This is recommended for the Linux and shell days: the commands run in a real Linux environment.
-
 ## Doing a set
 
-1. `git pull`, then open the set's folder (for example `sets/d05/`) and read its `README.md`.
+1. Keep the whole `fasttrack-exercises` folder open as your VS Code workspace. Choose **Terminal → New Terminal** and run `git pull` there. In VS Code's Explorer panel, expand the set directory (for example `sets/d05/`) and open its `README.md`.
 2. Write your code in the files it names, usually `starter/*.py`. Don't edit `tests/`.
 3. Press **Ctrl+Shift+B** and choose **Test: d05** (or whichever set). Red means not yet; fix and rerun after each exercise.
 4. Report **all pass / partial / stuck** on the task in the tracker. Partial and stuck come back in two days. After you report, the tracker links the reference solution so you can compare approaches.

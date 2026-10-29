@@ -1,0 +1,7 @@
+id,text,method
+REQ-01,The startup supply shall remain within its voltage limits.,Test
+REQ-02,The command loop shall meet its response time limit.,Test
+REQ-03,The chassis shall meet its EMI emissions limit.,Test
+REQ-04,"Harness shields shall match the drawing, including labels.",Inspection
+REQ-05,The predicted TVAC temperature margin shall be positive.,Analysis
+REQ-06,The operator shall be able to abort a station sequence.,Demonstration

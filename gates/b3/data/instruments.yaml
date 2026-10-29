@@ -1,0 +1,66 @@
+spec: "1.0"
+devices:
+  psu:
+    eom:
+      GPIB INSTR:
+        q: "\n"
+        r: "\n"
+    error:
+      error_queue:
+        - q: "SYST:ERR?"
+          default: '0,"No error"'
+          command_error: '-113,"Undefined header"'
+    dialogues:
+      - q: "*IDN?"
+        r: "  FASTTRACK,PSU,SIM,1.0  "
+      - q: "MEAS:VOLT?"
+        r: "24.125"
+      - q: "OUTP ON"
+      - q: "OUTP OFF"
+    properties:
+      channel:
+        default: 1
+        setter:
+          q: "INST:NSEL {:d}"
+        specs:
+          min: 1
+          max: 3
+          type: int
+      voltage:
+        default: 0.0
+        setter:
+          q: "VOLT {:.3f}"
+        specs:
+          min: 0.0
+          max: 30.0
+          type: float
+      current:
+        default: 0.0
+        setter:
+          q: "CURR {:.3f}"
+        specs:
+          min: 0.0
+          max: 3.0
+          type: float
+  dmm:
+    eom:
+      GPIB INSTR:
+        q: "\n"
+        r: "\n"
+    error:
+      error_queue:
+        - q: "SYST:ERR?"
+          default: '0,"No error"'
+          command_error: '-113,"Undefined header"'
+    dialogues:
+      - q: "*IDN?"
+        r: "FASTTRACK,DMM,SIM,1.0"
+      - q: "MEAS:VOLT:DC?"
+        r: "2.4125E+1"
+      - q: "MEAS:CURR:DC?"
+        r: "1.25E-1"
+resources:
+  GPIB::1::INSTR:
+    device: psu
+  GPIB::2::INSTR:
+    device: dmm

@@ -1,0 +1,4 @@
+name,low,high,unit
+bus_voltage,2.2e1,30.0,V
+supply_current,,3.0,A
+chassis_temperature,-20.5,,degC
