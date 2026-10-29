@@ -1,0 +1,8 @@
+pytest==9.0.2
+pyvisa==1.15.0
+pyvisa-sim==0.7.1
+pyserial==3.5
+mypy==1.19.1
+fastapi==0.128.0
+httpx==0.28.1
+pyyaml==6.0.3
