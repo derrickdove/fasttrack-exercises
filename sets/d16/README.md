@@ -1,88 +1,90 @@
-# d16 - PyVISA and a simulated instrument
+# d16 — Bytes, text and SCPI syntax
 
-**Time:** about 45 minutes | **Read first:** [PyVISA: Communicating with your instrument](https://pyvisa.readthedocs.io/en/latest/introduction/communication.html), [Missing Semester: Command-line Environment (job control, dotfiles, SSH)](https://missing.csail.mit.edu/2020/command-line/), and [PyVISA-sim documentation](https://pyvisa-sim.readthedocs.io/en/latest/) | **You edit:** `starter/visa_basics.py`
+**Time:** about 45 minutes · **Read first:** [SCPI in plain words: commands, queries, short forms, error queue (Wikipedia overview)](https://en.wikipedia.org/wiki/Standard_Commands_for_Programmable_Instruments); [Bytes vs text: bytes, encode() and decode()](https://docs.python.org/3/library/stdtypes.html#binary-sequence-types-bytes-bytearray-memoryview); [The Linux Command Line, chapter 10: processes (ps, top, kill)](https://linuxcommand.org/tlcl.php); [Python Tutorial §3.1.2: Text](https://docs.python.org/3/tutorial/introduction.html#text) · **You edit:** `starter/scpi.py`
 
 ## What you're building
 
-A chassis test station must find its instruments, record their identities, and read voltage before it can judge a hardware test. You will use a **DMM** (digital multimeter, an instrument that measures electrical quantities) and a **PSU** (power supply unit, an instrument that provides electrical power). Both are simulated here, so you need no hardware or network connection.
+A chassis test station sends settings to a power supply and asks a meter for measurements. You will build small helpers for SCPI (Standard Commands for Programmable Instruments), a text command language used by instruments. These helpers prepare and read messages locally; no instrument connection is needed.
 
 ## How this works
 
-1. Replace the `raise NotImplementedError(...)` lines in `starter/visa_basics.py`. Don't edit `tests/` or the supplied `data/station.yaml`.
-2. Press **Ctrl+Shift+B -> Test: d16** (or run `bash tools/run.sh d16` / `tools\run.ps1 d16`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+1. Replace the `raise NotImplementedError(...)` lines in `starter/scpi.py`. Don't edit `tests/`.
+2. Press Ctrl+Shift+B → **Test: d16** (or run `bash tools/run.sh d16` / `tools\run.ps1 d16`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
-**VISA** (Virtual Instrument Software Architecture) is a common interface for talking to instruments; **PyVISA** is its Python interface. A **backend** is the implementation handling those communications; **pyvisa-sim** supplies a simulated backend instead of real hardware. **YAML** is a text format for structured settings; the supplied YAML file defines fixed command/reply pairs.
-
-A **resource name** is an instrument's VISA address. `GPIB0::8::INSTR` identifies instrument 8 on controller 0 of **GPIB**, a laboratory instrument bus. A **resource manager** discovers and opens resources. A **session** is an open connection; the supplied `MessageBasedResource` type represents a resource that exchanges text commands and replies.
-
-**SCPI** (Standard Commands for Programmable Instruments) is a text command language used by many instruments. A **query** sends a command and reads its reply; in PyVISA, `resource.query(command)` returns a string. **Termination** is the character marking the end of a message; `"\n"` means newline. A **timeout** limits how long communication waits; 2000 **ms** (milliseconds) is two seconds.
-
-A **dictionary** maps keys to values; `dict[str, str]` means both are strings. A **float** represents a number with a fractional part. `strip()` removes surrounding whitespace, and `split(separator)` divides text into a list. For example, an operator log can be broken into two fields:
+A **string** (`str`) holds text; **bytes** hold integer byte values from 0 to 255, as sent over an instrument connection. An **encoding** maps text characters to bytes; **ASCII** is an encoding limited to values 0–127. `encode("ascii")` converts text to bytes; `decode("ascii")` converts bytes to text. A **terminator** is the ending that marks a message boundary, commonly `"\n"` (line feed) or `"\r\n"` (carriage return followed by line feed). **Whitespace** means spaces, tabs, line endings, and other characters removed by `str.strip()`.
 
 ```python
-entry = " CH2 ; PASS "
-fields = entry.split(";")
-channel = fields[0].strip()
-status = fields[1].strip()
+label = "station A2"
+payload = label.encode("ascii")
+assert payload == b"station A2"  # b marks a bytes literal
+assert payload.decode("ascii") == label
 ```
 
-The tests supply open resources directly to E2 and E3, so those exercises do not depend on your E1 implementation. They also use small stand-ins for instruments to check replies that the supplied simulator does not produce.
+A SCPI **header** is a command's name, such as `MEAS:VOLT?`; colons separate its keyword levels. An **argument** is a supplied value after the header. A **query** requests a reply and has `?` at the end of its header. `*IDN?` is a **common command**, shared across instrument types, that requests identification. An **error queue** stores instrument-reported errors for later queries; this set only formats text and does not read that queue.
+
+A **boolean** (`bool`) is `True` or `False`. For Python, `*args` collects extra positional arguments in a tuple (an ordered collection). `channels=` is a **keyword-only argument**: pass it by name. A **channel** is a numbered instrument input; SCPI writes a channel list as `(@1,2)`. An **exception** signals failure; `ValueError` here means an input cannot be represented under our rules.
+
+The Linux reading explains a **process**, a running program: `ps` lists processes, `top` shows live activity, and `kill` sends a signal (a request such as termination). Those commands help when a station driver hangs; this set requires no process commands.
 
 ## Exercises
 
-### E1 - Open an instrument session (easy, ~13 min)
+### E1 — Prepare a power-supply command (easy, ~9 min)
 
-**Goal:** Open the operator's requested instrument through the supplied simulator file.
+**Goal:** Turn operator-entered text into bytes the power supply can receive.
 
-**Signature:** `def open_resource(resource_name: str, sim_file: str) -> MessageBasedResource`
+**Signature:** `def encode_command(cmd: str, term: str = "\n") -> bytes`
 
-Construct `pyvisa.ResourceManager(f"{sim_file}@sim")` and open `resource_name` through it. `sim_file` is a string containing a filesystem path to a simulator YAML file, without the `@sim` suffix; paths may contain spaces. Return the open instrument with `read_termination` and `write_termination` both equal to `"\n"`, and `timeout` equal to `2000`. Set these attributes through `manager.open_resource(..., read_termination=..., write_termination=..., timeout=...)` or on the returned resource.
+**Contract:** Both `cmd` and `term` must contain only ASCII characters. `term` must not be empty. Raise `ValueError` otherwise. Remove every complete trailing copy of `term` from `cmd`, append one copy, then return ASCII bytes. Leave all other characters, including spaces, unchanged. An empty command is allowed and returns just the terminator. Compare whole terminators, not individual characters.
 
-**Example:** With `sim_file` pointing to `data/station.yaml`, `open_resource("GPIB0::8::INSTR", sim_file)` returns the DMM session. Its `query("*IDN?")` returns `"Fasttrack,DMM-100,DMM001,1.0"`.
+**Examples:** `encode_command("VOLT 5")` → `b"VOLT 5\n"`; `encode_command("OUTP ON\n\n")` → `b"OUTP ON\n"`; `encode_command("*IDN?", "\r\n")` → `b"*IDN?\r\n"`.
 
-**Watch out:** Use the supplied file, not the default `"@sim"` devices. Return the instrument, not the manager. Keep the session and manager open on success; closing a manager also closes its instrument sessions. The caller owns cleanup: call `resource.close()` after use. At station shutdown, `pyvisa.ResourceManager(f"{sim_file}@sim").close()` closes the shared manager; do that only after all sessions using that backend are finished. A `VisaIOError` reports a VISA backend or communication failure; let backend errors reach the caller unchanged. Inputs name message-based instruments such as this station's DMM and PSU.
+**Watch out:** `UnicodeEncodeError` means encoding encountered a character outside ASCII; catch it and raise `ValueError`. Check for an empty terminator before removing repeated endings.
 
-**Reread:** PyVISA, *Communicating with your instrument*, the `ResourceManager`, `open_resource`, termination, and timeout examples; PyVISA-sim documentation, using your own device definition with `path/to/file.yaml@sim`.
+**Reread:** Bytes vs text, `bytes` and `str.encode()`; SCPI overview, command syntax.
 
-### E2 - Record instrument identity (easy/medium, ~12 min)
+### E2 — Read a meter reply (easy, ~10 min)
 
-**Goal:** Turn an instrument identity reply into fields for the station's test report.
+**Goal:** Turn a meter's received bytes into text ready for later measurement checking.
 
-**Signature:** `def identify(resource: MessageBasedResource) -> dict[str, str]`
+**Signature:** `def decode_reply(data: bytes, term: str = "\n") -> str`
 
-Query `"*IDN?"` exactly once. Split the reply on commas and strip surrounding whitespace from every field. Require exactly four nonempty fields in this order: manufacturer, model, serial, firmware. A **serial number** identifies one physical unit; **firmware** is the instrument's embedded software version. Return a dictionary with exactly the keys `"manufacturer"`, `"model"`, `"serial"`, and `"firmware"`, keeping every value as a string.
+**Contract:** Require a nonempty ASCII `term`, or raise `ValueError`. Decode `data` as ASCII; catch `UnicodeDecodeError` and raise a plain `ValueError` instead. First remove at most one exact trailing copy of `term`, if present, then strip surrounding whitespace. Return the resulting string, including `""` for an empty reply. A missing terminator is allowed. Do not convert numbers, change internal spaces, or interpret instrument errors.
 
-**Example:** A reply of `" Lab , DMM X , 00042 , rev 3 \n"` becomes `{"manufacturer": "Lab", "model": "DMM X", "serial": "00042", "firmware": "rev 3"}`.
+**Examples:** `decode_reply(b"  +5.020 \r\n")` → `"+5.020"`; `decode_reply(b"READY||", "|")` → `"READY|"`; `decode_reply(b"  -100, bad command  ")` → `"-100, bad command"`.
 
-**Watch out:** Raise `ValueError` (Python's invalid-value exception) if the reply has too few or too many fields, or any field is empty after stripping. Preserve spaces inside fields and leading zeroes in serial numbers. Do not close the resource. Let communication errors reach the caller unchanged.
+**Watch out:** Removal happens before whitespace stripping: `decode_reply(b"READY|  ", "|")` returns `"READY|"`. Stripping may remove additional whitespace terminators, but must not remove additional non-whitespace terminators. A byte such as `b"\xff"` is not ASCII.
 
-**Reread:** PyVISA, *Communicating with your instrument*, the `query` and `*IDN?` examples. Compare the supplied YAML's `dialogues` entries (command/reply pairs) with the PyVISA-sim documentation's device-definition examples.
+**Reread:** Bytes vs text, `bytes.decode()` and the linked `str.strip()` description; Python Tutorial §3.1.2, strings and their methods.
 
-### E3 - Read the station voltage (easy, ~8 min)
+### E3 — Build settings and measurement requests (medium, ~14 min)
 
-**Goal:** Return a measurement in **volts** (the unit of electrical voltage) for a later test step to check against its limits. **DC** means direct current, used here to distinguish a steady voltage measurement from an alternating signal.
+**Goal:** Format power-supply settings and requests for selected meter inputs.
 
-**Signature:** `def read_voltage(resource: MessageBasedResource) -> float`
+**Signature:** `def build(header: str, *args: str | int | float | bool, channels: list[int] | None = None) -> str`
 
-Query `"MEAS:VOLT:DC?"` exactly once and return `float(reply)`. Both supplied instruments support this command: the DMM replies with `"+2.500000E+00"` (2.5 volts), and the PSU replies with `"+1.200000E+01"` (12.0 volts). This **scientific notation** uses `E` to express a power of ten.
+**Contract:** Return `header` unchanged when there are no values or channels. Otherwise append exactly one space, then comma-separated values with no spaces added around commas. Convert booleans to `ON` / `OFF`; convert other arguments with `str()`. Preserve strings literally, including any quotes or spaces they already contain. If `channels` is nonempty, append `(@` plus its comma-separated numbers plus `)` as the final value. `None` and `[]` both omit that value. Preserve channel order and duplicates, and do not modify the input list. Do not add a terminator.
 
-**Example:** A reply of `" -1.25e-3\n"` returns `-0.00125`.
+**Examples:** `build("VOLT", 5)` → `"VOLT 5"`; `build("MEAS:VOLT?", channels=[1, 2])` → `"MEAS:VOLT? (@1,2)"`; `build("OUTP", True)` → `"OUTP ON"`; `build("SOUR:VOLT", 2.5, "MIN", channels=[3])` → `"SOUR:VOLT 2.5,MIN,(@3)"`.
 
-**Watch out:** Keep negative signs and fractional values. Use Python's ordinary float conversion; it handles surrounding whitespace and scientific notation. Invalid numeric text such as `"OVERLOAD"`, `"5 V"`, or an empty reply must raise `ValueError`. Let communication errors reach the caller unchanged. Do not close the resource, retry, or apply pass/fail limits here.
+**Watch out:** Python treats booleans as a kind of integer, so handle booleans before general conversion. You may assume headers are valid, nonempty ASCII without surrounding whitespace, arguments have the supplied types, floats (decimal numbers) are finite (neither infinity nor NaN, meaning "not a number"), and channel numbers are positive integers. No extra input validation or automatic quoting is required.
 
-**Reread:** PyVISA, *Communicating with your instrument*, querying an instrument and converting returned text to numbers; PyVISA-sim documentation, fixed replies in device dialogues.
+**Reread:** SCPI overview, syntax and parameter lists; Python Tutorial §3.1.2, text and string operations.
 
-### E4 - Discover instruments for the operator (easy, ~12 min)
+### E4 — Recognize queries and abbreviate headers (medium, ~12 min)
 
-**Goal:** Build a repeatable list of instrument addresses for an operator tool.
+**Goal:** Help the station identify commands that need replies and display the instrument manual's short names.
 
-**Signature:** `def list_instruments(sim_file: str) -> list[str]`
+**Signatures:** `def is_query(cmd: str) -> bool` and `def short_form(header: str) -> str`
 
-Create a resource manager using `f"{sim_file}@sim"`. Call its `list_resources()` with no arguments, sort the returned names using Python's normal string ordering, and return a list of those names. Close this function's manager before returning; use `try`/`finally` or `with closing(pyvisa.ResourceManager(...)) as manager:`. The supplied `closing` helper makes a **context manager**, an object used by `with` to call `close()` when its block ends, even if an error occurs. Return `[]` when discovery returns no resources.
+**Contract for `is_query`:** Split the text on whitespace and inspect only the first token (piece). Return `True` exactly when that token ends with `?`. Empty or whitespace-only text returns `False`. Leading/trailing whitespace and arguments are allowed. A `?` in an argument does not make a command a query. Inputs contain at most one command; you do not need to parse multiple commands or validate SCPI grammar.
 
-**Example:** With the supplied station file, return `["GPIB0::12::INSTR", "GPIB0::8::INSTR"]`. String sorting puts `"12"` before `"8"`; do not sort addresses numerically.
+**Examples:** `is_query("  MEAS:VOLT? (@1,2)\n")` → `True`; `is_query('DISP:TEXT "Ready?"')` → `False`.
 
-**Watch out:** Discover resources rather than hard-coding this file's two names. Alternate files may define different resources. Some backends raise `VisaIOError` when no instruments match; let that error reach the caller too. Return `[]` if `list_resources()` returns an empty collection. Discovery does not need to open or query instruments. PyVISA shares managers for the same backend, so perform discovery before opening measurement sessions with E1. Repeated discovery must work. Let backend/file errors reach the caller.
+**Contract for `short_form`:** A manual's mixed-case notation uses uppercase letters for the required abbreviation and lowercase letters for the optional longer spelling. Remove only lowercase ASCII letters (`a`–`z`), preserving uppercase letters, digits, colons, a leading `*` or `:`, and a trailing `?`. Return a string. Inputs are valid manual-style headers without arguments or whitespace; each keyword already contains its uppercase short form. Do not guess abbreviations for arbitrary lowercase text.
 
-**Reread:** PyVISA, *Communicating with your instrument*, the `ResourceManager` and `list_resources` examples; PyVISA-sim documentation, the `resources` mapping. In Missing Semester, *Command-line Environment*, reread Job Control: backgrounding a station process does not close its instrument sessions. Its dotfiles (shell configuration files) and SSH (Secure Shell, remote terminal access) sections explain the environment an operator might run this tool from; no shell scripting is required here.
+**Examples:** `short_form("MEASure:VOLTage:DC?")` → `"MEAS:VOLT:DC?"`; `short_form(":SENSe1:VOLTage?")` → `":SENS1:VOLT?"`; `short_form("*IDN?")` → `"*IDN?"`.
+
+**Watch out:** Uppercasing the whole header would keep optional letters. `is_query` inspects the header even when channel arguments follow it.
+
+**Reread:** SCPI overview, command/query syntax and uppercase/lowercase short forms; Python Tutorial §3.1.2, string indexing and methods.

@@ -1,210 +1,398 @@
-"""Execute the learner's Bash files against isolated station directories."""
 from __future__ import annotations
 
-import json
-import os
-from pathlib import Path
-import re
-import shutil
-import subprocess
+from collections.abc import Iterator
+from queue import Empty, Queue
+import socket
+from threading import Barrier, Event, Lock, Thread, current_thread
+from time import perf_counter
 
 import pytest
 
-from starter.scripts import SCRIPT_DIR
+from starter.workers import Listener, Producer, drain, run_pipeline
 
-COLLECT_USAGE = "Usage: bash collect_logs.sh SRC DEST\n"
-CHECK_USAGE = "Usage: bash check_station.sh [--json] CONFIG\n"
-COMPLETE = "station_id=bench-7\ninstrument_host=192.0.2.8\nlog_dir=/var/log/station\n"
+
+def test_e1_reads_until_source_exhausted() -> None:
+    readings = iter([28.1, None, 28.2])
+    output: Queue[object] = Queue()
+    stop = Event()
+    producer = Producer(lambda: next(readings), output, stop)
+    assert isinstance(producer, Thread), "Producer must subclass Thread"
+    assert not producer.is_alive(), "construction must not start the producer"
+    try:
+        producer.start()
+        producer.join(timeout=2)
+        assert not producer.is_alive(), "StopIteration must finish the producer"
+        assert [output.get_nowait() for _ in range(3)] == [28.1, None, 28.2]
+        with pytest.raises(Empty):
+            output.get_nowait()
+    finally:
+        stop.set()
+        if producer.ident is not None:
+            producer.join(timeout=2)
+        assert not producer.is_alive(), "producer leaked a thread"
+
+
+def test_e1_preset_stop_never_calls_source() -> None:
+    calls: list[str] = []
+    stop = Event()
+    stop.set()
+    output: Queue[object] = Queue()
+    producer = Producer(lambda: calls.append("read"), output, stop)
+    try:
+        producer.start()
+        producer.join(timeout=2)
+        assert not producer.is_alive()
+        assert calls == [], "an already-stopped producer must not read"
+        with pytest.raises(Empty):
+            output.get_nowait()
+    finally:
+        producer.join(timeout=2)
+
+
+def test_e1_discards_read_that_sets_stop() -> None:
+    stop = Event()
+    output: Queue[object] = Queue()
+
+    def source() -> object:
+        stop.set()
+        return "late CH1 reading"
+
+    producer = Producer(source, output, stop)
+    try:
+        producer.start()
+        producer.join(timeout=2)
+        assert not producer.is_alive()
+        with pytest.raises(Empty):
+            output.get_nowait()
+    finally:
+        stop.set()
+        producer.join(timeout=2)
+
+
+def test_e1_external_stop_during_read() -> None:
+    entered = Event()
+    release = Event()
+    stop = Event()
+    output: Queue[object] = Queue()
+
+    def source() -> object:
+        entered.set()
+        # Only the controller releases this read; the timeout guards deadlock.
+        assert release.wait(timeout=5), "controller never released the source"
+        return 28.4
+
+    producer = Producer(source, output, stop)
+    try:
+        producer.start()
+        assert entered.wait(timeout=5), "producer never called the source"
+        stop.set()
+        release.set()
+        producer.join(timeout=2)
+        assert not producer.is_alive(), "producer ignored stop_event"
+        with pytest.raises(Empty):
+            output.get_nowait()
+    finally:
+        stop.set()
+        release.set()
+        producer.join(timeout=2)
+
+
+def test_e2_zero_timeout_preserves_queue_order() -> None:
+    q: Queue[object] = Queue()
+    for item in ["CH1", None, "CH1", 0]:
+        q.put_nowait(item)
+    assert drain(q, 0) == ["CH1", None, "CH1", 0]
+    assert drain(q, 0) == []
+
+
+def test_e2_negative_timeout_leaves_queue_untouched() -> None:
+    q: Queue[str] = Queue()
+    q.put_nowait("CH2")
+    with pytest.raises(ValueError):
+        drain(q, -0.1)
+    assert q.get_nowait() == "CH2", "validate before removing readings"
+
+
+def test_e2_waits_with_get_instead_of_polling() -> None:
+    class CheckedQueue(Queue[int]):
+        def get(self, block: bool = True, timeout: float | None = None) -> int:
+            assert block and timeout == 0.01, "use get(timeout=timeout) on every read"
+            return super().get(block=block, timeout=timeout)
+
+        def empty(self) -> bool:
+            pytest.fail("empty() is a snapshot, not a waiting strategy")
+
+        def qsize(self) -> int:
+            pytest.fail("qsize() is a snapshot, not a waiting strategy")
+
+    q = CheckedQueue()
+    q.put_nowait(28)
+    assert drain(q, 0.01) == [28]
+
+
+def test_e2_accepts_arrival_while_get_is_waiting() -> None:
+    waiting = Event()
+    reading_sent = Event()
+
+    class SignallingQueue(Queue[str]):
+        def get(self, block: bool = True, timeout: float | None = None) -> str:
+            waiting.set()
+            # Script arrival before starting the real queue's idle timeout.
+            assert reading_sent.wait(timeout=5), "sender never queued the reading"
+            return super().get(block=block, timeout=timeout)
+
+    q = SignallingQueue()
+
+    def send_reading() -> None:
+        if waiting.wait(timeout=5):
+            q.put_nowait("CH3 ready")
+            reading_sent.set()
+
+    sender = Thread(target=send_reading)
+    sender.start()
+    try:
+        assert drain(q, 0.1) == ["CH3 ready"], "wait for a reading arriving after drain begins"
+    finally:
+        waiting.set()
+        sender.join(timeout=5)
+        assert not sender.is_alive()
+
+
+class ObservedSocket(socket.socket):
+    """Let tests coordinate on a real socket timeout without sleeping."""
+
+    def __init__(self) -> None:
+        super().__init__(socket.AF_INET, socket.SOCK_DGRAM)
+        self.timed_out = Event()
+
+    def recvfrom(self, bufsize: int, flags: int = 0) -> tuple[bytes, tuple[str, int]]:
+        try:
+            return super().recvfrom(bufsize, flags)
+        except socket.timeout:
+            self.timed_out.set()
+            raise
 
 
 @pytest.fixture
-def bash() -> str:
-    executable = shutil.which("bash")
-    if executable is None:
-        pytest.skip("Bash is missing: install Git Bash on Windows or use Codespaces; d31 is unfinished.")
-    return executable
+def udp_socket() -> Iterator[ObservedSocket]:
+    with ObservedSocket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        yield sock
 
 
-def run_script(
-    bash: str,
-    tmp_path: Path,
-    name: str,
-    *arguments: str | Path,
-    exercise: int,
-    hooks: str = "",
-) -> subprocess.CompletedProcess[str]:
-    # BASH_ENV supplies test commands without requiring executable file permissions.
-    # Forward slashes work in Git Bash and native Linux Bash alike.
-    environment = os.environ.copy()
-    for key in ("BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS", "POSIXLY_CORRECT"):
-        environment.pop(key, None)
-    hook_file = tmp_path / "bash-test-env.sh"
-    hook_file.write_text("date() { printf '20310405\\n'; }\n" + hooks, encoding="utf-8")
-    environment["BASH_ENV"] = hook_file.as_posix()
-    result = subprocess.run(
-        [bash, "--noprofile", "--norc", (SCRIPT_DIR / name).as_posix(),
-         *(arg.as_posix() if isinstance(arg, Path) else arg for arg in arguments)],
-        cwd=tmp_path, env=environment, capture_output=True, text=True,
-        encoding="utf-8", errors="replace", timeout=3,
-    )
-    if result.returncode == 99 and result.stderr.startswith("NotImplementedError:"):
-        raise NotImplementedError(f"E{exercise}: replace the unfinished body in starter/{name}")
-    return result
+def send(sock: socket.socket, packet: bytes) -> None:
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
+        sender.bind(("127.0.0.1", 0))
+        sender.settimeout(0.2)
+        sender.sendto(packet, sock.getsockname())
 
 
-def config_file(tmp_path: Path, text: str) -> Path:
-    path = tmp_path / "station settings.conf"
-    path.write_bytes(text.encode("utf-8"))
-    return path
+def test_e3_parses_in_order_and_skips_bad_packets(udp_socket: ObservedSocket) -> None:
+    output: Queue[object] = Queue()
+    listener = Listener(udp_socket, output, lambda packet: float(packet.decode("ascii")))
+    try:
+        assert listener.thread is None, "constructor must not start receiving"
+        assert not listener.stop_event.is_set()
+        assert udp_socket.gettimeout() == 0.2
+        listener.start()
+        for packet in [b"bad", b"28.1", b"28.2"]:
+            send(udp_socket, packet)
+        assert output.get(timeout=1) == 28.1
+        assert output.get(timeout=1) == 28.2
+    finally:
+        listener.stop()
+        assert listener.thread is None or not listener.thread.is_alive()
+    assert udp_socket.fileno() == -1, "stop must close the owned socket"
+    with pytest.raises(Empty):
+        output.get_nowait()
 
 
-def test_e1_collects_only_top_level_logs_and_preserves_sources(bash: str, tmp_path: Path) -> None:
-    src = tmp_path / "bench logs"
-    src.mkdir()
-    (src / "power check.log").write_bytes(b"CH1=24.0\n")
-    (src / "-scope.log").write_bytes(b"\x00\xffcapture")
-    os.utime(src / "power check.log", (946684800, 946684800))
-    (src / "notes.txt").write_text("operator note", encoding="utf-8")
-    (src / "UPPER.LOG").write_text("ignore", encoding="utf-8")
-    (src / ".private.log").write_text("ignore", encoding="utf-8")
-    nested = src / "old.log"
-    nested.mkdir()
-    (nested / "nested.log").write_text("ignore", encoding="utf-8")
-    dest = tmp_path / "new archive" / "shift"
-    result = run_script(bash, tmp_path, "collect_logs.sh", src, dest, exercise=1)
-    assert result.returncode == 0, f"collection failed: {result.stderr}"
-    assert result.stdout == result.stderr == "", "successful collection must be quiet"
-    target = dest / "20310405"
-    assert sorted(p.name for p in target.iterdir()) == ["-scope.log", "power check.log"]
-    for name in ("power check.log", "-scope.log"):
-        assert (target / name).read_bytes() == (src / name).read_bytes(), f"copy corrupted {name}"
+def test_e3_none_is_a_valid_parsed_item(udp_socket: ObservedSocket) -> None:
+    output: Queue[object] = Queue()
+    listener = Listener(udp_socket, output, lambda packet: None)
+    try:
+        listener.start()
+        send(udp_socket, b"heartbeat")
+        assert output.get(timeout=1) is None
+    finally:
+        listener.stop()
+        assert listener.thread is None or not listener.thread.is_alive()
 
 
-def test_e1_empty_source_and_existing_archive(bash: str, tmp_path: Path) -> None:
-    src = tmp_path / "empty"
-    src.mkdir()
-    dest = tmp_path / "archive"
-    result = run_script(bash, tmp_path, "collect_logs.sh", src, dest, exercise=1)
-    assert result.returncode == 0, f"an empty source is valid: {result.stderr}"
-    target = dest / "20310405"
-    assert target.is_dir() and not list(target.iterdir()), "create the dated folder even without logs"
-    (src / "relay.log").write_text("new", encoding="utf-8")
-    (target / "relay.log").write_text("old", encoding="utf-8")
-    (target / "other.log").write_text("keep", encoding="utf-8")
-    result = run_script(bash, tmp_path, "collect_logs.sh", src, dest, exercise=1)
-    assert result.returncode == 0, result.stderr
-    assert (target / "relay.log").read_text(encoding="utf-8") == "new", "replace an older copy"
-    assert (target / "other.log").read_text(encoding="utf-8") == "keep", "keep unrelated archive files"
+def test_e3_timeout_keeps_listening_then_idle_stop_is_bounded(udp_socket: ObservedSocket) -> None:
+    output: Queue[object] = Queue()
+    listener = Listener(udp_socket, output, lambda packet: packet.decode("ascii"))
+    try:
+        listener.start()
+        assert udp_socket.timed_out.wait(timeout=1), "recvfrom must time out while idle"
+        assert listener.thread is not None and listener.thread.is_alive(), "timeout must not end the loop"
+        send(udp_socket, b"CH4:PASS")
+        assert output.get(timeout=1) == "CH4:PASS"
+    finally:
+        before = perf_counter()
+        listener.stop()
+        elapsed = perf_counter() - before
+        assert listener.thread is None or not listener.thread.is_alive(), "stop returned with a live thread"
+    assert elapsed <= 2, f"idle shutdown took {elapsed:.3f}s; limit is 2s"
+    assert listener.stop_event.is_set()
 
 
-@pytest.mark.parametrize("case", ["none", "one", "extra", "missing", "file"])
-def test_e1_bad_arguments(bash: str, tmp_path: Path, case: str) -> None:
-    src = tmp_path / "src"
-    src.mkdir()
-    regular = tmp_path / "not a directory"
-    regular.write_text("config", encoding="utf-8")
-    dest = tmp_path / "must not exist"
-    args = {
-        "none": [], "one": [src], "extra": [src, dest, "extra"],
-        "missing": [tmp_path / "missing", dest], "file": [regular, dest],
-    }[case]
-    result = run_script(bash, tmp_path, "collect_logs.sh", *args, exercise=1)
-    assert result.returncode == 2, f"bad arguments need exit 2: {result}"
-    assert result.stdout == "" and result.stderr == COLLECT_USAGE
-    assert not dest.exists(), "validate arguments before creating destination folders"
+def test_e3_repeated_stop_and_start_rejection(udp_socket: ObservedSocket) -> None:
+    listener = Listener(udp_socket, Queue(), lambda packet: packet)
+    try:
+        listener.start()
+        with pytest.raises(RuntimeError):
+            listener.start()
+    finally:
+        listener.stop()
+        assert listener.thread is None or not listener.thread.is_alive()
+    listener.stop()
+    with pytest.raises(RuntimeError):
+        listener.start()
 
 
-def test_e2_enables_strict_options(bash: str, tmp_path: Path) -> None:
-    src = tmp_path / "src"
-    src.mkdir()
-    result = run_script(bash, tmp_path, "collect_logs.sh", src, tmp_path / "archive", exercise=2)
-    assert result.returncode == 0, result.stderr
-    text = (SCRIPT_DIR / "collect_logs.sh").read_text(encoding="utf-8")
-    assert re.search(r"^\s*set -euo pipefail\s*(?:#.*)?$", text, re.MULTILINE), (
-        "put set -euo pipefail on its own line before the collection work"
-    )
+def test_e3_stop_before_start_closes_socket(udp_socket: ObservedSocket) -> None:
+    listener = Listener(udp_socket, Queue(), lambda packet: packet)
+    listener.stop()
+    listener.stop()
+    assert udp_socket.fileno() == -1
+    assert listener.thread is None
+    assert listener.stop_event.is_set()
+    with pytest.raises(RuntimeError):
+        listener.start()
+
+@pytest.mark.parametrize("workers", [1, 2, 8])
+def test_e4_preserves_duplicate_and_none_inputs(workers: int) -> None:
+    values = ["CH1", None, "CH1", "CH2"]
+    calls: Queue[object] = Queue()
+
+    def check(item: object) -> str:
+        calls.put_nowait(item)
+        return f"{item}:PASS"
+
+    assert run_pipeline(iter(values), workers, check) == [f"{item}:PASS" for item in values]
+    observed = [calls.get_nowait() for _ in values]
+    assert observed.count("CH1") == 2 and observed.count(None) == 1 and observed.count("CH2") == 1
+    with pytest.raises(Empty):
+        calls.get_nowait()
 
 
-@pytest.mark.parametrize("command", ["cp", "mkdir", "date"])
-def test_e2_stops_on_failed_command(bash: str, tmp_path: Path, command: str) -> None:
-    src = tmp_path / "src"
-    src.mkdir()
-    for name in ("a.log", "b.log"):
-        (src / name).write_text(name, encoding="utf-8")
-    hooks = f"{command}() {{ printf '%s\\n' {command} >> attempts.txt; return 37; }}\n"
-    result = run_script(
-        bash, tmp_path, "collect_logs.sh", src, tmp_path / "archive", exercise=2, hooks=hooks,
-    )
-    assert result.returncode != 0, f"a failed {command} must stop the collection"
-    attempts = (tmp_path / "attempts.txt").read_text(encoding="utf-8").splitlines()
-    assert attempts == [command], f"stop after the first {command} failure, got {attempts}"
-    assert not list((tmp_path / "archive").rglob("*.log")), "do not copy after a prerequisite fails"
+@pytest.mark.parametrize("workers", [0, -2])
+def test_e4_rejects_worker_count_before_consuming_input(workers: int) -> None:
+    def readings() -> Iterator[str]:
+        pytest.fail("validate workers before consuming the input")
+        yield "CH1"
+
+    with pytest.raises(ValueError):
+        run_pipeline(readings(), workers, str)
+    with pytest.raises(ValueError):
+        run_pipeline([], workers, str)
 
 
-def test_e3_complete_config_with_literal_values(bash: str, tmp_path: Path) -> None:
-    config = config_file(
-        tmp_path,
-        "# station settings\r\n\r\nstation_id=$(touch INJECTION)\r\n"
-        "instrument_host=scope=primary\r\nunknown=ignored\r\nlog_dir=C:\\station logs",
-    )
-    result = run_script(bash, tmp_path, "check_station.sh", config, exercise=3)
-    assert result.returncode == 0, f"all required values are present: {result.stderr}"
-    assert result.stdout == "Station OK\n" and result.stderr == ""
-    assert not (tmp_path / "INJECTION").exists(), "read configuration as data, never execute it"
+def test_e4_empty_input_starts_no_workers(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unexpected_start(self: Thread) -> None:
+        pytest.fail("empty input must not start threads")
+
+    def unexpected_check(item: object) -> object:
+        pytest.fail("empty input must not call fn")
+
+    monkeypatch.setattr(Thread, "start", unexpected_start)
+    assert run_pipeline(iter([]), 3, unexpected_check) == []
 
 
-def test_e3_missing_and_empty_keys_in_required_order(bash: str, tmp_path: Path) -> None:
-    config = config_file(tmp_path, "# station_id=comment\nlog_dir=\ninstrument_host=\n")
-    result = run_script(bash, tmp_path, "check_station.sh", config, exercise=3)
-    assert result.returncode == 1, "missing settings require exit 1"
-    assert result.stdout == "Missing: station_id\nMissing: instrument_host\nMissing: log_dir\n"
-    assert result.stderr == ""
+def test_e4_uses_requested_pool_and_joins_all_workers() -> None:
+    rendezvous = Barrier(3)
+    seen: set[Thread] = set()
+    guard = Lock()
+
+    def check(channel: int) -> int:
+        with guard:
+            seen.add(current_thread())
+        # A sequential implementation cannot get three checks to this point.
+        rendezvous.wait(timeout=0.2)
+        return channel * 10
+
+    assert run_pipeline(range(6), 3, check) == [0, 10, 20, 30, 40, 50]
+    assert len(seen) == 3, f"expected three worker threads, saw {len(seen)}"
+    assert current_thread() not in seen, "fn belongs in the worker pool"
+    assert all(not thread.is_alive() for thread in seen), "workers must stop before returning"
 
 
+def test_e4_returns_input_order_despite_reverse_completion() -> None:
+    second_done = Event()
+    completions: Queue[int] = Queue()
 
-def test_e3_whitespace_and_backslash_are_literal_values(bash: str, tmp_path: Path) -> None:
-    config = config_file(tmp_path, "station_id= \ninstrument_host=scope\nlog_dir=\\")
-    result = run_script(bash, tmp_path, "check_station.sh", config, exercise=3)
-    assert result.returncode == 0, "a space and a literal backslash are nonempty values"
-    assert result.stdout == "Station OK\n" and result.stderr == ""
+    def check(channel: int) -> str:
+        if channel == 0:
+            assert second_done.wait(timeout=0.2), "two workers must overlap"
+        completions.put_nowait(channel)
+        if channel == 1:
+            second_done.set()
+        return f"CH{channel}:PASS"
 
-
-def test_e3_last_value_wins(bash: str, tmp_path: Path) -> None:
-    config = config_file(tmp_path, COMPLETE + "station_id=\ninstrument_host=backup\n")
-    result = run_script(bash, tmp_path, "check_station.sh", config, exercise=3)
-    assert result.returncode == 1, "a later empty value clears an earlier setting"
-    assert result.stdout == "Missing: station_id\n" and result.stderr == ""
-
-
-@pytest.mark.parametrize("case", ["none", "extra", "missing", "directory", "option"])
-def test_e3_usage_errors(bash: str, tmp_path: Path, case: str) -> None:
-    config = config_file(tmp_path, COMPLETE)
-    args = {"none": [], "extra": [config, config], "missing": [tmp_path / "absent"],
-            "directory": [tmp_path], "option": ["--unknown"]}[case]
-    result = run_script(bash, tmp_path, "check_station.sh", *args, exercise=3)
-    assert result.returncode == 2, f"invalid invocation must return 2: {result}"
-    assert result.stdout == "" and result.stderr == CHECK_USAGE
+    assert run_pipeline([0, 1], 2, check) == ["CH0:PASS", "CH1:PASS"]
+    assert [completions.get_nowait(), completions.get_nowait()] == [1, 0]
 
 
-@pytest.mark.parametrize(
-    ("text", "missing"),
-    [(COMPLETE, []), ("station_id=bench-7\n", ["instrument_host", "log_dir"]),
-     ("", ["station_id", "instrument_host", "log_dir"]),
-     (COMPLETE + "log_dir=\r\n", ["log_dir"])],
-)
-def test_e4_json_matches_config_result(bash: str, tmp_path: Path, text: str, missing: list[str]) -> None:
-    config = config_file(tmp_path, text)
-    result = run_script(bash, tmp_path, "check_station.sh", "--json", config, exercise=4)
-    assert result.returncode == (1 if missing else 0), "JSON mode keeps the text mode exit status"
-    assert result.stderr == "", f"valid JSON invocation wrote diagnostics: {result.stderr}"
-    assert result.stdout.endswith("\n") and len(result.stdout.splitlines()) == 1, "emit one JSON line"
-    payload = json.loads(result.stdout)
-    assert payload == {"ok": not missing, "missing": missing}, f"wrong station report: {payload}"
-    assert type(payload["ok"]) is bool, "ok must be a JSON Boolean"
+@pytest.mark.parametrize("workers", [1, 3])
+def test_e4_raises_original_first_error_after_all_checks_stop(workers: int) -> None:
+    first = ValueError("CH0 overvoltage")
+    later = RuntimeError("CH2 instrument fault")
+    attempted: Queue[int] = Queue()
+    finished: Queue[int] = Queue()
+    seen: set[Thread] = set()
+    guard = Lock()
+    hold_check = Event()
+
+    def check(channel: int) -> int:
+        with guard:
+            seen.add(current_thread())
+        attempted.put_nowait(channel)
+        if channel == 0:
+            raise first
+        if channel == 2:
+            raise later
+        # Leave other work in progress when a parallel worker reports failure.
+        hold_check.wait(timeout=0.01)
+        finished.put_nowait(channel)
+        return channel
+
+    with pytest.raises((ValueError, RuntimeError)) as caught:
+        run_pipeline(range(5), workers, check)
+    if isinstance(caught.value, NotImplementedError):
+        raise caught.value
+    if workers == 1:
+        assert caught.value is first, "re-raise the first recorded exception object"
+    else:
+        assert caught.value is first or caught.value is later, "do not replace the original exception"
+    assert all(not thread.is_alive() for thread in seen), "exception escaped with live workers"
+    assert sorted(attempted.get_nowait() for _ in range(5)) == list(range(5)), "attempt every job"
+    assert sorted(finished.get_nowait() for _ in range(3)) == [1, 3, 4], "finish remaining checks before raising"
+    with pytest.raises(Empty):
+        attempted.get_nowait()
 
 
-@pytest.mark.parametrize("extra", [[], ["config", "extra"], ["absent"]])
-def test_e4_json_usage_errors(bash: str, tmp_path: Path, extra: list[str]) -> None:
-    result = run_script(bash, tmp_path, "check_station.sh", "--json", *extra, exercise=4)
-    assert result.returncode == 2, "--json still requires exactly one config path"
-    assert result.stdout == "" and result.stderr == CHECK_USAGE
+from starter.workers import gil_answers
+
+
+def test_e5_q1_bytecode_execution() -> None:
+    answers = gil_answers()
+    if not isinstance(answers, dict) or set(answers) != {"Q1", "Q2", "Q3", "Q4"}:
+        pytest.fail("E5: return a dictionary with exactly Q1-Q4; reread E5's return contract", pytrace=False)
+    if answers.get("Q1") != "B":
+        pytest.fail("Q1: reread the Python glossary, 'global interpreter lock', and threading docs, 'GIL and performance considerations'", pytrace=False)
+
+
+def test_e5_q2_instrument_io_waits() -> None:
+    if gil_answers().get("Q2") != "C":
+        pytest.fail("Q2: reread threading docs, 'GIL and performance considerations', on I/O-bound tasks", pytrace=False)
+
+
+def test_e5_q3_cpu_heavy_waveforms() -> None:
+    if gil_answers().get("Q3") != "A":
+        pytest.fail("Q3: reread the Python glossary, 'global interpreter lock', and threading docs, 'GIL and performance considerations'", pytrace=False)
+
+
+def test_e5_q4_shared_measurement_counter() -> None:
+    if gil_answers().get("Q4") != "D":
+        pytest.fail("Q4: reread threading docs, 'Lock objects', and queue docs, 'Queue objects'", pytrace=False)

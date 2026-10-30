@@ -1,208 +1,218 @@
-from collections.abc import Iterator
-
+﻿"""Contracts for drivers used by a chassis test station."""
 import pytest
-import serial
 
-from starter.serial_sensor import (
-    bus_answers,
-    open_loopback,
-    parse_sensor_line,
-    read_frames,
-    read_line,
-    send_line,
-)
+from starter.driver import Dmm, FakeTransport, PowerSupply, Transport
+
+
+class RecordingTransport:
+    """Independent protocol implementation recording writes and queries together."""
+
+    def __init__(self, replies: dict[str, str]) -> None:
+        self.replies = replies
+        self.events: list[tuple[str, str]] = []
+
+    def write(self, command: str) -> None:
+        self.events.append(("write", command))
+
+    def query(self, command: str) -> str:
+        self.events.append(("query", command))
+        return self.replies[command]
 
 
 @pytest.fixture
-def port() -> Iterator[serial.Serial]:
-    # Independent of E1, so later exercise failures identify their own stubs.
-    with serial.serial_for_url("loop://", timeout=0.01, write_timeout=0.5) as connection:
-        yield connection
+def transport() -> RecordingTransport:
+    return RecordingTransport({
+        "*IDN?": "  BenchCo,DMM,17,1.0\r\n",
+        "MEAS:VOLT:DC?": " +1.250E+1\r\n",
+        "MEAS:VOLT?": " 3.300\n",
+    })
 
 
-def _frame(payload: str) -> str:
-    checksum = 0
-    for byte in payload.encode("ascii"):
-        checksum ^= byte
-    return f"${payload}*{checksum:02X}"
+def test_e1_writes_preserve_exact_commands() -> None:
+    fake = FakeTransport({})
+    assert fake.writes == [], "a new station fake must start with no writes"
+    commands = ["CONF:VOLT:DC", "", "  OUTP OFF\n", "CONF:VOLT:DC"]
+    for command in commands:
+        assert fake.write(command) is None, "write should return None"
+    assert fake.writes == commands, "preserve command text, duplicates, and call order"
 
 
-@pytest.mark.parametrize("timeout", [0.0, 0.01, 0.05])
-def test_e1_open_settings(timeout: float) -> None:
-    with open_loopback(timeout) as connection:
-        assert connection.is_open, "return an already open connection"
-        assert connection.port == "loop://", "use the loopback URL handler"
-        assert connection.timeout == timeout, "set the requested read timeout"
-        assert connection.write_timeout == timeout, "bound writes as well as reads"
-        assert (connection.baudrate, connection.bytesize, connection.parity, connection.stopbits) == (
-            9600, 8, "N", 1
-        ), "keep pySerial's default baud and framing"
-    assert not connection.is_open, "the caller must be able to close the connection"
+def test_e1_queries_are_repeatable_and_preserve_reply_text() -> None:
+    fake = FakeTransport({"*IDN?": " BenchCo\n", "MEAS:VOLT?": "", "": "empty command"})
+    for command, expected in [("*IDN?", " BenchCo\n"), ("MEAS:VOLT?", ""),
+                              ("*IDN?", " BenchCo\n"), ("", "empty command")]:
+        assert fake.query(command) == expected, f"wrong scripted reply for {command!r}"
+    assert fake.writes == [], "queries must not be recorded as writes"
 
 
-def test_e1_echo_bytes() -> None:
-    with open_loopback(0.05) as connection:
-        connection.write(b"CHASSIS\r\n")
-        assert connection.read(9) == b"CHASSIS\r\n", "loopback should echo written bytes"
+@pytest.mark.parametrize("unknown", ["UNKNOWN?", "*idn?", "*IDN?\n"])
+def test_e1_unknown_query_raises_without_changing_writes(unknown: str) -> None:
+    fake = FakeTransport({"*IDN?": "BenchCo"})
+    fake.write("CONF:VOLT:DC")
+    with pytest.raises(KeyError):
+        fake.query(unknown)
+    assert fake.writes == ["CONF:VOLT:DC"], "failed queries must preserve history"
 
 
-def test_e1_negative_timeout() -> None:
-    with pytest.raises(ValueError):
-        open_loopback(-0.1)
+def test_e1_instances_have_separate_write_lists() -> None:
+    first = FakeTransport({"*IDN?": "meter A"})
+    second = FakeTransport({"*IDN?": "meter B"})
+    compatible: Transport = first
+    compatible.write("CONF:VOLT:DC")
+    assert second.writes == [], "one instrument's writes must not leak into another"
+    assert first.query("*IDN?") == "meter A"
+    assert second.query("*IDN?") == "meter B"
 
 
-@pytest.mark.parametrize("text", ["STATUS?", "", "  CH2  "])
-def test_e2_send_exact_bytes(port: serial.Serial, text: str) -> None:
-    assert send_line(port, text) is None, "send_line should return None"
-    expected = text.encode("ascii") + b"\r\n"
-    assert port.read(len(expected)) == expected, "write ASCII followed by exactly one CRLF"
-    assert port.in_waiting == 0, "do not append extra bytes"
-    assert port.is_open, "the caller owns closing the port"
+def test_e2_construction_and_idn_use_injected_transport(transport: RecordingTransport) -> None:
+    meter = Dmm(transport)
+    assert transport.events == [], "constructing a meter must not contact hardware"
+    assert meter.idn() == "BenchCo,DMM,17,1.0", "strip only surrounding ID reply whitespace"
+    transport.replies["*IDN?"] = "next meter"
+    assert meter.idn() == "next meter", "each identification must query the transport again"
+    assert transport.events == [("query", "*IDN?"), ("query", "*IDN?")]
 
 
-def test_e2_roundtrip_two_replies(port: serial.Serial) -> None:
-    send_line(port, "STATUS?")
-    send_line(port, "ID?")
-    assert read_line(port) == "STATUS?", "read only the first complete reply"
-    assert read_line(port) == "ID?", "leave the next reply for the next call"
-    assert port.is_open, "reading must leave the connection open"
-
-
-@pytest.mark.parametrize("raw, expected", [(b"  READY  \r\n", "  READY  "), (b"\r\n", "")])
-def test_e2_read_preserves_payload(port: serial.Serial, raw: bytes, expected: str) -> None:
-    port.write(raw)
-    assert read_line(port) == expected, "remove only the final CRLF, preserving payload spaces"
-
-
-def test_e2_silent_sensor_times_out(port: serial.Serial) -> None:
-    with pytest.raises(TimeoutError):
-        read_line(port)
-
-
-@pytest.mark.parametrize("raw", [b"READY\n", b"partial", b"\xff\r\n"])
-def test_e2_damaged_line(port: serial.Serial, raw: bytes) -> None:
-    port.write(raw)
-    with pytest.raises(ValueError):
-        read_line(port)
-    assert port.in_waiting == 0, "the damaged line has been consumed"
-
-
-@pytest.mark.parametrize("text", ["STATUS?\n", "STATUS?\r", "A\r\nB", "TEMP=23\N{DEGREE SIGN}C"])
-def test_e2_reject_invalid_command_before_write(port: serial.Serial, text: str) -> None:
-    with pytest.raises(ValueError):
-        send_line(port, text)
-    assert port.in_waiting == 0, "invalid commands must not write any bytes"
-
-
-def test_e3_known_checksum() -> None:
-    result = parse_sensor_line("$TMP,23.5,PRS,101.2*02")
-    assert result == {"TMP": 23.5, "PRS": 101.2}, "decode both sensor measurements"
-    assert all(isinstance(value, float) for value in result.values()), "values must be floats"
-
-
-@pytest.mark.parametrize("payload, expected", [
-    ("TMP,-12.5", {"TMP": -12.5}),
-    ("CH1,0,CH2,1e2,CH3,+3.25", {"CH1": 0.0, "CH2": 100.0, "CH3": 3.25}),
-    ("tmp,1,TMP,2,tmp,3", {"tmp": 3.0, "TMP": 2.0}),
+@pytest.mark.parametrize("reply, expected", [
+    (" +1.250E+1\r\n", 12.5), ("-0.002", -0.002), ("0", 0.0),
 ])
-def test_e3_label_value_pairs(payload: str, expected: dict[str, float]) -> None:
-    assert parse_sensor_line(_frame(payload)) == expected, f"incorrect measurements for {payload!r}"
+def test_e2_dc_voltage_converts_reply(reply: str, expected: float,
+                                    transport: RecordingTransport) -> None:
+    transport.replies["MEAS:VOLT:DC?"] = reply
+    meter = Dmm(transport)
+    result = meter.measure_dc_voltage()
+    assert isinstance(result, float), "meter readings must be floats"
+    assert result == pytest.approx(expected), f"wrong voltage for reply {reply!r}"
+    transport.replies["MEAS:VOLT:DC?"] = "2.75"
+    assert meter.measure_dc_voltage() == 2.75, "do not cache a previous station reading"
+    assert transport.events == [("query", "MEAS:VOLT:DC?"), ("query", "MEAS:VOLT:DC?")]
 
 
-def test_e3_lowercase_checksum() -> None:
-    # XOR of TMP,23.5 is 7F; lowercase hex must also work.
-    assert parse_sensor_line("$TMP,23.5*7f") == {"TMP": 23.5}, "accept lowercase hex digits"
-
-
-@pytest.mark.parametrize("line", ["$TMP,23.5,PRS,101.2*4F", "$TMP,23.5,PRS,101.3*02"])
-def test_e3_reject_checksum_mismatch(line: str) -> None:
+@pytest.mark.parametrize("reply", ["OVERLOAD", "", "1.25 V"])
+def test_e2_bad_numeric_reply_reaches_caller(reply: str, transport: RecordingTransport) -> None:
+    transport.replies["MEAS:VOLT:DC?"] = reply
+    meter = Dmm(transport)
     with pytest.raises(ValueError):
-        parse_sensor_line(line)
+        meter.measure_dc_voltage()
+    assert transport.events == [("query", "MEAS:VOLT:DC?")]
 
 
-@pytest.mark.parametrize("line", [
-    "", "TMP,20*67", "$TMP,20", "$TMP,20*67*67", "$TMP,20*7",
-    "$TMP,20*067", "$TMP,20*GG", "$TMP,20*+A", "$TMP,20*67\r\n",
-    "$T\N{DEGREE SIGN},20*00",
+@pytest.mark.parametrize("method, command", [("idn", "*IDN?"),
+                                            ("measure_dc_voltage", "MEAS:VOLT:DC?")])
+def test_e2_missing_reply_reaches_caller(method: str, command: str) -> None:
+    transport = RecordingTransport({})
+    meter = Dmm(transport)
+    with pytest.raises(KeyError):
+        getattr(meter, method)()
+    assert transport.events == [("query", command)]
+
+
+@pytest.mark.parametrize("ch, voltage, formatted", [
+    (1, 0.0, "0.000"), (2, 30.0, "30.000"), (3, 5.1256, "5.126"),
+    (1, 0.0004, "0.000"), (2, 29.9994, "29.999"),
 ])
-def test_e3_reject_malformed_envelope(line: str) -> None:
+def test_e3_set_voltage_exact_sequence(ch: int, voltage: float, formatted: str,
+                                      transport: RecordingTransport) -> None:
+    supply = PowerSupply(transport)
+    assert transport.events == [], "constructing a supply must not contact hardware"
+    assert supply.set_voltage(ch, voltage) is None
+    assert transport.events == [("write", f"INST:NSEL {ch}"), ("write", f"VOLT {formatted}")], (
+        "select the channel first, then write voltage with exactly three decimal places"
+    )
+
+
+@pytest.mark.parametrize("ch, voltage", [
+    (0, 5.0), (4, 5.0), (-1, 5.0), (1, -0.0001), (2, 30.0001),
+    (3, float("inf")), (1, float("-inf")), (2, float("nan")), (0, 31.0),
+])
+def test_e3_invalid_request_has_no_transport_effect(ch: int, voltage: float,
+                                                  transport: RecordingTransport) -> None:
+    supply = PowerSupply(transport)
     with pytest.raises(ValueError):
-        parse_sensor_line(line)
+        supply.set_voltage(ch, voltage)
+    assert transport.events == [], "validate channel AND voltage before selecting a channel"
 
 
-@pytest.mark.parametrize("payload", ["", "TMP", "TMP,20,PRS", ",20", "TMP,", "TMP,hot"])
-def test_e3_reject_invalid_fields(payload: str) -> None:
+def test_e3_rejected_request_preserves_existing_station_history(transport: RecordingTransport) -> None:
+    supply = PowerSupply(transport)
+    supply.set_voltage(3, 12.0)
+    before = list(transport.events)
     with pytest.raises(ValueError):
-        parse_sensor_line(_frame(payload))
+        supply.set_voltage(2, -1.0)
+    assert transport.events == before, "rejecting a request must leave earlier commands intact"
+    supply.set_voltage(3, 12.0)
+    assert transport.events == before + before, "every valid call must send its two commands"
 
 
-def test_e4_collect_and_leave_next_frame(port: serial.Serial) -> None:
-    lines = [_frame("TMP,21"), _frame("PRS,102"), _frame("TMP,22")]
-    port.write(("\r\n".join(lines) + "\r\n").encode("ascii"))
-    assert read_frames(port, 2) == ([{"TMP": 21.0}, {"PRS": 102.0}], 0), "keep arrival order"
-    assert port.readline() == (lines[2] + "\r\n").encode("ascii"), "stop at the requested count"
-    assert port.is_open, "the caller still owns the connection"
+@pytest.mark.parametrize("ch, on, command", [
+    (1, True, "OUTP ON"), (2, False, "OUTP OFF"), (3, True, "OUTP ON"),
+])
+def test_e4_output_exact_sequence(ch: int, on: bool, command: str,
+                                  transport: RecordingTransport) -> None:
+    supply = PowerSupply(transport)
+    assert supply.output(ch, on) is None
+    assert transport.events == [("write", f"INST:NSEL {ch}"), ("write", command)]
 
 
-def test_e4_skip_and_count_damaged_lines(port: serial.Serial) -> None:
-    good = (_frame("TMP,23.5,PRS,101.2") + "\r\n").encode("ascii")
-    malformed = (_frame("TMP,hot") + "\r\n").encode("ascii")
-    port.write(b"$TMP,23.5,PRS,101.2*4F\r\n" + good + malformed
-               + b"\xff\r\nwrong-ending\n\r\n" + good)
-    expected = {"TMP": 23.5, "PRS": 101.2}
-    assert read_frames(port, 2) == ([expected, expected], 5), "count each rejected line once"
+@pytest.mark.parametrize("ch, reply, expected", [(1, "0", 0.0), (2, " 3.300\n", 3.3),
+                                               (3, "-2.5E-3", -0.0025)])
+def test_e4_measure_selects_before_query(ch: int, reply: str, expected: float,
+                                       transport: RecordingTransport) -> None:
+    transport.replies["MEAS:VOLT?"] = reply
+    supply = PowerSupply(transport)
+    result = supply.measure_voltage(ch)
+    assert isinstance(result, float), "supply readings must be floats"
+    assert result == pytest.approx(expected), f"wrong supply reading for {reply!r}"
+    assert transport.events == [("write", f"INST:NSEL {ch}"), ("query", "MEAS:VOLT?")], (
+        "select the requested supply channel before asking for its voltage"
+    )
 
 
-def test_e4_zero_count_does_not_read(port: serial.Serial) -> None:
-    port.write(b"untouched\r\n")
-    assert read_frames(port, 0) == ([], 0), "zero requested frames needs no reads"
-    assert port.readline() == b"untouched\r\n", "zero must preserve buffered bytes"
-
-
-def test_e4_negative_count_does_not_read(port: serial.Serial) -> None:
-    port.write(b"untouched\r\n")
+@pytest.mark.parametrize("ch", [-1, 0, 4])
+@pytest.mark.parametrize("on", [True, False])
+def test_e4_invalid_output_channel_preserves_history(ch: int, on: bool,
+                                                    transport: RecordingTransport) -> None:
+    supply = PowerSupply(transport)
+    transport.write("existing station command")
+    before = list(transport.events)
     with pytest.raises(ValueError):
-        read_frames(port, -1)
-    assert port.readline() == b"untouched\r\n", "reject the count before reading"
+        supply.output(ch, on)
+    assert transport.events == before, "invalid output channel must cause no transport calls"
 
 
-@pytest.mark.parametrize("raw", [b"", b"bad\r\n", b"partial", b"$TMP,23.5,PRS,101.2*02\r\n"])
-def test_e4_propagate_timeout_without_partial_result(port: serial.Serial, raw: bytes) -> None:
-    if raw:
-        port.write(raw)
-    with pytest.raises(TimeoutError):
-        read_frames(port, 2)
+@pytest.mark.parametrize("ch", [-1, 0, 4])
+def test_e4_invalid_measure_channel_does_not_query(ch: int, transport: RecordingTransport) -> None:
+    supply = PowerSupply(transport)
+    with pytest.raises(ValueError):
+        supply.measure_voltage(ch)
+    assert transport.events == [], "invalid measurement channel must not write or query"
 
 
-def test_e4_propagate_connection_failure(port: serial.Serial) -> None:
-    port.close()
-    with pytest.raises(serial.SerialException):
-        read_frames(port, 1)
+def test_e4_station_procedure_reselects_and_reads_again(transport: RecordingTransport) -> None:
+    supply = PowerSupply(transport)
+    supply.set_voltage(2, 5.0)
+    supply.output(2, True)
+    assert supply.measure_voltage(2) == 3.3
+    transport.replies["MEAS:VOLT?"] = "4.9"
+    assert supply.measure_voltage(3) == 4.9, "each measurement needs a fresh query"
+    supply.output(2, False)
+    assert transport.events == [
+        ("write", "INST:NSEL 2"), ("write", "VOLT 5.000"),
+        ("write", "INST:NSEL 2"), ("write", "OUTP ON"),
+        ("write", "INST:NSEL 2"), ("query", "MEAS:VOLT?"),
+        ("write", "INST:NSEL 3"), ("query", "MEAS:VOLT?"),
+        ("write", "INST:NSEL 2"), ("write", "OUTP OFF"),
+    ], "a station procedure must issue every transport call in order"
 
 
-def test_e5_q1_asynchronous_bus() -> None:
-    answers = bus_answers()
-    assert isinstance(answers, dict), "Return a dictionary of question IDs and option letters"
-    assert set(answers) == {"Q1", "Q2", "Q3", "Q4", "Q5"}, "Return exactly Q1 through Q5"
-    if answers.get("Q1") != "C":
-        pytest.fail("Q1: reread SparkFun Serial Communication, Synchronous vs. Asynchronous", pytrace=False)
-
-
-def test_e5_q2_chip_select() -> None:
-    if bus_answers().get("Q2") != "B":
-        pytest.fail("Q2: reread SparkFun SPI, the chip-select signal discussion", pytrace=False)
-
-
-def test_e5_q3_address_and_ack() -> None:
-    if bus_answers().get("Q3") != "A":
-        pytest.fail("Q3: reread SparkFun I2C, the address and ACK message discussion", pytrace=False)
-
-
-def test_e5_q4_full_duplex() -> None:
-    if bus_answers().get("Q4") != "B":
-        pytest.fail("Q4: reread SparkFun Serial Communication, Half/Full-Duplex, and SPI data signals", pytrace=False)
-
-
-def test_e5_q5_usb_adapter_and_baud() -> None:
-    if bus_answers().get("Q5") != "C":
-        pytest.fail("Q5: reread SparkFun Serial Communication, UARTs and Baud Rate", pytrace=False)
+@pytest.mark.parametrize("replies, error", [({"MEAS:VOLT?": "OVERLOAD"}, ValueError),
+                                          ({}, KeyError)])
+def test_e4_reply_error_follows_channel_selection(replies: dict[str, str],
+                                                 error: type[Exception]) -> None:
+    transport = RecordingTransport(replies)
+    supply = PowerSupply(transport)
+    with pytest.raises(error):
+        supply.measure_voltage(3)
+    assert transport.events == [("write", "INST:NSEL 3"), ("query", "MEAS:VOLT?")], (
+        "reply errors must reach the caller after selection, without extra commands"
+    )

@@ -7,9 +7,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def set_order(identifier: str) -> tuple[int, int, str]:
-    """Days use (day, 0); rN follows d(7*N-1); checkN follows dN and reviews.
+    """Days use (day, 0); rN sits on the Sunday after block N, day 7*(N+1); checkN follows dN and reviews.
 
-    For example: d06, r1, d07; d30, check30, d31; d41, r6, d42.
+    For example: d13, r1, d15; d33, check34, r4, d36; d48, r6, d51.
     Unknown folder names sort last, alphabetically.
     """
     day = re.fullmatch(r"d(\d+)(?:-.*)?", identifier)
@@ -18,7 +18,7 @@ def set_order(identifier: str) -> tuple[int, int, str]:
     if day:
         return int(day[1]), 0, identifier
     if review:
-        return 7 * int(review[1]) - 1, 1, identifier
+        return 7 * (int(review[1]) + 1), 1, identifier
     if check:
         return int(check[1]), 2, identifier
     return 10000, 0, identifier

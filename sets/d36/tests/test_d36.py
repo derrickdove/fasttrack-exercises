@@ -1,258 +1,210 @@
-"""Offline station deployment checks: no Linux service is installed or started."""
-from configparser import ConfigParser
-from copy import deepcopy
+"""Execute the learner's Bash files against isolated station directories."""
+from __future__ import annotations
+
+import json
+import os
 from pathlib import Path
-import tomllib
+import re
+import shutil
+import subprocess
 
 import pytest
 
-from starter.units import load_station_toml, parse_unit, validate_unit
+from starter.scripts import SCRIPT_DIR
+
+COLLECT_USAGE = "Usage: bash collect_logs.sh SRC DEST\n"
+CHECK_USAGE = "Usage: bash check_station.sh [--json] CONFIG\n"
+COMPLETE = "station_id=bench-7\ninstrument_host=192.0.2.8\nlog_dir=/var/log/station\n"
 
 
 @pytest.fixture
-def service_file() -> ConfigParser:
-    path = Path(__file__).resolve().parents[1] / "starter" / "chassis-demo.service"
-    text = path.read_text(encoding="utf-8")
-    if "# NotImplementedError: E1:" in text:
-        raise NotImplementedError("E1: Replace the service file placeholder using README.md")
-    parser = ConfigParser(strict=False, interpolation=None, delimiters=("=",))
-    parser.optionxform = str
-    parser.read_string(text)
-    return parser
+def bash() -> str:
+    executable = shutil.which("bash")
+    if executable is None:
+        pytest.skip("Bash is missing: install Git Bash on Windows or use Codespaces; d36 is unfinished.")
+    return executable
 
 
-def test_e1_network_ordering(service_file: ConfigParser) -> None:
-    assert service_file.has_section("Unit"), "Add a [Unit] section"
-    unit = service_file["Unit"]
-    assert unit.get("Description", "").strip(), "Describe the station service"
-    for key in ("After", "Wants"):
-        assert "network-online.target" in unit.get(key, "").split(), f"{key} must name network-online.target"
+def run_script(
+    bash: str,
+    tmp_path: Path,
+    name: str,
+    *arguments: str | Path,
+    exercise: int,
+    hooks: str = "",
+) -> subprocess.CompletedProcess[str]:
+    # BASH_ENV supplies test commands without requiring executable file permissions.
+    # Forward slashes work in Git Bash and native Linux Bash alike.
+    environment = os.environ.copy()
+    for key in ("BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS", "POSIXLY_CORRECT"):
+        environment.pop(key, None)
+    hook_file = tmp_path / "bash-test-env.sh"
+    hook_file.write_text("date() { printf '20310405\\n'; }\n" + hooks, encoding="utf-8")
+    environment["BASH_ENV"] = hook_file.as_posix()
+    result = subprocess.run(
+        [bash, "--noprofile", "--norc", (SCRIPT_DIR / name).as_posix(),
+         *(arg.as_posix() if isinstance(arg, Path) else arg for arg in arguments)],
+        cwd=tmp_path, env=environment, capture_output=True, text=True,
+        encoding="utf-8", errors="replace", timeout=3,
+    )
+    if result.returncode == 99 and result.stderr.startswith("NotImplementedError:"):
+        raise NotImplementedError(f"E{exercise}: replace the unfinished body in starter/{name}")
+    return result
 
 
-def test_e1_service_policy(service_file: ConfigParser) -> None:
-    assert service_file.has_section("Service"), "Add a [Service] section"
-    service = service_file["Service"]
-    assert service.get("Type") == "simple", "Use Type=simple for the station process"
-    command = service.get("ExecStart", "").split()
-    assert len(command) >= 3, "ExecStart needs the Python path, -m, and chassis"
-    assert command[0].startswith("/"), "Use an absolute Linux Python path"
-    assert command[0].rsplit("/", 1)[-1] in ("python", "python3"), "Use python or python3"
-    assert command[1:3] == ["-m", "chassis"], "Start the chassis module"
-    assert service.get("Restart") == "on-failure", "Restart the station after a failure"
-    assert int(service.get("RestartSec", "0")) > 0, "RestartSec must be positive whole seconds"
-    assert service.get("User", "").strip() not in ("", "root", "0"), "Choose a named non-root service user"
+def config_file(tmp_path: Path, text: str) -> Path:
+    path = tmp_path / "station settings.conf"
+    path.write_bytes(text.encode("utf-8"))
+    return path
 
 
-def test_e1_boot_target(service_file: ConfigParser) -> None:
-    assert service_file.has_section("Install"), "Add an [Install] section"
-    assert "multi-user.target" in service_file["Install"].get("WantedBy", "").split(), "Use the normal multi-user boot target"
+def test_e1_collects_only_top_level_logs_and_preserves_sources(bash: str, tmp_path: Path) -> None:
+    src = tmp_path / "bench logs"
+    src.mkdir()
+    (src / "power check.log").write_bytes(b"CH1=24.0\n")
+    (src / "-scope.log").write_bytes(b"\x00\xffcapture")
+    os.utime(src / "power check.log", (946684800, 946684800))
+    (src / "notes.txt").write_text("operator note", encoding="utf-8")
+    (src / "UPPER.LOG").write_text("ignore", encoding="utf-8")
+    (src / ".private.log").write_text("ignore", encoding="utf-8")
+    nested = src / "old.log"
+    nested.mkdir()
+    (nested / "nested.log").write_text("ignore", encoding="utf-8")
+    dest = tmp_path / "new archive" / "shift"
+    result = run_script(bash, tmp_path, "collect_logs.sh", src, dest, exercise=1)
+    assert result.returncode == 0, f"collection failed: {result.stderr}"
+    assert result.stdout == result.stderr == "", "successful collection must be quiet"
+    target = dest / "20310405"
+    assert sorted(p.name for p in target.iterdir()) == ["-scope.log", "power check.log"]
+    for name in ("power check.log", "-scope.log"):
+        assert (target / name).read_bytes() == (src / name).read_bytes(), f"copy corrupted {name}"
 
 
-def test_e2_sections_and_whitespace(tmp_path: Path) -> None:
-    path = tmp_path / "station.service"
-    path.write_text("  # station comment\n; another comment\n\n[ Unit ]\n Description = Rack 7 \n[Service]\nType=simple\n", encoding="utf-8")
-    expected = {"Unit": {"Description": ["Rack 7"]}, "Service": {"Type": ["simple"]}}
-    assert parse_unit(str(path)) == expected, "Strip surrounding whitespace and skip whole-line comments"
+def test_e1_empty_source_and_existing_archive(bash: str, tmp_path: Path) -> None:
+    src = tmp_path / "empty"
+    src.mkdir()
+    dest = tmp_path / "archive"
+    result = run_script(bash, tmp_path, "collect_logs.sh", src, dest, exercise=1)
+    assert result.returncode == 0, f"an empty source is valid: {result.stderr}"
+    target = dest / "20310405"
+    assert target.is_dir() and not list(target.iterdir()), "create the dated folder even without logs"
+    (src / "relay.log").write_text("new", encoding="utf-8")
+    (target / "relay.log").write_text("old", encoding="utf-8")
+    (target / "other.log").write_text("keep", encoding="utf-8")
+    result = run_script(bash, tmp_path, "collect_logs.sh", src, dest, exercise=1)
+    assert result.returncode == 0, result.stderr
+    assert (target / "relay.log").read_text(encoding="utf-8") == "new", "replace an older copy"
+    assert (target / "other.log").read_text(encoding="utf-8") == "keep", "keep unrelated archive files"
 
 
-def test_e2_repeats_empty_values_and_literal_text(tmp_path: Path) -> None:
-    path = tmp_path / "repeat.service"
-    path.write_text("[Service]\nEnvironment=MODE=demo\nEnvironment=\nEnvironment=LOAD=100% # literal; text\nUser=chassis\nuser=other\n[Service]\nEnvironment=NEXT=2\n", encoding="utf-8")
-    expected = {"Service": {"Environment": ["MODE=demo", "", "LOAD=100% # literal; text", "NEXT=2"], "User": ["chassis"], "user": ["other"]}}
-    assert parse_unit(path) == expected, "Keep every assignment, case, empty value, and text after the first ="
+@pytest.mark.parametrize("case", ["none", "one", "extra", "missing", "file"])
+def test_e1_bad_arguments(bash: str, tmp_path: Path, case: str) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    regular = tmp_path / "not a directory"
+    regular.write_text("config", encoding="utf-8")
+    dest = tmp_path / "must not exist"
+    args = {
+        "none": [], "one": [src], "extra": [src, dest, "extra"],
+        "missing": [tmp_path / "missing", dest], "file": [regular, dest],
+    }[case]
+    result = run_script(bash, tmp_path, "collect_logs.sh", *args, exercise=1)
+    assert result.returncode == 2, f"bad arguments need exit 2: {result}"
+    assert result.stdout == "" and result.stderr == COLLECT_USAGE
+    assert not dest.exists(), "validate arguments before creating destination folders"
 
 
-@pytest.mark.parametrize("character", ["\v", "\f", "\x1c", "\x1d", "\x1e", "\u0085", "\u2028", "\u2029"])
-def test_e2_preserves_literal_characters_inside_values(tmp_path: Path, character: str) -> None:
-    path = tmp_path / "literal.service"
-    value = f"LABEL=alpha{character}beta"
-    path.write_text(f"[Service]\nEnvironment={value}\n", encoding="utf-8")
-    assert parse_unit(path) == {"Service": {"Environment": [value]}}, "Keep all characters inside values"
+def test_e2_enables_strict_options(bash: str, tmp_path: Path) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    result = run_script(bash, tmp_path, "collect_logs.sh", src, tmp_path / "archive", exercise=2)
+    assert result.returncode == 0, result.stderr
+    text = (SCRIPT_DIR / "collect_logs.sh").read_text(encoding="utf-8")
+    assert re.search(r"^\s*set -euo pipefail\s*(?:#.*)?$", text, re.MULTILINE), (
+        "put set -euo pipefail on its own line before the collection work"
+    )
 
 
-def test_e2_empty_file_and_empty_sections(tmp_path: Path) -> None:
-    path = tmp_path / "empty.service"
-    path.write_text("# no settings\n", encoding="utf-8")
-    assert parse_unit(path) == {}, "A comment-only file has no sections"
-    path.write_text("[Unit]\n[Service]\n", encoding="utf-8")
-    assert parse_unit(path) == {"Unit": {}, "Service": {}}, "Keep empty sections"
+@pytest.mark.parametrize("command", ["cp", "mkdir", "date"])
+def test_e2_stops_on_failed_command(bash: str, tmp_path: Path, command: str) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    for name in ("a.log", "b.log"):
+        (src / name).write_text(name, encoding="utf-8")
+    hooks = f"{command}() {{ printf '%s\\n' {command} >> attempts.txt; return 37; }}\n"
+    result = run_script(
+        bash, tmp_path, "collect_logs.sh", src, tmp_path / "archive", exercise=2, hooks=hooks,
+    )
+    assert result.returncode != 0, f"a failed {command} must stop the collection"
+    attempts = (tmp_path / "attempts.txt").read_text(encoding="utf-8").splitlines()
+    assert attempts == [command], f"stop after the first {command} failure, got {attempts}"
+    assert not list((tmp_path / "archive").rglob("*.log")), "do not copy after a prerequisite fails"
 
 
-@pytest.mark.parametrize("text, line", [
-    ("# heading\nUser=chassis\n", 2),
-    ("[Service]\nRestart on-failure\n", 2),
-    ("[Service]\n = value\n", 2),
-    ("[ ]\n", 1),
-    ("[Service\n", 1),
-])
-def test_e2_bad_lines_name_line_number(tmp_path: Path, text: str, line: int) -> None:
-    path = tmp_path / "broken.service"
-    path.write_text(text, encoding="utf-8")
-    with pytest.raises(ValueError, match=rf"line {line}\b"):
-        parse_unit(path)
+def test_e3_complete_config_with_literal_values(bash: str, tmp_path: Path) -> None:
+    config = config_file(
+        tmp_path,
+        "# station settings\r\n\r\nstation_id=$(touch INJECTION)\r\n"
+        "instrument_host=scope=primary\r\nunknown=ignored\r\nlog_dir=C:\\station logs",
+    )
+    result = run_script(bash, tmp_path, "check_station.sh", config, exercise=3)
+    assert result.returncode == 0, f"all required values are present: {result.stderr}"
+    assert result.stdout == "Station OK\n" and result.stderr == ""
+    assert not (tmp_path / "INJECTION").exists(), "read configuration as data, never execute it"
 
 
-def test_e2_missing_file(tmp_path: Path) -> None:
-    with pytest.raises(FileNotFoundError):
-        parse_unit(tmp_path / "absent.service")
+def test_e3_missing_and_empty_keys_in_required_order(bash: str, tmp_path: Path) -> None:
+    config = config_file(tmp_path, "# station_id=comment\nlog_dir=\ninstrument_host=\n")
+    result = run_script(bash, tmp_path, "check_station.sh", config, exercise=3)
+    assert result.returncode == 1, "missing settings require exit 1"
+    assert result.stdout == "Missing: station_id\nMissing: instrument_host\nMissing: log_dir\n"
+    assert result.stderr == ""
 
 
-@pytest.fixture
-def valid_unit() -> dict[str, dict[str, list[str]]]:
-    return {
-        "Unit": {"Description": ["Rack 7"], "After": ["network-online.target"], "Wants": ["network-online.target"]},
-        "Service": {"Type": ["simple"], "ExecStart": ["/opt/station/python -m chassis --help"], "Restart": ["on-failure"], "RestartSec": ["3"], "User": ["chassis"]},
-        "Install": {"WantedBy": ["multi-user.target"]},
-    }
+
+def test_e3_whitespace_and_backslash_are_literal_values(bash: str, tmp_path: Path) -> None:
+    config = config_file(tmp_path, "station_id= \ninstrument_host=scope\nlog_dir=\\")
+    result = run_script(bash, tmp_path, "check_station.sh", config, exercise=3)
+    assert result.returncode == 0, "a space and a literal backslash are nonempty values"
+    assert result.stdout == "Station OK\n" and result.stderr == ""
 
 
-def test_e3_valid_unit_and_no_mutation(valid_unit: dict[str, dict[str, list[str]]]) -> None:
-    before = deepcopy(valid_unit)
-    assert validate_unit(valid_unit) == [], "A valid station unit has no problems"
-    assert valid_unit == before, "Checking a unit must not change it"
+def test_e3_last_value_wins(bash: str, tmp_path: Path) -> None:
+    config = config_file(tmp_path, COMPLETE + "station_id=\ninstrument_host=backup\n")
+    result = run_script(bash, tmp_path, "check_station.sh", config, exercise=3)
+    assert result.returncode == 1, "a later empty value clears an earlier setting"
+    assert result.stdout == "Missing: station_id\n" and result.stderr == ""
 
 
-def test_e3_empty_unit_reports_checklist_in_order() -> None:
-    expected = [
-        "Description missing",
-        "After must include network-online.target",
-        "Wants must include network-online.target",
-        "Type must be simple",
-        "ExecStart must run an absolute python -m chassis command",
-        "Restart missing",
-        "RestartSec missing",
-        "User missing",
-        "WantedBy must include multi-user.target",
-    ]
-    assert validate_unit({}) == expected, "Report every missing setting in checklist order"
+@pytest.mark.parametrize("case", ["none", "extra", "missing", "directory", "option"])
+def test_e3_usage_errors(bash: str, tmp_path: Path, case: str) -> None:
+    config = config_file(tmp_path, COMPLETE)
+    args = {"none": [], "extra": [config, config], "missing": [tmp_path / "absent"],
+            "directory": [tmp_path], "option": ["--unknown"]}[case]
+    result = run_script(bash, tmp_path, "check_station.sh", *args, exercise=3)
+    assert result.returncode == 2, f"invalid invocation must return 2: {result}"
+    assert result.stdout == "" and result.stderr == CHECK_USAGE
 
 
-@pytest.mark.parametrize("section, key, message", [
-    ("Unit", "Description", "Description missing"),
-    ("Unit", "After", "After must include network-online.target"),
-    ("Unit", "Wants", "Wants must include network-online.target"),
-    ("Service", "Type", "Type must be simple"),
-    ("Service", "ExecStart", "ExecStart must run an absolute python -m chassis command"),
-    ("Service", "Restart", "Restart missing"),
-    ("Service", "RestartSec", "RestartSec missing"),
-    ("Service", "User", "User missing"),
-    ("Install", "WantedBy", "WantedBy must include multi-user.target"),
-])
-@pytest.mark.parametrize("values", [None, [], ["  "]])
-def test_e3_missing_and_blank_settings(valid_unit: dict[str, dict[str, list[str]]], section: str, key: str, message: str, values: list[str] | None) -> None:
-    if values is None:
-        del valid_unit[section][key]
-    else:
-        valid_unit[section][key] = values
-    assert validate_unit(valid_unit) == [message], f"Name the missing {section}.{key} setting"
+@pytest.mark.parametrize(
+    ("text", "missing"),
+    [(COMPLETE, []), ("station_id=bench-7\n", ["instrument_host", "log_dir"]),
+     ("", ["station_id", "instrument_host", "log_dir"]),
+     (COMPLETE + "log_dir=\r\n", ["log_dir"])],
+)
+def test_e4_json_matches_config_result(bash: str, tmp_path: Path, text: str, missing: list[str]) -> None:
+    config = config_file(tmp_path, text)
+    result = run_script(bash, tmp_path, "check_station.sh", "--json", config, exercise=4)
+    assert result.returncode == (1 if missing else 0), "JSON mode keeps the text mode exit status"
+    assert result.stderr == "", f"valid JSON invocation wrote diagnostics: {result.stderr}"
+    assert result.stdout.endswith("\n") and len(result.stdout.splitlines()) == 1, "emit one JSON line"
+    payload = json.loads(result.stdout)
+    assert payload == {"ok": not missing, "missing": missing}, f"wrong station report: {payload}"
+    assert type(payload["ok"]) is bool, "ok must be a JSON Boolean"
 
 
-@pytest.mark.parametrize("section, key, value, message", [
-    ("Service", "User", "root", "User is root"),
-    ("Service", "User", "0", "User is root"),
-    ("Service", "Type", "forking", "Type must be simple"),
-    ("Service", "Restart", "always", "Restart must be on-failure"),
-    ("Service", "RestartSec", "0", "RestartSec must be positive whole seconds"),
-    ("Service", "RestartSec", "-2", "RestartSec must be positive whole seconds"),
-    ("Service", "RestartSec", "0.5", "RestartSec must be positive whole seconds"),
-    ("Service", "RestartSec", "3s", "RestartSec must be positive whole seconds"),
-    ("Service", "ExecStart", "python -m chassis", "ExecStart must run an absolute python -m chassis command"),
-    ("Service", "ExecStart", "/usr/bin/python -m unrelated", "ExecStart must run an absolute python -m chassis command"),
-    ("Service", "ExecStart", "/usr/bin/echo python -m chassis", "ExecStart must run an absolute python -m chassis command"),
-    ("Unit", "After", "not-network-online.target", "After must include network-online.target"),
-    ("Install", "WantedBy", "graphical.target", "WantedBy must include multi-user.target"),
-])
-def test_e3_invalid_values(valid_unit: dict[str, dict[str, list[str]]], section: str, key: str, value: str, message: str) -> None:
-    valid_unit[section][key] = [value]
-    assert validate_unit(valid_unit) == [message], f"Reject {section}.{key}={value!r}"
-
-
-def test_e3_repeated_settings(valid_unit: dict[str, dict[str, list[str]]]) -> None:
-    valid_unit["Unit"]["After"] = ["network-online.target", "time-sync.target"]
-    valid_unit["Unit"]["Wants"] = ["time-sync.target", "network-online.target"]
-    valid_unit["Install"]["WantedBy"] = ["multi-user.target", "graphical.target"]
-    valid_unit["Service"]["User"] = ["root", " chassis "]
-    valid_unit["Service"]["Restart"] = ["always", " on-failure "]
-    valid_unit["Service"]["ExecStart"] = ["/usr/bin/python3 -m chassis"]
-    valid_unit["Other"] = {"Extra": ["ignored"]}
-    assert validate_unit(valid_unit) == [], "Combine dependency lists; use the last scalar value; ignore extra settings"
-    valid_unit["Service"]["User"].append("root")
-    assert validate_unit(valid_unit) == ["User is root"], "The final User assignment controls this checklist"
-
-
-@pytest.fixture
-def station_text() -> str:
-    return '''[station]
-name = "Rack 7"
-operator_note = "Keep this extra key"
-
-[[instruments]]
-id = "psu1"
-kind = "psu"
-resource = "TCPIP::10.0.0.5::5025::SOCKET"
-
-[[instruments]]
-id = "dmm1"
-kind = "dmm"
-resource = "TCPIP::10.0.0.6::5025::SOCKET"
-'''
-
-
-def test_e4_loads_complete_dict(tmp_path: Path, station_text: str) -> None:
-    path = tmp_path / "station.toml"
-    path.write_text(station_text, encoding="utf-8")
-    assert load_station_toml(str(path)) == tomllib.loads(station_text), "Return all loaded data, including extra keys"
-
-
-@pytest.mark.parametrize("text, key_path", [
-    ('instruments = []\n', "station"),
-    ('station = "Rack 7"\ninstruments = []\n', "station"),
-    ('[station]\n', "station.name"),
-    ('[station]\nname = true\n', "station.name"),
-    ('[station]\nname = 7\n', "station.name"),
-    ('[station]\nname = "A"\n', "instruments"),
-    ('instruments = "psu1"\n[station]\nname = "A"\n', "instruments"),
-    ('instruments = {}\n[station]\nname = "A"\n', "instruments"),
-    ('instruments = [7]\n[station]\nname = "A"\n', "instruments[0]"),
-])
-def test_e4_container_and_station_errors(tmp_path: Path, text: str, key_path: str) -> None:
-    path = tmp_path / "station.toml"
-    path.write_text(text, encoding="utf-8")
-    with pytest.raises(ValueError) as caught:
-        load_station_toml(path)
-    assert key_path in str(caught.value), f"Name the failing key path {key_path!r}"
-
-
-@pytest.mark.parametrize("key", ["id", "kind", "resource"])
-@pytest.mark.parametrize("replacement", [None, "42", "false", "[]", "{}"])
-def test_e4_instrument_field_errors(tmp_path: Path, station_text: str, key: str, replacement: str | None) -> None:
-    # Damage only the second instrument, so its index must be reported.
-    first, second = station_text.rsplit("[[instruments]]", 1)
-    lines = second.splitlines()
-    lines = [line if not line.startswith(key + " =") else (f"{key} = {replacement}" if replacement is not None else "") for line in lines]
-    path = tmp_path / "station.toml"
-    path.write_text(first + "[[instruments]]" + "\n".join(lines), encoding="utf-8")
-    with pytest.raises(ValueError) as caught:
-        load_station_toml(path)
-    expected = f"instruments[1].{key}"
-    assert expected in str(caught.value), f"Report the exact instrument field {expected}"
-
-
-def test_e4_empty_list_and_strings_are_valid(tmp_path: Path) -> None:
-    path = tmp_path / "station.toml"
-    path.write_text('instruments = []\n[station]\nname = ""\n', encoding="utf-8")
-    assert load_station_toml(path) == {"station": {"name": ""}, "instruments": []}, "This loader checks types, allowing empty strings and an empty instrument list"
-    path.write_text('[station]\nname = "A"\n[[instruments]]\nid = ""\nkind = "simulator"\nresource = ""\n', encoding="utf-8")
-    assert load_station_toml(path)["instruments"][0]["kind"] == "simulator", "Kind is a string here; deployment policy is outside this exercise"
-
-
-def test_e4_bad_toml(tmp_path: Path) -> None:
-    path = tmp_path / "broken.toml"
-    path.write_text("[station\nname = ?", encoding="utf-8")
-    with pytest.raises(tomllib.TOMLDecodeError):
-        load_station_toml(path)
-
-
-def test_e4_missing_file(tmp_path: Path) -> None:
-    with pytest.raises(FileNotFoundError):
-        load_station_toml(tmp_path / "absent.toml")
+@pytest.mark.parametrize("extra", [[], ["config", "extra"], ["absent"]])
+def test_e4_json_usage_errors(bash: str, tmp_path: Path, extra: list[str]) -> None:
+    result = run_script(bash, tmp_path, "check_station.sh", "--json", *extra, exercise=4)
+    assert result.returncode == 2, "--json still requires exactly one config path"
+    assert result.stdout == "" and result.stderr == CHECK_USAGE

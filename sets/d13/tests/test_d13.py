@@ -1,285 +1,261 @@
-from collections.abc import Iterator
-from time import perf_counter
-from typing import overload
+from copy import deepcopy
+from datetime import datetime, timedelta, timezone
+import json
+import logging
+import re
 
 import pytest
 
-from starter.windows import (
-    dedupe_keep_order,
-    first_spike,
-    max_in_windows,
-    rolling_mean,
+from starter.reporting import (
+    failures_by_channel,
+    get_station_logger,
+    summarize,
+    write_report,
 )
 
 
-class _CountedFloat(float):
-    """Count additions on readings even after their container is copied."""
-
-    def __new__(cls, value: float, additions: list[int]) -> "_CountedFloat":
-        sample = super().__new__(cls, value)
-        sample.additions = additions
-        return sample
-
-    def __add__(self, other: float) -> float:
-        self.additions[0] += 1
-        return float.__add__(self, other)
-
-    def __radd__(self, other: float) -> float:
-        return self + other
+@pytest.fixture
+def logger_names(tmp_path):
+    names = [f"d13.{tmp_path.name}.station", f"d13.{tmp_path.name}.backup"]
+    yield names
+    for name in names:
+        logger = logging.getLogger(name)
+        for handler in logger.handlers[:]:
+            logger.removeHandler(handler)
+            handler.close()
 
 
-class _ReadBudget(list[float]):
-    """Count sample accesses, including samples copied by a slice."""
+def flush(logger):
+    for handler in logger.handlers:
+        handler.flush()
 
-    def __init__(self, values: list[float]) -> None:
-        super().__init__(values)
-        self.reads = 0
-        self.limit = 12 * len(values) + 12
 
-    def _spend(self, count: int) -> None:
-        self.reads += count
-        assert self.reads <= self.limit, (
-            f"Read more than {self.limit} samples for {len(self)} inputs; "
-            "update saved state instead of rescanning each window"
+def test_e1_levels_and_line_format(tmp_path, logger_names):
+    path = tmp_path / "station.log"
+    name = logger_names[0]
+    logger = get_station_logger(name, path)
+    assert isinstance(logger, logging.Logger), "return the configured logging.Logger"
+    for level in (logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR, logging.CRITICAL):
+        logger.log(level, "CH1 reading %s", "µV")
+    flush(logger)
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 4, "record INFO through CRITICAL, omitting DEBUG"
+    for line, level in zip(lines, ("INFO", "WARNING", "ERROR", "CRITICAL")):
+        pattern = (
+            r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3} "
+            + re.escape(f"{level} {name}: CH1 reading µV")
         )
-
-    def __iter__(self) -> Iterator[float]:
-        for value in super().__iter__():
-            self._spend(1)
-            yield value
-
-    @overload
-    def __getitem__(self, index: int) -> float: ...
-
-    @overload
-    def __getitem__(self, index: slice) -> list[float]: ...
-
-    def __getitem__(self, index: int | slice) -> float | list[float]:
-        if isinstance(index, slice):
-            self._spend(len(range(*index.indices(len(self)))))
-        else:
-            self._spend(1)
-        return super().__getitem__(index)
+        assert re.fullmatch(pattern, line), f"unexpected log format: {line!r}"
+    assert logger.level == logging.INFO, "set the named logger's level to INFO"
+    assert logger.propagate is False, "station events must not propagate to parent loggers"
+    assert len(logger.handlers) == 1, "install one file handler"
+    assert isinstance(logger.handlers[0], logging.FileHandler)
+    assert logger.handlers[0].level == logging.INFO, "set the file handler's level to INFO"
 
 
-@pytest.mark.parametrize(
-    "values,window,expected",
-    [
-        ([2.0, 4.0, 8.0, 10.0], 2, [3.0, 6.0, 9.0]),
-        ([0.1, 0.2, 0.3, 0.4], 3, [0.2, 0.3]),
-        ([-4.0, 2.0, -1.0, 5.0], 2, [-1.0, 0.5, 2.0]),
-        ([7.5, -2.0], 1, [7.5, -2.0]),
-        ([1.0, 2.0, 6.0], 3, [3.0]),
-        ([5.0], 1, [5.0]),
-        ([5.0], 2, []),
-        ([], 1, []),
-    ],
-)
-def test_e1_full_windows(
-    values: list[float], window: int, expected: list[float]
-) -> None:
-    got = rolling_mean(values, window)
-    assert got == pytest.approx(expected), f"wrong means for {values}, window={window}"
+def test_e1_repeated_setup_does_not_duplicate_events(tmp_path, logger_names):
+    path = tmp_path / "run.log"
+    first = get_station_logger(logger_names[0], path)
+    first.info("before setup again")
+    second = get_station_logger(logger_names[0], path)
+    third = get_station_logger(logger_names[0], path)
+    third.info("after setup again")
+    flush(third)
+    assert first is second is third, "reuse the logger associated with this name"
+    assert len(third.handlers) == 1, "repeated setup must not accumulate handlers"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2, "each event must appear once, including after repeated setup"
+    assert lines[0].endswith(": before setup again")
+    assert lines[1].endswith(": after setup again")
 
 
-@pytest.mark.parametrize("window", [0, -1, -100])
-@pytest.mark.parametrize("values", [[], [1.0, 2.0]])
-def test_e1_invalid_window(values: list[float], window: int) -> None:
-    with pytest.raises(ValueError):
-        rolling_mean(values, window)
+def test_e1_appends_to_existing_file_with_string_path(tmp_path, logger_names):
+    path = tmp_path / "operator log.log"
+    path.write_text("previous run retained\n", encoding="utf-8")
+    logger = get_station_logger(logger_names[0], str(path))
+    logger.info("new run")
+    flush(logger)
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2, "append the event without deleting the previous run"
+    assert lines[0] == "previous run retained"
+    assert lines[1].endswith(": new run")
 
 
-@pytest.mark.parametrize("window", [1, 2, 5])
-def test_e1_preserves_input(window: int) -> None:
-    values = [3.0, 1.0, 4.0]
-    before = values.copy()
-    got = rolling_mean(values, window)
-    assert values == before, "the recorded sensor trace must stay unchanged"
-    assert got is not values, "return a new list even when window=1"
+def test_e1_station_names_have_independent_files(tmp_path, logger_names):
+    first_path = tmp_path / "primary.log"
+    second_path = tmp_path / "backup.log"
+    first = get_station_logger(logger_names[0], first_path)
+    second = get_station_logger(logger_names[1], second_path)
+    first.info("primary connected")
+    second.warning("backup disconnected")
+    flush(first)
+    flush(second)
+    first_lines = first_path.read_text(encoding="utf-8").splitlines()
+    second_lines = second_path.read_text(encoding="utf-8").splitlines()
+    assert len(first_lines) == len(second_lines) == 1, "keep station files independent"
+    assert first_lines[0].endswith(f"INFO {logger_names[0]}: primary connected")
+    assert second_lines[0].endswith(f"WARNING {logger_names[1]}: backup disconnected")
 
 
-def test_e1_linear_sample_work() -> None:
-    plain = [float(index % 17) for index in range(6000)]
-    additions = [0]
-    values = _ReadBudget([_CountedFloat(value, additions) for value in plain])
-    expected = [sum(plain[start:start + 300]) / 300 for start in range(5701)]
-    got = rolling_mean(values, 300)
-    assert got == pytest.approx(expected), "the running total must slide one sample at a time"
-    limit = 12 * len(plain) + 12
-    assert additions[0] <= limit, (
-        f"Used {additions[0]} additions for {len(plain)} inputs (limit {limit}); "
-        "reuse the total instead of summing each window, even after copying the input"
-    )
-
-
-def test_e1_fast_enough() -> None:
-    values = [float(index % 1000) for index in range(200_000)]
-    start = perf_counter()
-    got = rolling_mean(values, 1000)
-    elapsed = perf_counter() - start
-    assert got == pytest.approx([499.5] * 199_001), "one mean is needed per full window"
-    assert elapsed <= 2.0, f"rolling_mean took {elapsed:.3f}s; reuse the previous total (limit 2s)"
+def test_e2_counts_every_check_on_repeated_channels():
+    results = [
+        {"channel": "CH1", "status": status, "message": "voltage check"}
+        for status in ("PASS", "FAIL", "PASS", "ERROR", "FAIL")
+    ]
+    got = summarize(results)
+    assert got == {"counts": {"PASS": 2, "FAIL": 2, "ERROR": 1}, "overall": "ERROR"}
+    assert type(got) is dict and type(got["counts"]) is dict, "return ordinary dictionaries"
 
 
 @pytest.mark.parametrize(
-    "values,window,expected",
+    "statuses, expected",
     [
-        ([4.0, 2.0, 3.0, 1.0, 5.0], 3, [4.0, 3.0, 5.0]),
-        ([1.0, 2.0, 3.0, 4.0], 2, [2.0, 3.0, 4.0]),
-        ([4.0, 3.0, 2.0, 1.0], 2, [4.0, 3.0, 2.0]),
-        ([8.0, 8.0, 1.0, 2.0], 2, [8.0, 8.0, 2.0]),
-        ([-4.0, -2.0, -7.0, -1.0], 2, [-2.0, -2.0, -1.0]),
-        ([2.0, 2.0, 2.0], 2, [2.0, 2.0]),
-        ([2.5, -1.0], 1, [2.5, -1.0]),
-        ([1.0, 9.0, 3.0], 3, [9.0]),
-        ([5.0], 1, [5.0]),
-        ([5.0], 2, []),
-        ([], 4, []),
+        (["PASS"], "PASS"),
+        (["FAIL"], "FAIL"),
+        (["ERROR"], "ERROR"),
+        (["FAIL", "PASS", "PASS"], "FAIL"),
+        (["PASS", "PASS", "FAIL"], "FAIL"),
+        (["ERROR", "FAIL", "PASS"], "ERROR"),
+        (["PASS", "FAIL", "ERROR"], "ERROR"),
     ],
 )
-def test_e2_full_windows(
-    values: list[float], window: int, expected: list[float]
-) -> None:
-    got = max_in_windows(values, window)
-    assert got == expected, f"wrong maxima for {values}, window={window}"
+def test_e2_worst_status_is_severity_not_order_or_frequency(statuses, expected):
+    results = [{"channel": "CH4", "status": status, "message": "check"} for status in statuses]
+    got = summarize(results)
+    assert got["overall"] == expected, f"for {statuses}, worst status must be {expected}"
+    assert set(got["counts"]) == set(statuses), "include only statuses actually observed"
 
 
-@pytest.mark.parametrize("window", [0, -1, -100])
-@pytest.mark.parametrize("values", [[], [1.0, 2.0]])
-def test_e2_invalid_window(values: list[float], window: int) -> None:
-    with pytest.raises(ValueError):
-        max_in_windows(values, window)
+def test_e2_empty_run():
+    assert summarize([]) == {"counts": {}, "overall": "PASS"}, "empty runs use the documented default"
 
 
-@pytest.mark.parametrize("window", [1, 2, 5])
-def test_e2_preserves_input(window: int) -> None:
-    values = [3.0, 1.0, 4.0]
-    before = values.copy()
-    got = max_in_windows(values, window)
-    assert values == before, "the recorded sensor trace must stay unchanged"
-    assert got is not values, "return a new list even when window=1"
+def test_e2_preserves_input_and_does_not_share_counts():
+    results = [{"channel": "CH2", "status": "PASS", "message": "ready", "reading": 4.2}]
+    before = deepcopy(results)
+    first = summarize(results)
+    assert results == before, "summary must not modify the check records"
+    first["counts"]["PASS"] = 99
+    assert summarize(results) == {"counts": {"PASS": 1}, "overall": "PASS"}, "each call gets fresh counts"
 
 
-@pytest.mark.parametrize("descending", [False, True])
-def test_e2_linear_sample_work(descending: bool) -> None:
-    plain = [float((index * 37) % 503) for index in range(6000)]
-    if descending:
-        plain = [float(6000 - index) for index in range(6000)]
-    values = _ReadBudget(plain)
-    expected = [max(plain[start:start + 300]) for start in range(5701)]
-    got = max_in_windows(values, 300)
-    assert got == expected, "discard expired and dominated candidates, preserving the maximum"
+def test_e3_groups_fail_and_error_messages_in_channel_order():
+    results = [
+        {"channel": "CH1", "status": "FAIL", "message": "voltage low"},
+        {"channel": "CH2", "status": "PASS", "message": "ready"},
+        {"channel": "CH3", "status": "ERROR", "message": "no reply"},
+        {"channel": "CH1", "status": "PASS", "message": "recovered"},
+        {"channel": "CH1", "status": "ERROR", "message": "timeout"},
+        {"channel": "CH3", "status": "FAIL", "message": "current high"},
+    ]
+    got = failures_by_channel(results)
+    assert got == {"CH1": ["voltage low", "timeout"], "CH3": ["no reply", "current high"]}
+    assert type(got) is dict, "return a plain dict rather than a defaultdict"
 
 
-def test_e2_fast_enough() -> None:
-    values = [float(200_000 - index) for index in range(200_000)]
-    start = perf_counter()
-    got = max_in_windows(values, 1000)
-    elapsed = perf_counter() - start
-    assert got == values[:199_001], "on a decreasing trace the leftmost sample is the maximum"
-    assert elapsed <= 2.0, f"max_in_windows took {elapsed:.3f}s; use a deque (limit 2s)"
+@pytest.mark.parametrize("results", [[], [{"channel": "CH2", "status": "PASS", "message": "ready"}]])
+def test_e3_omits_channels_without_failures(results):
+    assert failures_by_channel(results) == {}, "empty and all-PASS runs have no failure channels"
+
+
+def test_e3_keeps_duplicate_and_empty_messages():
+    results = [
+        {"channel": "CH1", "status": status, "message": message}
+        for status, message in (("FAIL", "low"), ("ERROR", ""), ("FAIL", "low"))
+    ]
+    assert failures_by_channel(results) == {"CH1": ["low", "", "low"]}, "retain every failure message"
+
+
+def test_e3_preserves_input_and_uses_separate_lists():
+    results = [
+        {"channel": "CH1", "status": "FAIL", "message": "low"},
+        {"channel": "CH2", "status": "ERROR", "message": "offline"},
+    ]
+    before = deepcopy(results)
+    got = failures_by_channel(results)
+    assert results == before, "grouping must not modify check records"
+    got["CH1"].append("operator note")
+    assert got["CH2"] == ["offline"], "each channel needs its own list"
+    assert failures_by_channel(results) == {"CH1": ["low"], "CH2": ["offline"]}, "calls must be independent"
+
+
+@pytest.mark.parametrize("string_path", [False, True])
+def test_e4_report_shape_summary_and_full_results(tmp_path, string_path):
+    results = [
+        {"channel": "CH2", "status": "PASS", "message": "ready", "reading": 2.5},
+        {"channel": "CH1", "status": "ERROR", "message": "capteur débranché", "details": [1, None]},
+        {"channel": "CH1", "status": "FAIL", "message": "voltage low"},
+    ]
+    meta = {"station": "A1", "operator": "Zoë", "attempt": 2}
+    now = datetime(2026, 10, 28, 12, 30, tzinfo=timezone.utc)
+    path = tmp_path / "run report.json"
+    returned = write_report(results, str(path) if string_path else path, meta, now=now)
+    got = json.loads(path.read_text(encoding="utf-8"))
+    assert returned is None, "write_report writes a file and returns None"
+    assert got == {
+        "meta": {**meta, "generated_utc": "2026-10-28T12:30:00+00:00"},
+        "summary": {"counts": {"PASS": 1, "ERROR": 1, "FAIL": 1}, "overall": "ERROR"},
+        "results": results,
+    }, "preserve run metadata and full result records, using the documented report shape"
 
 
 @pytest.mark.parametrize(
-    "values,window,factor,expected",
+    "now, expected",
     [
-        ([2.0, 2.0, 4.0, 9.0], 2, 2.0, 3),
-        ([2.0, 2.0, 5.0, 100.0], 2, 2.0, 2),
-        ([100.0, 1.0, 1.0, 3.0], 2, 2.0, 3),
-        ([10.0, 10.0, 1.0, 1.0, 4.0, 99.0], 2, 2.0, 4),
-        ([0.0, 0.0, 0.0, 1.0], 2, 2.0, 3),
-        ([-2.0, -2.0, -3.0], 2, 2.0, 2),
-        ([4.0, 4.0, 3.0], 2, 0.5, 2),
-        ([1.0, 1.0, 3.0], 1, 2.0, 2),
-        ([1.0, 1.0, 2.0 + 1e-8], 2, 2.0, 2),
-        ([0.0, 0.0, 2e-12], 2, 2.0, 2),
-        ([-1.0, -1.0, -2.0 + 1e-8], 2, 2.0, 2),
-        ([1.0, 1.0, 1.0], 2, 2.0, None),
-        ([9.0, 9.0], 2, 2.0, None),
-        ([9.0], 3, 2.0, None),
-        ([], 1, 2.0, None),
+        (datetime(2026, 10, 28, 1, 30, 2, 123456, tzinfo=timezone(timedelta(hours=2))),
+         "2026-10-27T23:30:02.123456+00:00"),
+        (datetime(2026, 10, 28, 23, 45, tzinfo=timezone(timedelta(hours=-3, minutes=-30))),
+         "2026-10-29T03:15:00+00:00"),
     ],
 )
-def test_e3_previous_window(
-    values: list[float], window: int, factor: float, expected: int | None
-) -> None:
-    got = first_spike(values, window, factor)
-    assert got == expected, (
-        f"for {values}, window={window}, factor={factor}, expected first spike {expected}, got {got}"
-    )
+def test_e4_injected_time_is_converted_to_utc(tmp_path, now, expected):
+    path = tmp_path / "report.json"
+    write_report([], path, {}, now=now)
+    got = json.loads(path.read_text(encoding="utf-8"))
+    assert got["meta"]["generated_utc"] == expected, "convert the instant to UTC, preserving fractional seconds"
 
 
-@pytest.mark.parametrize(
-    "values",
-    [
-        [2.0, 2.0, 4.0],
-        [0.0, 0.0, 0.0],
-        [0.1, 0.4, 0.1, 0.1, 0.2],
-        [1.0, 1.0, 2.0 + 1e-10],
-        [0.0, 0.0, 5e-13],
-        [-1.0, -1.0, -2.0 + 1e-10],
-    ],
-)
-def test_e3_equal_threshold_is_not_spike(values: list[float]) -> None:
-    assert first_spike(values, 2, 2.0) is None, "only a strict increase above the threshold counts"
+def test_e4_metadata_copy_overwrites_old_timestamp_without_mutating_inputs(tmp_path):
+    results = [{"channel": "CH1", "status": "FAIL", "message": "low", "details": {"v": 1.0}}]
+    meta = {"station": "A1", "generated_utc": "old timestamp", "tags": ["acceptance"]}
+    before_results, before_meta = deepcopy(results), deepcopy(meta)
+    now = datetime(2026, 10, 28, tzinfo=timezone.utc)
+    path = tmp_path / "report.json"
+    write_report(results, path, meta, now=now)
+    got = json.loads(path.read_text(encoding="utf-8"))
+    assert results == before_results and meta == before_meta, "do not change caller-owned inputs"
+    assert got["meta"] == {**meta, "generated_utc": now.isoformat()}, "replace a stale timestamp in the file copy"
 
 
-@pytest.mark.parametrize("window", [0, -1])
-@pytest.mark.parametrize("values", [[], [1.0, 2.0, 3.0]])
-def test_e3_invalid_window(values: list[float], window: int) -> None:
-    with pytest.raises(ValueError):
-        first_spike(values, window, 2.0)
+def test_e4_overwrites_existing_report_with_empty_run(tmp_path):
+    path = tmp_path / "report.json"
+    path.write_text("old report content that is longer than an empty run " * 100, encoding="utf-8")
+    now = datetime(2026, 10, 28, tzinfo=timezone.utc)
+    write_report([], path, {}, now=now)
+    assert json.loads(path.read_text(encoding="utf-8")) == {
+        "meta": {"generated_utc": now.isoformat()},
+        "summary": {"counts": {}, "overall": "PASS"},
+        "results": [],
+    }, "replace the old file completely; do not append JSON documents"
 
 
-@pytest.mark.parametrize("factor", [0.0, -0.5, -3.0])
-@pytest.mark.parametrize("values", [[], [1.0, 2.0, 3.0]])
-def test_e3_invalid_factor(values: list[float], factor: float) -> None:
-    with pytest.raises(ValueError):
-        first_spike(values, 2, factor)
+def test_e4_default_time_is_current_aware_utc(tmp_path):
+    path = tmp_path / "report.json"
+    before = datetime.now(timezone.utc)
+    write_report([], path, {"station": "A1"})
+    after = datetime.now(timezone.utc)
+    got = json.loads(path.read_text(encoding="utf-8"))
+    timestamp = got["meta"]["generated_utc"]
+    parsed = datetime.fromisoformat(timestamp)
+    assert timestamp.endswith("+00:00"), "use isoformat with an explicit UTC offset"
+    assert before <= parsed <= after, "when now is omitted, use the current UTC instant"
 
 
-def test_e3_preserves_input() -> None:
-    values = [2.0, 2.0, 5.0, 100.0]
-    before = values.copy()
-    assert first_spike(values, 2, 2.0) == 2
-    assert values == before, "spike detection must not consume or rearrange the trace"
+def test_e1_file_error_reaches_caller(tmp_path, logger_names):
+    with pytest.raises(OSError):
+        get_station_logger(logger_names[0], tmp_path)
 
 
-def test_e3_linear_sample_work() -> None:
-    values = _ReadBudget([1.0] * 5999 + [10.0])
-    assert first_spike(values, 300, 2.0) == 5999, "check every candidate using an updated baseline"
-
-
-@pytest.mark.parametrize(
-    "serials,expected",
-    [
-        (["PSU-7", "DMM-2", "PSU-7", "PSU-8"], ["PSU-7", "DMM-2", "PSU-8"]),
-        (["Z-9", "A-1", "Z-9", "M-2", "A-1"], ["Z-9", "A-1", "M-2"]),
-        (["PSU-7", "psu-7", " PSU-7 ", "PSU-7"], ["PSU-7", "psu-7", " PSU-7 "]),
-        (["", "DMM-1", "", "DMM-1"], ["", "DMM-1"]),
-        (["DMM-1"] * 4, ["DMM-1"]),
-        (["DMM-1"], ["DMM-1"]),
-        ([], []),
-    ],
-)
-def test_e4_first_occurrences(serials: list[str], expected: list[str]) -> None:
-    got = dedupe_keep_order(serials)
-    assert got == expected, f"keep the first occurrence of each exact serial in {serials!r}"
-
-
-def test_e4_preserves_input() -> None:
-    serials = ["PSU-3", "DMM-1", "PSU-3"]
-    before = serials.copy()
-    got = dedupe_keep_order(serials)
-    assert serials == before, "keep the original discovery log unchanged"
-    assert got is not serials, "return a new list"
-
-
-def test_e4_fast_enough() -> None:
-    unique = [f"DMM-{index:06d}" for index in range(100_000)]
-    serials = unique + unique[::-1]
-    start = perf_counter()
-    got = dedupe_keep_order(serials)
-    elapsed = perf_counter() - start
-    assert got == unique, "all 100,000 serials must appear once in discovery order"
-    assert elapsed <= 2.0, f"dedupe_keep_order took {elapsed:.3f}s; use set membership (limit 2s)"
+def test_e4_file_error_reaches_caller(tmp_path):
+    with pytest.raises(OSError):
+        write_report([], tmp_path, {}, now=datetime(2026, 10, 28, tzinfo=timezone.utc))

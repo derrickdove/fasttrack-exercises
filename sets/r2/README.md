@@ -1,4 +1,4 @@
-# r2 — Week 2 station review
+# r2 — Block 2 station review
 
 **Time:** about 60 minutes · **Read first:** review day, no new reading. Revisit the earlier readings listed below as needed. · **You edit:** `starter/review2.py` and `starter/test_review2_learner.py`.
 
@@ -6,7 +6,7 @@
 
 A chassis test station measures current, summarizes step results, and shows an operator recent problems. This set mixes this week with earlier weeks: implement this week's three helpers and two test exercises, then revisit week 1 CSV files and exceptions with two new problems. Everything uses simulated results; no instruments are connected.
 
-Readings to revisit from d08-d13, plus d04-d05 for the final two exercises:
+Readings to revisit from d08-d15, plus d04-d05 for the final two exercises:
 
 - Python Tutorial section 6, "Modules"; `typing` documentation introduction; mypy "Getting started".
 - pytest "Get started", "How to write and report assertions", "How to use fixtures" (including `tmp_path`), and "How to parametrize".
@@ -65,7 +65,7 @@ Accept only the exact strings `PASS`, `FAIL`, and `ERROR`. Return `(counts, over
 
 **Watch out:** `"pass"` and `"ERROR "` are invalid. A `Counter` is a dictionary-like counter from `collections`; it can help, but is optional.
 
-**Reread:** d12: `collections` documentation, `Counter` and counting examples.
+**Reread:** d13: `collections` documentation, `Counter` and counting examples.
 
 ### E3 — Recent problems in a bounded window (medium, ~10 min)
 
@@ -81,7 +81,7 @@ Use a deque and a running count: add the incoming status, remove the oldest when
 
 **Watch out:** A window of 1 produces one count per result. Do not emit a partial window at the start or end. Treat both failure statuses as bad.
 
-**Reread:** d13: `collections.deque`, especially `append` and `popleft`; *A Common-Sense Guide to Data Structures and Algorithms*, Big O and queues.
+**Reread:** d15: `collections.deque`, especially `append` and `popleft`; *A Common-Sense Guide to Data Structures and Algorithms*, Big O and queues.
 
 ### E4 — Write tests for inclusive current limits (medium, ~9 min)
 
@@ -101,7 +101,7 @@ The checks run only your `test_e4_*` tests against the correct helper and four s
 
 **Watch out:** Don't implement a replacement checker inside the tests. Import the supplied helper and assert its observable result. E4 is independent of whether you finished E1-E3.
 
-**Reread:** d09: pytest "Get started" and "How to write and report assertions", expected exceptions; d11: "How to parametrize", parameter sets.
+**Reread:** d09: pytest "Get started" and "How to write and report assertions", expected exceptions; d12: "How to parametrize", parameter sets.
 
 ### E5 — Write tests for operator logs (medium, ~9 min)
 
@@ -128,7 +128,7 @@ Your E5 tests must accept the correct helper and catch three defects separately:
 
 **Watch out:** Checking only `caplog.text` can miss a wrong level or duplicate record. INFO is normally filtered out unless capture is enabled.
 
-**Reread:** d10: pytest "How to use fixtures", fixture arguments and per-test isolation; d12: Logging HOWTO, logging levels and named loggers; d09: assertion reporting.
+**Reread:** d11: pytest "How to use fixtures", fixture arguments and per-test isolation; d13: Logging HOWTO, logging levels and named loggers; d09: assertion reporting.
 
 
 ### E6 — Load a station's limit bands (easy–medium, ~9 min)

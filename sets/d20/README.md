@@ -1,92 +1,90 @@
-﻿# d20 — SCPI over Ethernet: a raw TCP socket client
+# d20 — Safe by default: context managers, timeouts and retries
 
-**Time:** about 45 minutes · **Read first:** [Python Socket Programming HOWTO](https://docs.python.org/3/howto/sockets.html); [The Linux Command Line, ch. 16: networking (ping, ip, ss, ssh)](https://linuxcommand.org/tlcl.php); [Python socket docs: create_connection and settimeout](https://docs.python.org/3/library/socket.html) · **You edit:** `starter/tcp_instrument.py`
+**Time:** about 45 minutes · **Read first:** [contextlib, the with statement, and decorators](https://docs.python.org/3/library/contextlib.html), [Missing Semester: Debugging and Profiling](https://missing.csail.mit.edu/2020/debugging-profiling/), [Python Tutorial §8.7: Defining Clean-up Actions](https://docs.python.org/3/tutorial/errors.html#defining-clean-up-actions), and [functools.wraps](https://docs.python.org/3/library/functools.html#functools.wraps) · **You edit:** `starter/safety.py`
 
 ## What you're building
 
-Your test station controls a bench instrument over Ethernet, a network connection between devices. SCPI (Standard Commands for Programmable Instruments) is a text command language used by instruments; here, `OUTP ON` enables an output and `MEAS:VOLT?` asks for voltage. A query is a command that asks for a reply. Build a client that connects, sends commands, and collects complete replies so a test step can use the measurement.
+A test station uses a power supply unit (**PSU**) to power the hardware being tested. You will make its output cleanup reliable, retry temporary communication failures, bound readiness checks, and increase voltage gradually. Tests use supplied stand-ins for instruments and time, so no hardware is needed.
 
 ## How this works
 
-1. Replace the `raise NotImplementedError(...)` lines in `starter/tcp_instrument.py`. Don't edit `tests/`. E3 improves the methods you wrote in E2; it has no separate method stub.
-2. Press **Ctrl+Shift+B → Test: d20** (or run `bash tools/run.sh d20` / `tools\run.ps1 d20`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
-3. Report **all pass / partial / stuck** in the tracker.
+1. Replace the `raise NotImplementedError(...)` lines in `starter/safety.py`. Don't edit `tests/`. The supplied `Protocol` classes describe the methods an instrument must offer; their `...` declarations are complete and need no edits.
+2. Press Ctrl+Shift+B → **Test: d20** (or run `bash tools/run.sh d20` / `tools\run.ps1 d20`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+3. Report all pass / partial / stuck in the tracker.
 
-TCP (Transmission Control Protocol) delivers an ordered stream of bytes, the numeric units used to transmit data. A socket is the program's connection endpoint; a raw TCP client uses this socket directly. The host identifies the instrument computer, and the port identifies its listening service. Tests use `127.0.0.1` (your own computer) and an automatically assigned port, so no hardware or internet is needed.
+A **channel** is an independently controlled PSU output, identified here by an integer. A **context manager** runs entry and exit actions around a `with` block; Python calls `__enter__` before the block and `__exit__` when it ends, including on an exception (a raised error). Returning false from `__exit__` lets that error continue to the caller. A `finally` block runs cleanup whether a `try` block succeeds or fails.
 
-A class defines an object's behavior; an instance is one object created from it. A context manager supports `with`, which runs cleanup when the block ends, even after an exception (an error passed to the caller). A timeout bounds how long one blocking socket operation waits; it is not a deadline for the whole query.
+A **decorator** wraps a function to add behavior; `@decorator` applies it. `functools.wraps` copies the original function's name and documentation onto the wrapper. `*args` and `**kwargs` forward positional and named arguments. A **callable** is something you can call, such as a function. `ParamSpec` and `TypeVar` in the supplied annotations keep argument and result types connected; you need not change those annotations.
 
-UTF-8 is a text encoding: `.encode("utf-8")` turns text into bytes and `.decode("utf-8")` turns bytes back into text. LF (line feed), written `\n`, marks the end of each message here. The `b` prefix makes a bytes literal, such as `b"OK"`. A buffer stores received bytes until a whole reply is available:
+A **retry** is another attempt after a specified error. **Polling** means checking repeatedly. A **deadline** is a time after which no further check starts; a **monotonic clock** measures elapsed time without jumping when the computer's calendar clock changes. **Injection** means passing a replacement dependency, such as a fake sleep function, to make behavior easy to test. A **truthy** result acts like true in an `if`; `False`, `None`, `0`, and empty containers are falsey.
 
 ```python
-pending = b"STAT"
-pending += b"US\nNEXT"
-line, remaining = pending.split(b"\n", 1)
-print(line.decode("utf-8"))  # STATUS
-print(remaining)            # b'NEXT'
-```
+from contextlib import nullcontext
 
-Use `sendall` to send the complete encoded message. `recv` returns up to the requested byte count, so one call might return part of a line, several lines, or `b""` when the peer (the other endpoint) closes. Keep bytes until LF arrives; decode only the complete line because a UTF-8 character may span receives.
+with nullcontext("station A") as name:  # a context manager with no cleanup
+    print(name)
+```
 
 ## Exercises
 
-### E1 — Connect and release the bench instrument (easy, ~10 min)
+### E1 — Leave every output off (easy, ~10 min)
 
-**Goal:** Own one socket for the lifetime of a station instrument object.
+**Goal:** Implement `OutputGuard(psu, channels)` and its context-manager methods. `psu.output(ch, False)` disables a channel. Store a snapshot (an independent copy) of the supplied sequence of channel numbers at construction, so later changes to the caller's list do not affect cleanup. Construction and entry make no instrument calls. Entry returns the guard itself.
 
-**Signatures:** `TcpInstrument(host: str, port: int, timeout: float = 2.0)`, `close() -> None`, `__enter__() -> TcpInstrument`, and the supplied `__exit__(...) -> None`.
+**Signature:** `OutputGuard(psu: OutputDevice, channels: Sequence[int])`; see the supplied `__enter__` and `__exit__` signatures.
 
-Connect immediately in `__init__` using `socket.create_connection((host, port), timeout=timeout)`. Use the supplied timeout, in seconds, for subsequent sends and receives too (`settimeout` can set it explicitly). `close()` releases the socket and is safe to call more than once. `__enter__` returns this same instance. `__exit__` always closes and lets any exception continue to the caller.
+Python passes `__exit__` the exception class (`exc_type`), the exception object (`exc_value`), and its recorded call stack (`traceback`); all three are `None` on a normal exit. On exit, attempt to disable every listed channel in order, including duplicates. An empty sequence does nothing. Return `False` when cleanup completes. If a cleanup call raises, still attempt the remaining channels. If the block already raised, preserve that same exception object; otherwise raise the first cleanup exception. This also applies to interruption exceptions such as `KeyboardInterrupt`, which inherit from `BaseException` rather than `Exception`.
 
-**Example:** `with TcpInstrument("127.0.0.1", bench_port) as bench:` gives the block a connected `bench`; leaving the block releases it. `bench_port` must be the port where an instrument is actually listening.
+**Example:** `with OutputGuard(psu, [2, 1]): ...` ends by calling `output(2, False)` then `output(1, False)`.
 
-**Watch out:** Creating the object already connects; entering `with` should not connect again. Let connection errors propagate. Later tests depend on E1, so complete it first.
+**Watch out:** Do not enable outputs or suppress the block's error. This guard requests shutdown; an instrument that rejects an off command cannot be guaranteed to turn off.
 
-**Reread:** Socket Programming HOWTO, “Creating a Socket” and “Disconnecting”; socket docs, `create_connection` and `socket.settimeout`. In The Linux Command Line ch. 16, revisit `ping` (reachability), `ip` (interface addresses), `ss` (socket status), and `ssh` (a secure remote shell). These are diagnostic tools; no shell commands are required by this set.
+**Reread:** contextlib, “Examples and Recipes” → “Supporting a variable number of context managers”; Python Tutorial §8.7; Missing Semester, “Debugging” → “Logging”. Trace the order of cleanup events when debugging.
 
-### E2 — Send a command and collect a complete reply (medium, ~15 min)
+### E2 — Retry a temporary instrument failure (medium, ~12 min)
 
-**Goal:** Let a station configure the instrument and read a measurement.
+**Goal:** Implement a decorator factory (a function that returns a decorator) for station operations.
 
-**Signatures:** `write(cmd: str) -> None`, `query(cmd: str) -> str`.
+**Signature:** `retry(times: int, exceptions: tuple[type[Exception], ...], delay_s: float = 0, sleep=time.sleep)`
 
-`write` sends `(cmd + "\n")` encoded as UTF-8, without waiting for a reply. `query` sends its command in the same way, then reads exactly one LF-terminated reply. Return the decoded text with only the final LF removed. Preserve leading/trailing spaces; an empty reply is `""`. Keep any bytes after the first LF for the next reply, including across method calls. You may add a private helper method (an internal method, conventionally named with a leading underscore) for reading one reply.
+`times` is the total number of attempts, including the first. Reject `times < 1` or `delay_s < 0` with `ValueError` when `retry(...)` is called, before decorating anything. Other inputs have the annotated types; `exceptions` is a tuple of exception classes, possibly empty. Forward all arguments and return the first successful result, including falsey results. Preserve the function's name and docstring with `functools.wraps`.
 
-All supplied commands are strings without CR (`\r`, carriage return) or LF. Replies use LF, not CRLF. No command validation or SCPI parsing is required. If `recv` returns `b""` before a full reply is available, raise `ConnectionError`; never return an incomplete measurement.
+Only errors matching `exceptions` trigger another attempt (subclasses, more specific kinds of the listed error classes, match too). Before each next attempt, call the injected `sleep(delay_s)` exactly once, even when the delay is zero. Do not sleep before the first attempt, after success, after an unlisted error, or after exhausting attempts. Re-raise the last operation error unchanged when attempts run out. A sleep error propagates immediately. Each invocation gets its own attempt budget.
 
-**Example:** `bench.write("OUTP ON")` sends `b"OUTP ON\n"`. If `bench.query("MEAS:VOLT?")` receives `b" 28."` then `b"0 \n"`, return `" 28.0 "`.
+**Example:** `@retry(3, (OSError,), delay_s=0.2, sleep=record_sleep)` allows up to three operation calls and two calls to `record_sleep(0.2)`.
 
-**Watch out:** `strip()` would remove meaningful spaces. Do not assume one `recv` equals one reply, or discard later reply bytes. Add timeout messages in E3.
+**Watch out:** Retrying an operation can repeat its effects. Here the caller chooses operations for which repeating the request is acceptable.
 
-**Reread:** Socket Programming HOWTO, “Using a Socket”, especially partial sends/receives and delimiting messages (marking message boundaries).
+**Reread:** contextlib, “Using a context manager as a function decorator”; functools.wraps; Missing Semester, “Debugging” → “Logging” (record attempts and errors).
 
-### E3 — Tell the operator which command timed out (easy, ~8 min)
+### E3 — Wait for station readiness with a deadline (medium, ~11 min)
 
-**Goal:** Make a silent instrument produce a useful test-step error.
+**Goal:** Poll a readiness function without waiting forever between checks.
 
-**Signatures:** Improve `write` and `query`; there is no new public method.
+**Signature:** `with_deadline(fn, timeout_s, clock=time.monotonic, sleep=time.sleep) -> T`
 
-If sending a command or waiting for its complete reply times out, raise the built-in `TimeoutError` with the exact command text somewhere in its message. This includes a reply that starts arriving but never reaches LF. Keep E1's configured timeout. A connection attempt has no command yet, so its errors need no command text.
+Reject a negative timeout with `ValueError` before calling any dependency. Compute the deadline from the injected clock once, then call `fn()` immediately, even for a zero timeout. Return the exact first truthy result. After a falsey result, raise `TimeoutError` if no time remains. Otherwise sleep for the smaller of 0.01 seconds and the remaining time. Check the clock after sleeping: at or beyond the deadline, raise `TimeoutError` without another `fn()` call. Repeat while time remains. The timeout message is up to you.
 
-**Example:** A silent `bench.query("MEAS:CURR?")` raises `TimeoutError("Timed out reading reply to 'MEAS:CURR?'")`. Other wording is fine if it includes `MEAS:CURR?`.
+The clock returns seconds and never moves backward; sleep advances time. Propagate errors from `fn`, `clock`, or `sleep` immediately. Calls are synchronous (one finishes before the next starts): this helper cannot interrupt a blocked `fn()`. A truthy result from an already-started call is accepted even if that call took past the deadline.
 
-**Watch out:** Catch a socket timeout, not every exception. In current Python, `socket.timeout` is an alias of `TimeoutError`. After a timeout or broken connection, the caller should close the client; recovering that connection is outside this set. You are not asked to retry or turn an error into a measurement value.
+**Example:** if readiness returns `None` then `{"ready": True}`, return that dictionary after one sleep, provided time remains.
 
-**Reread:** socket docs, `socket.settimeout` and “Notes on socket timeouts”; Socket Programming HOWTO, “Using a Socket”.
+**Watch out:** Use the supplied clock and sleep, not calendar time or a real delay hidden inside your code. A zero timeout still permits the immediate check, but never a second one.
 
-### E4 — Pipeline a station measurement batch (medium, ~12 min)
+**Reread:** contextlib, “Examples and Recipes” → “Catching exceptions from __enter__ methods” (keep the protected operation's exception distinct); Missing Semester, “Debugging” → “Debuggers” (inspect the remaining time).
 
-**Goal:** Ask for several measurements without waiting between commands.
+### E4 — Ramp voltage and recover safely (medium, ~12 min)
 
-**Signature:** `query_many(cmds: list[str]) -> list[str]`.
+**Goal:** Increase a PSU channel from 0 V (volts, the unit of electrical potential) toward a target. A **ramp** is a series of small changes; **settling** is waiting for the instrument to stabilize after a change.
 
-Pipelining means sending every command before starting to read any replies. Use E2's command encoding and reply rules. Return one reply for each command, in the same order, preserving duplicate commands and leaving the input list unchanged. `[]` returns `[]` without sending or reading. Later `query` or `query_many` calls must still work on the same connection.
+**Signature:** `ramp_voltage(psu, ch, target, step, settle) -> None`
 
-Carry E3's error handling forward: a send timeout names the command being sent; a read timeout names the command whose reply is currently awaited. Raise the error rather than return a partial list.
+The caller has already set this channel to 0 V and enabled its output. Use `psu.set_voltage(ch, voltage)`; do not read voltage or enable output. Inputs are finite numbers. Reject `target < 0` or `step <= 0` with `ValueError` before any device or settle calls. On valid input, write `min(previous + step, target)` until you reach the target. Call the zero-argument `settle()` after each successful write, including the final one. Never write a value above target. A zero target does nothing; a step larger than target writes target once. Return `None` and leave output enabled on success.
 
-**Example:** `bench.query_many(["MEAS:VOLT?", "MEAS:CURR?"])` sends both lines first. Receiving `b"28.0\n0.25\n"` returns `["28.0", "0.25"]`.
+If a voltage write or settle raises any `BaseException`, attempt `set_voltage(ch, 0.0)`, then `output(ch, False)`, then re-raise the original exception object. Attempt both cleanup operations even if either raises; their errors must not replace the original. Do not settle during cleanup. Invalid-input errors need no cleanup because no operation has started.
 
-**Watch out:** Calling `query` once per command is sequential, so it fails when an instrument waits for the entire batch before replying. Reuse a reply-reading helper, and preserve extra bytes when a receive contains several replies.
+**Example:** target `5`, step `2` writes `2`, `4`, `5`, with one settle call after each. If settling at `4` fails, the next commands are voltage `0` and output off.
 
-**Reread:** Socket Programming HOWTO, “Using a Socket”, especially its warning that a receive can include the start of the following message.
+**Watch out:** Use `min` to clamp the last increment. Keep validation outside the recovery block. As in E1, cleanup can only attempt commands when the instrument itself is failing.
 
+**Reread:** Python Tutorial §8.7; contextlib, “Examples and Recipes” → “Replacing any use of try-finally and flag variables”; Missing Semester, “Debugging” → “Logging” (inspect the command sequence).

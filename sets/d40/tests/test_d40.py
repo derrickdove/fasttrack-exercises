@@ -1,168 +1,183 @@
+from pathlib import Path
+import shlex
+from typing import Any
+
 import pytest
+import yaml
 
-from starter.registers import clear_bits, decode_status, explain, field, set_bits, unpack_status_frame
-from starter.registers import endian_answers
-
-
-_ENDIAN_ANSWERS = {"Q1": "B", "Q2": "D", "Q3": "A", "Q4": "C"}
-
-@pytest.mark.parametrize(
-    ("byte", "expected"),
-    [
-        (0, {"ready": False, "output_on": False, "overcurrent": False, "overtemp": False}),
-        (255, {"ready": True, "output_on": True, "overcurrent": True, "overtemp": True}),
-        (0x85, {"ready": True, "output_on": True, "overcurrent": False, "overtemp": True}),
-    ],
-)
-def test_e1_operator_flags(byte: int, expected: dict[str, bool]) -> None:
-    got = decode_status(byte)
-    assert got == expected, f"status {byte:#04x}: expected {expected}, got {got}"
-    assert all(type(value) is bool for value in got.values()), "operator flags must be bool values"
+from starter.review_fix import branch_name_ok, failed_channels, within_limits
 
 
-@pytest.mark.parametrize("bit, active", [(0, "ready"), (2, "output_on"), (4, "overcurrent"), (7, "overtemp")])
-def test_e1_individual_masks(bit: int, active: str) -> None:
-    got = decode_status(1 << bit)
-    expected = {name: name == active for name in ("ready", "output_on", "overcurrent", "overtemp")}
-    assert got == expected, f"bit {bit} alone should activate only {active}"
+@pytest.mark.parametrize("value, expected", [(24.0, True), (21.0, False), (27.0, False)])
+def test_e1_voltage_range(value: float, expected: bool) -> None:
+    got = within_limits(value, 22.0, 26.0)
+    assert got is expected, f"22..26 V at {value}: expected {expected}, got {got}"
 
 
-def test_e1_reserved_bits_are_ignored() -> None:
-    got = decode_status(0x6A)
-    expected = {"ready": False, "output_on": False, "overcurrent": False, "overtemp": False}
-    assert got == expected, "reserved bits must not become status flags"
+@pytest.mark.parametrize("value", [22.0, 26.0])
+def test_e1_inclusive_endpoints(value: float) -> None:
+    assert within_limits(value, 22.0, 26.0) is True, "Both endpoints must pass"
 
 
-@pytest.mark.parametrize("byte", [-1, 256, 1024])
-def test_e1_invalid_byte(byte: int) -> None:
-    with pytest.raises(ValueError):
-        decode_status(byte)
+@pytest.mark.parametrize("value, expected", [(-2.0, True), (-2.1, False), (-1.9, False)])
+def test_e1_single_point_limit(value: float, expected: bool) -> None:
+    assert within_limits(value, -2.0, -2.0) is expected, "Equal bounds accept exactly that value"
 
 
-@pytest.mark.parametrize("reg, mask, expected", [(0x20, 0x03, 0x23), (0x85, 0x14, 0x95), (0xA5, 0, 0xA5), (0, 255, 255), (255, 255, 255)])
-def test_e2_set_selected_bits(reg: int, mask: int, expected: int) -> None:
-    got = set_bits(reg, mask)
-    assert got == expected, f"set {mask:#04x} in {reg:#04x}: expected {expected:#04x}, got {got:#04x}"
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+def test_e1_nonfinite_reading(value: float) -> None:
+    assert within_limits(value, 22.0, 26.0) is False, "Non-finite instrument readings must fail"
 
 
-@pytest.mark.parametrize("reg, mask, expected", [(0x23, 0x03, 0x20), (0x95, 0x14, 0x81), (0xA5, 0, 0xA5), (255, 255, 0), (0, 255, 0)])
-def test_e2_clear_selected_bits(reg: int, mask: int, expected: int) -> None:
-    got = clear_bits(reg, mask)
-    assert got == expected, f"clear {mask:#04x} in {reg:#04x}: expected {expected:#04x}, got {got:#04x}"
+@pytest.mark.parametrize("readings", [{}, {"bus_b": 26.0, "bus_a": 22.0}])
+def test_e2_no_failures(readings: dict[str, float]) -> None:
+    assert failed_channels(readings, 22.0, 26.0) == [], "Empty or all-passing input has no failures"
 
 
-@pytest.mark.parametrize("reg, shift, width, expected", [(0xD7, 4, 3, 5), (0xAC, 2, 3, 3), (255, 0, 8, 255), (128, 7, 1, 1), (0, 0, 1, 0), (0xF0, 0, 4, 0)])
-def test_e2_extract_unsigned_field(reg: int, shift: int, width: int, expected: int) -> None:
-    got = field(reg, shift, width)
-    assert got == expected, f"register {reg:#04x}, shift {shift}, width {width}: expected {expected}, got {got}"
+def test_e2_late_failure() -> None:
+    readings = {"bus_a": 24.0, "bus_b": 28.0}
+    assert failed_channels(readings, 22.0, 26.0) == ["bus_b"], "Do not return after the first channel"
 
 
-@pytest.mark.parametrize("reg, mask", [(-1, 0), (256, 0), (0, -1), (0, 256)])
-@pytest.mark.parametrize("operation", [set_bits, clear_bits])
-def test_e2_invalid_bit_operands(operation, reg: int, mask: int) -> None:
-    with pytest.raises(ValueError):
-        operation(reg, mask)
+def test_e2_all_failures_sorted() -> None:
+    readings = {"bus_z": 29.0, "bus_a": 20.0, "bus_m": 24.0}
+    got = failed_channels(readings, 22.0, 26.0)
+    assert got == ["bus_a", "bus_z"], f"Expected every failure in name order, got {got}"
 
 
-@pytest.mark.parametrize("reg, shift, width", [(-1, 0, 1), (256, 0, 1), (0, -1, 1), (0, 8, 1), (0, 0, 0), (0, 0, -1), (0, 0, 9), (0, 7, 2)])
-def test_e2_invalid_field_ranges(reg: int, shift: int, width: int) -> None:
-    with pytest.raises(ValueError):
-        field(reg, shift, width)
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+def test_e2_nonfinite_channel(value: float) -> None:
+    got = failed_channels({"bus_a": 24.0, "bus_b": value}, 22.0, 26.0)
+    assert got == ["bus_b"], "A non-finite reading must appear in the failure list"
 
 
-def test_e2_configuration_round_trip() -> None:
-    configured = set_bits(clear_bits(0x8B, 0x70), 0x50)
-    assert configured == 0xDB, "updating range must preserve unrelated configuration bits"
-    assert field(configured, 4, 3) == 5, "header's range field should contain the chosen range"
+def test_e2_preserves_input() -> None:
+    readings = {"bus_z": 28.0, "bus_a": 24.0}
+    before = list(readings.items())
+    first = failed_channels(readings, 22.0, 26.0)
+    first.append("operator-note")
+    assert list(readings.items()) == before, "Do not change readings or its insertion order"
+    assert failed_channels(readings, 22.0, 26.0) == ["bus_z"], "Return a fresh list on each call"
 
 
-@pytest.mark.parametrize(
-    "payload, expected",
-    [
-        (b"\x01\xe0\x2e\xfa\x00\x02\x00", {"status": 1, "voltage_mv": 12000, "current_ma": 250, "sequence": 2}),
-        (b"\x6a\x34\x12\x78\x56\xbc\x9a", {"status": 106, "voltage_mv": 4660, "current_ma": 22136, "sequence": 39612}),
-    ],
-)
-def test_e3_packed_offsets_and_byte_order(payload: bytes, expected: dict[str, int]) -> None:
-    got = unpack_status_frame(payload)
-    assert got == expected, f"frame {payload.hex()}: expected {expected}, got {got}"
-    assert all(type(value) is int for value in got.values()), "frame fields must remain raw integers"
+@pytest.fixture
+def workflow() -> dict[str, Any]:
+    path = Path(__file__).resolve().parents[1] / "starter" / "ci.yml"
+    parsed = yaml.safe_load(path.read_text(encoding="utf-8-sig"))
+    if parsed == {"__exercise_stub__": "E3: write the GitHub Actions workflow"}:
+        raise NotImplementedError("E3: replace the supplied ci.yml placeholder")
+    assert isinstance(parsed, dict), "ci.yml must contain a YAML mapping"
+    return parsed
 
 
-@pytest.mark.parametrize("raw_current, expected", [(b"\xff\xff", -1), (b"\x00\x80", -32768), (b"\xff\x7f", 32767), (b"\x06\xff", -250)])
-def test_e3_signed_current(raw_current: bytes, expected: int) -> None:
-    payload = b"\x80\x01\x00" + raw_current + b"\x01\x00"
-    got = unpack_status_frame(payload)
-    assert got == {"status": 128, "voltage_mv": 1, "current_ma": expected, "sequence": 1}, "current signedness must not affect neighboring members"
+@pytest.fixture
+def steps(workflow: dict[str, Any]) -> list[dict[str, Any]]:
+    jobs = workflow.get("jobs")
+    assert isinstance(jobs, dict), "Add a jobs mapping"
+    checks = jobs.get("checks")
+    assert isinstance(checks, dict), "Add the station job named checks"
+    assert checks.get("runs-on") == "ubuntu-latest", "checks must run on ubuntu-latest"
+    assert "if" not in checks, "The checks job must run without an if condition"
+    assert not checks.get("continue-on-error", False), "The checks job must propagate failures"
+    supplied = checks.get("steps")
+    assert isinstance(supplied, list) and supplied, "checks needs a nonempty steps list"
+    assert all(isinstance(step, dict) for step in supplied), "Each step must be a YAML mapping"
+    assert all("if" not in step and not step.get("continue-on-error", False) for step in supplied), (
+        "Station checks must run unconditionally and propagate failures"
+    )
+    for scope in [workflow, checks, *supplied]:
+        assert "working-directory" not in scope, "Do not override the working directory"
+        defaults = scope.get("defaults", {}).get("run", {})
+        assert "working-directory" not in defaults, "Do not override the default working directory"
+    return supplied
 
 
-@pytest.mark.parametrize(
-    "payload, expected",
-    [
-        (b"\x00" * 7, {"status": 0, "voltage_mv": 0, "current_ma": 0, "sequence": 0}),
-        (b"\xff" * 7, {"status": 255, "voltage_mv": 65535, "current_ma": -1, "sequence": 65535}),
-    ],
-)
-def test_e3_full_member_ranges(payload: bytes, expected: dict[str, int]) -> None:
-    got = unpack_status_frame(payload)
-    assert got == expected, "preserve raw status bits, units, and the full unsigned counter range"
+def _action_position(steps: list[dict[str, Any]], action: str) -> int:
+    for index, step in enumerate(steps):
+        used = step.get("uses", "")
+        if isinstance(used, str) and used.startswith(action + "@") and used.split("@", 1)[1]:
+            return index
+    pytest.fail(f"Add a uses: {action}@<version> step")
 
 
-@pytest.mark.parametrize("size", [0, 1, 6, 8, 10])
-def test_e3_reject_wrong_frame_length(size: int) -> None:
-    with pytest.raises(ValueError):
-        unpack_status_frame(bytes(size))
+def _commands(steps: list[dict[str, Any]], tool: str) -> list[tuple[int, list[str]]]:
+    found = []
+    for index, step in enumerate(steps):
+        run = step.get("run", "")
+        assert isinstance(run, str), "run must be shell command text"
+        commands = [shlex.split(line, comments=True) for line in run.splitlines()]
+        commands = [words for words in commands if words]
+        if len(commands) != 1:
+            continue
+        words = commands[0]
+        if words[:2] in (["python", "-m"], ["python3", "-m"]):
+            words = words[2:]
+        if words and words[0] == tool:
+            found.append((index, words[1:]))
+    return found
 
 
-@pytest.mark.parametrize(
-    "line, expected",
-    [
-        ("value = *status_ptr;", "Read the byte that status_ptr points to into value."),
-        ("*status_ptr = 0;", "Write zero to the byte that status_ptr points to."),
-    ],
-)
-def test_e4_pointer_read_and_write(line: str, expected: str) -> None:
-    got = explain(line)
-    assert got == expected, f"for {line!r}, use the exact matching meaning: {expected!r}"
+def test_e3_push_and_pull_request(workflow: dict[str, Any]) -> None:
+    # PyYAML's YAML 1.1 rules read an unquoted `on` key as the boolean True.
+    events = workflow.get("on", workflow.get(True))
+    assert isinstance(events, (list, dict)), "Use an event list or mapping for on"
+    assert "push" in events and "pull_request" in events, "Run on push and pull_request"
+    if isinstance(events, dict):
+        assert all(events[event] in (None, {}) for event in ("push", "pull_request")), (
+            "Do not filter push or pull_request events in this exercise"
+        )
 
 
-@pytest.mark.parametrize(
-    "line, expected",
-    [
-        ("value = frame_ptr->voltage_mv;", "Read the voltage_mv member of the status frame that frame_ptr points to into value."),
-        ("value = (uint8_t)raw;", "Convert raw to an unsigned 8-bit integer, keeping its lowest 8 bits, and store it in value."),
-        ("value = *status_reg;", "Read the volatile hardware byte that status_reg points to into value."),
-    ],
-)
-def test_e4_member_cast_and_volatile_read(line: str, expected: str) -> None:
-    got = explain(line)
-    assert got == expected, f"for {line!r}, use the exact matching meaning: {expected!r}"
+def test_e3_checkout_before_python(steps: list[dict[str, Any]]) -> None:
+    checkout = _action_position(steps, "actions/checkout")
+    setup = _action_position(steps, "actions/setup-python")
+    assert checkout < setup, "Check out the station code before setting up Python"
 
 
-@pytest.mark.parametrize("line", ["", "value = status_ptr;", " value = *status_ptr;", "value = *status_reg;\n"])
-def test_e4_reject_unknown_lines(line: str) -> None:
-    with pytest.raises(ValueError):
-        explain(line)
+def test_e3_python_312(steps: list[dict[str, Any]]) -> None:
+    setup = steps[_action_position(steps, "actions/setup-python")]
+    options = setup.get("with", {})
+    assert isinstance(options, dict), "setup-python needs a with mapping"
+    assert options.get("python-version") == "3.12", "Quote python-version: '3.12' as text"
 
 
-def test_e5_q1_big_endian_memory() -> None:
-    answers = endian_answers()
-    assert isinstance(answers, dict), "E5: Return a dictionary as described in the README"
-    assert set(answers) == {"Q1", "Q2", "Q3", "Q4"}, "E5: Return exactly the four question IDs"
-    correct = answers.get("Q1") == _ENDIAN_ANSWERS["Q1"]
-    assert correct, "Q1: Reread Endianness, Overview, and compare the byte positions"
+def test_e3_install_requirements(steps: list[dict[str, Any]]) -> None:
+    installs = [index for index, args in _commands(steps, "pip")
+                if args == ["install", "-r", "requirements.txt"]]
+    setup = _action_position(steps, "actions/setup-python")
+    assert any(index > setup for index in installs), "After setup, run pip install -r requirements.txt"
 
 
-def test_e5_q2_network_byte_order() -> None:
-    correct = endian_answers().get("Q2") == _ENDIAN_ANSWERS["Q2"]
-    assert correct, "Q2: Reread Endianness, Networking, for the agreed network convention"
+def test_e3_pytest_and_mypy_after_install(steps: list[dict[str, Any]]) -> None:
+    installs = [index for index, args in _commands(steps, "pip")
+                if args == ["install", "-r", "requirements.txt"]]
+    tests = [index for index, args in _commands(steps, "pytest") if args == ["sets/d40"]]
+    types = [index for index, args in _commands(steps, "mypy")
+             if args == ["--strict", "sets/d40/starter"]]
+    assert tests, "Run pytest sets/d40 as a direct command"
+    assert types, "Run mypy --strict sets/d40/starter as a direct command"
+    assert any(install < test < check for install in installs for test in tests for check in types), (
+        "Use separate steps in this order: install, pytest, mypy"
+    )
 
 
-def test_e5_q3_test_pc_native_order() -> None:
-    correct = endian_answers().get("Q3") == _ENDIAN_ANSWERS["Q3"]
-    assert correct, "Q3: Reread Endianness, Hardware, for x86 and ARM byte order"
+@pytest.mark.parametrize("name", ["feature/CTS-34-bus-limits", "fix/CTS-7-boundary", "fix/CTS-001-bus2"])
+def test_e4_valid_station_branches(name: str) -> None:
+    assert branch_name_ok(name) is True, f"Expected valid station branch: {name!r}"
 
 
-def test_e5_q4_wrong_unpack_order() -> None:
-    correct = endian_answers().get("Q4") == _ENDIAN_ANSWERS["Q4"]
-    assert correct, "Q4: Reread Endianness, Overview, and the README's worked struct example"
+@pytest.mark.parametrize("name", ["main", "review/CTS-34-bus", "feature/cts-34-bus", "fix/CTS-x-bus",
+                                  "fix/CTS--bus", "fix/CTS-34", "fix/CTS-34-bus/extra"])
+def test_e4_prefix_and_ticket(name: str) -> None:
+    assert branch_name_ok(name) is False, f"Reject invalid prefix or ticket: {name!r}"
+
+
+@pytest.mark.parametrize("slug", ["", "Bus", "bus_limit", "bus limit", "-bus", "bus-", "bus--limit", "büs"])
+def test_e4_slug_rules(slug: str) -> None:
+    name = f"feature/CTS-34-{slug}"
+    assert branch_name_ok(name) is False, f"Reject invalid slug: {slug!r}"
+
+
+@pytest.mark.parametrize("name", [" fix/CTS-34-bus", "fix/CTS-34-bus ", "fix/CTS-34-bus\n", "fix/CTS-٣٤-bus"])
+def test_e4_full_ascii_name(name: str) -> None:
+    assert branch_name_ok(name) is False, f"Validate the complete ASCII name without stripping: {name!r}"

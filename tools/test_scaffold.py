@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class TaskChecks(unittest.TestCase):
     def test_plan_order(self):
-        names = ["check45", "d45", "d42", "r6", "d41", "d31", "check30", "d30", "d07", "r1", "d06", "d00-hello"]
+        names = ["check54", "d53", "d51", "r6", "d48", "d36", "r4", "check34", "d33", "d15", "r1", "d13", "d00-hello"]
         self.assertEqual(sorted(names, key=set_order), list(reversed(names)))
 
 

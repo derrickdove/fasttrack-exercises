@@ -1,6 +1,6 @@
-# r4 — Week 4 review: a telemetry capture at the bench
+# r4 — Block 4 review: a telemetry capture at the bench
 
-**Time:** about 60 minutes · **Read first:** no new reading; revisit d04 (CSV), d12 (grouped reports), d17 (fake transports), d18 (cleanup), and review d22–d27: Python "Socket Programming HOWTO" (datagrams and framing), Beej's Guide (datagram sockets), `socket` docs (`SOCK_DGRAM`, `sendall`), `struct` docs (byte order and format characters), `zlib.crc32` docs, Wikipedia "Endianness" and "Serial number arithmetic", RFC 1982 section 3 (optional), `collections.deque` docs, Wireshark wiki "Libpcap File Format", tcpdump man page (`-r` and filters), Wireshark User's Guide "Capturing", `threading` docs (`Thread`, `Event`), `queue` docs, and The Pragmatic Programmer's concurrency topic (optional). · **You edit:** `starter/review4.py`
+**Time:** about 60 minutes · **Read first:** no new reading; revisit d04 (CSV), d13 (grouped reports), d19 (fake transports), d20 (cleanup), and review d25–d31: Python "Socket Programming HOWTO" (datagrams and framing), Beej's Guide (datagram sockets), `socket` docs (`SOCK_DGRAM`, `sendall`), `struct` docs (byte order and format characters), `zlib.crc32` docs, Wikipedia "Endianness" and "Serial number arithmetic", RFC 1982 section 3 (optional), `collections.deque` docs, Wireshark wiki "Libpcap File Format", tcpdump man page (`-r` and filters), Wireshark User's Guide "Capturing", `threading` docs (`Thread`, `Event`), `queue` docs, and The Pragmatic Programmer's concurrency topic (optional). · **You edit:** `starter/review4.py`
 
 ## What you're building
 
@@ -24,7 +24,7 @@ assert encoded == b"\x02\x01"
 assert decoded == 258
 ```
 
-A **CRC** (cyclic redundancy check) is a number computed from bytes to detect corruption. `crc16(data)` is supplied: it returns a 16-bit integer using the station's CRC-16/CCITT-FALSE algorithm. Do not implement the CRC algorithm. The check example is `crc16(b"123456789") == 0x29b1`. This variant uses CRC-16 rather than d23's CRC-32.
+A **CRC** (cyclic redundancy check) is a number computed from bytes to detect corruption. `crc16(data)` is supplied: it returns a 16-bit integer using the station's CRC-16/CCITT-FALSE algorithm. Do not implement the CRC algorithm. The check example is `crc16(b"123456789") == 0x29b1`. This variant uses CRC-16 rather than d26's CRC-32.
 
 A `bytearray` is a byte buffer you can change; `buffer.extend(chunk)` appends bytes. A **sequence number** labels a packet's position; after 65535 comes 0, called **wraparound**. A **capture** saves network traffic to a file. **pcap** is a common capture file format containing network frames (raw network messages) and timestamps. The supplied `capture_payloads` helper extracts the UDP **payload**, the application bytes inside a datagram; you do not implement a pcap reader today. A destination **port** is the integer used to direct a datagram to the receiving application.
 
@@ -58,7 +58,7 @@ A **millivolt** is one thousandth of a volt. Each channel may appear only once p
 
 **Watch out:** A channel number is unsigned, but a negative reading uses signed `h`. Do not alter the input dictionary's values or insertion order. Use the supplied `crc16`.
 
-**Reread:** d23 — `struct` docs, byte order and format characters; Wikipedia "Endianness"; compare d23's `zlib.crc32` reading with the supplied CRC-16 helper.
+**Reread:** d26 — `struct` docs, byte order and format characters; Wikipedia "Endianness"; compare d26's `zlib.crc32` reading with the supplied CRC-16 helper.
 
 ### E2 — Reject malformed sensor packets (medium, ~10 min)
 
@@ -72,7 +72,7 @@ Return `(sequence, readings)` with integer millivolts. Accept records in any ord
 
 **Watch out:** Validate length before unpacking fields. Malformed input must produce `ValueError`, rather than leaking `struct.error`. Tests supply their own packets, so you can solve E2 before E1.
 
-**Reread:** d23 — `struct` docs (`unpack`, byte order and exact sizes); the CRC checks from that day.
+**Reread:** d26 — `struct` docs (`unpack`, byte order and exact sizes); the CRC checks from that day.
 
 ### E3 — Buffer the operator's framed stream (easy, ~4 min)
 
@@ -82,7 +82,7 @@ Return `(sequence, readings)` with integer millivolts. Accept records in any ord
 
 To leave time for earlier-week retention, frame extraction is supplied in `extract_frames(pending: bytearray) -> list[bytes]`. It removes complete frames from the passed buffer, keeps unfinished bytes, and implements the oversized-prefix rule below. You only initialize an instance buffer, append each chunk, and return the helper's result. Do not copy or edit the helper.
 
-The frame header is a **length prefix**, a field before the payload. Each frame is a **two-byte unsigned little-endian payload length** followed by that many payload bytes. The length excludes its own two bytes. This differs from d25's four-byte big-endian prefix (most significant byte first). Payloads are arbitrary bytes; do not parse them as telemetry. A zero-length frame is valid. The largest allowed payload is `MAX_FRAME == 4096` bytes, inclusive.
+The frame header is a **length prefix**, a field before the payload. Each frame is a **two-byte unsigned little-endian payload length** followed by that many payload bytes. The length excludes its own two bytes. This differs from d29's four-byte big-endian prefix (most significant byte first). Payloads are arbitrary bytes; do not parse them as telemetry. A zero-length frame is valid. The largest allowed payload is `MAX_FRAME == 4096` bytes, inclusive.
 
 Each new instance starts empty. `feed` appends its chunk, returns all newly complete payloads in order, and retains unfinished bytes for the next call. It returns `[]` if nothing completes. An empty chunk still processes existing bytes. Keep state separate for each instance.
 
@@ -92,7 +92,7 @@ As soon as a complete two-byte prefix says more than 4096, clear **all** buffere
 
 **Watch out:** A read can contain half a frame, many frames, or the end of one and start of another. Never assume one read equals one message.
 
-**Reread:** d25 — Python "Socket Programming HOWTO", framing and partial reads; `socket.sendall`. Relate this buffer to the timeout-bounded receive loops from d22 and the listener/queue separation in d27's `threading` and `queue` readings; no sockets or threads are needed in this exercise.
+**Reread:** d29 — Python "Socket Programming HOWTO", framing and partial reads; `socket.sendall`. Relate this buffer to the timeout-bounded receive loops from d25 and the listener/queue separation in d31's `threading` and `queue` readings; no sockets or threads are needed in this exercise.
 
 ### E4 — Count gaps without being fooled by wraparound (medium, ~10 min)
 
@@ -118,7 +118,7 @@ A late packet never subtracts previously counted loss. Remember even late values
 
 **Watch out:** Sorting destroys arrival order. A late packet must not move newest backward. This is a report of gaps observed on arrival, not a count of sequence values still absent at the end.
 
-**Reread:** d24 — Wikipedia "Serial number arithmetic", RFC 1982 section 3 (optional), and `collections.deque` docs for comparison with a bounded duplicate history.
+**Reread:** d27 — Wikipedia "Serial number arithmetic", RFC 1982 section 3 (optional), and `collections.deque` docs for comparison with a bounded duplicate history.
 
 ### E5 — Report on the captured bench run (medium, ~10 min)
 
@@ -136,12 +136,12 @@ The supplied capture contains nine datagrams in file order: port 5005 sequence 6
 
 **Watch out:** A good CRC does not make an invalid channel acceptable. Catch `ValueError` only around decoding one payload, so file failures remain visible to the operator.
 
-**Reread:** d26 — Wireshark wiki "Libpcap File Format", tcpdump man page (`-r` and filters), Wireshark User's Guide "Capturing"; d22 — Beej's Guide, datagram sockets, and `socket` docs (`SOCK_DGRAM`).
+**Reread:** d30 — Wireshark wiki "Libpcap File Format", tcpdump man page (`-r` and filters), Wireshark User's Guide "Capturing"; d25 — Beej's Guide, datagram sockets, and `socket` docs (`SOCK_DGRAM`).
 
 
 ### E6 — Count failed checks from the bench log (easy, ~9 min)
 
-**Goal:** Give the operator a count of failed readings for each affected channel. This combines d04's CSV reading with d12's grouped failure reports in a new limits-checking task.
+**Goal:** Give the operator a count of failed readings for each affected channel. This combines d04's CSV reading with d13's grouped failure reports in a new limits-checking task.
 
 **Signature:** `def limit_failures(path: Path) -> dict[str, int]`
 
@@ -184,6 +184,6 @@ Attempt the disconnect even if selecting, querying, or converting the reply rais
 
 **Example:** With channel 3 and query reply `" 2.750\n"`, calls are write `"ROUT:CLOS (@3)"`, query `"READ?"`, write `"ROUT:OPEN:ALL"`; return `2.75`.
 
-**Watch out:** d18's `try`/`finally` pattern guarantees cleanup when leaving a block. Put validation before that block so an invalid channel sends nothing. A failed measurement must not turn into a plausible zero.
+**Watch out:** d20's `try`/`finally` pattern guarantees cleanup when leaving a block. Put validation before that block so an invalid channel sends nothing. A failed measurement must not turn into a plausible zero.
 
-Reread: d17
+Reread: d19

@@ -1,126 +1,108 @@
-# d11 — Parametrize and markers: one test, many cases
+# d11 — Fixtures: fake instruments for tests
 
-**Time:** about 45 minutes · **Read first:** pytest [How to parametrize fixtures and test functions](https://docs.pytest.org/en/stable/how-to/parametrize.html), pytest [How to mark test functions](https://docs.pytest.org/en/stable/how-to/mark.html), and Missing Semester [Data Wrangling](https://missing.csail.mit.edu/2020/data-wrangling/) · **You edit:** `starter/test_scpi_learner.py`
+**Time:** about 45 minutes · **Read first:** [pytest: How to use fixtures (including tmp_path)](https://docs.pytest.org/en/stable/how-to/fixtures.html) and [Missing Semester: Shell Tools and Scripting](https://missing.csail.mit.edu/2020/shell-tools/) (second half: find, grep, history) · **You edit:** `starter/fixtures_learner.py`
 
 ## What you're building
 
-A chassis test station needs to read voltages and instrument error messages in several formats. You will write tests for a supplied SCPI driver, the small module that translates station requests and instrument replies. A module is a Python file. SCPI means *Standard Commands for Programmable Instruments*, a text command language used by lab equipment. pytest is the Python tool that discovers and runs your tests.
+A test station needs repeatable tests without a physical power supply attached. You'll provide fake instruments, temporary limit files, safe output cleanup, and measurement builders that tests can request by name. A **fake** is a small substitute for real equipment whose behavior you control.
 
 ## How this works
 
-1. Replace the `raise NotImplementedError(...)` lines in `starter/test_scpi_learner.py` and add the decorators requested below. Keep the four function names, parameter names, and type hints (the annotations after ?:? and ?->? that describe input and output types). Don't edit `scpi.py`, `pytest.ini`, or `tests/`.
-2. Press **Ctrl+Shift+B → Test: d11** (or run `bash tools/run.sh d11` / `tools\run.ps1 d11`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+1. Replace the `raise NotImplementedError(...)` lines in `starter/fixtures_learner.py`. Keep the supplied imports, types, signatures, and `@pytest.fixture` decorators. Don't edit `tests/`, `conftest.py`, or the provided `starter/fakes.py`.
+2. Press **Ctrl+Shift+B → Test: d11** (or run `bash tools/run.sh d11` / `tools\run.ps1 d11` from the repository root). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
-A **parameter** is a named function input. **Parametrization** makes pytest run one test function for each row of inputs. A **decorator** is an `@...` line above a function that adds instructions to it. This station-status example is separate from your voltage tests:
+A **fixture** is a function that pytest runs to supply a test's named argument. A **decorator**, here `@pytest.fixture`, marks a function for pytest. A **dependency** is another fixture requested as an argument; pytest supplies it automatically. The supplied set-root `conftest.py` registers your fixtures so the tests can request them. Tests request fixture names; they do not call decorated fixture functions directly.
+
+**Scope** controls how long pytest reuses a fixture result. The default, **function scope**, gives each test a new result; two requests within the same test share that result. Module scope shares one result across a test file; session scope shares it across the entire test run. Keep all four fixtures function-scoped so command history cannot leak between tests.
+
+**Setup** runs before a test. **Teardown** runs afterward, including after a failed **assertion** (a condition a test requires to be true). A **yield fixture** pauses at `yield`, hands a value to the test, and resumes for teardown. `try/finally` places cleanup in a block that runs when leaving the `try` block. `Iterator[FakeInstrument]` describes a fixture that yields a fake instrument.
+
+Here is another station fixture showing the lifecycle. The `with` block closes its file when control leaves the block:
 
 ```python
-@pytest.mark.parametrize("status", ["READY", "BUSY"])
-def test_station_status(status: str) -> None:
-    assert status in {"READY", "BUSY"}
+@pytest.fixture
+def station_log(tmp_path):
+    path = tmp_path / "station.log"
+    with path.open("w", encoding="utf-8") as log:
+        yield log  # The with block closes the file during teardown.
 ```
 
-An **assertion** checks a condition and fails a test when it is false. `pytest.approx(expected)` compares numbers while allowing small rounding differences. An **exception** is Python's way of reporting an error; `with pytest.raises(ValueError):` passes only if the indented operation raises that exception.
+A **Path** is a `pathlib` object representing a filesystem path. `tmp_path` is pytest's built-in fixture providing a separate temporary directory for each test; use `/` to join a directory and filename. `path.write_text(text, encoding="utf-8")` writes text and closes the file. Never use a fixed absolute path for test files.
 
-A **marker** is a label attached to a test, such as `@pytest.mark.slow`. **Registering** a marker means listing its name in `pytest.ini`, pytest's settings file; `slow` is already registered here. **Deselection** means leaving a test out of a run; `-m "not slow"` selects tests without the `slow` label. A marker does not add a delay.
+A **factory** is a function that creates a new object on each call. Here one fixture returns a function, and the test calls that function many times. `Callable[..., Reading]` means a callable returning a `Reading`; the dots leave argument details to the contract below. `Reading` is a supplied **TypedDict**, a type description for an ordinary dictionary with specified keys and value types.
 
-An **id** is a readable label for one parametrized row, visible in pytest's output. **Data wrangling** means turning raw text into useful information. On a Linux station, `grep` selects matching log lines, `sed` transforms text, and `awk` extracts fields or computes values. Descriptive case ids make those log searches easier. No shell commands are required in this set.
-
-A **mutant** is a deliberately faulty driver copy. Our outer checks start a **subprocess**, a separate Python process, to run your tests with the supplied driver and these copies. Good tests pass on the supplied driver and fail on the relevant mutants. Write assertions against the imported driver functions; do not inspect files or detect which driver is loaded. The supplied `conftest.py` keeps your tests out of the outer collection so the score still has four exercises.
-
-## Supplied driver: `scpi.py`
-
-An import makes another module's functions available in your file. The imports are already in your starter. You do not implement this driver.
-
-| Function | Contract |
-| --- | --- |
-| `parse_number(reply: str) -> float` | Convert a decimal or scientific-notation string to a number. Ignore spaces and line endings at its edges. Nonnumeric text raises `ValueError`. Scientific notation uses `E` for a power of ten: `6.02E+2` means `6.02 × 100`. |
-| `parse_error(reply: str) -> tuple[int, str]` | Split a reply at its first comma into a signed integer code and a quoted message. Ignore outer whitespace and spaces before the opening quote; remove the message's surrounding quotes. Preserve its capitalization, internal spaces, and internal commas. A tuple is a fixed sequence, here `(code, message)`. Invalid integer codes, missing commas, and missing surrounding message quotes raise `ValueError`. Embedded quote escapes are outside this exercise. |
-| `build_query(channel: int) -> str` | For a positive integer channel, return exactly `MEAS:VOLT? (@<channel>)\n`. A channel is a numbered instrument input; a query is a command asking for a reading. Zero or negative channels raise `ValueError`. |
-| `read_voltage(reply: str) -> float` | Normally call `parse_number`. The special reply `"OVLD"` means overload: the input exceeds the instrument's measurement range. Known firmware defect **FW-17** incorrectly returns `0.0` for `"OVLD"`. The desired behavior is to raise `ValueError("overload")`. Firmware is the software running inside an instrument. |
-
-In Python string literals, `\r` means carriage return and `\n` means newline; together they are a common instrument line ending. Type these escapes inside strings rather than entering a physical line break.
+For the shell reading, **find** searches directory trees, **grep** searches text, and **history** recalls shell commands. On Linux, practice finding `test_d11.py`, searching for `OUTP`, and recalling your test command. These are optional navigation drills; the graded exercises run on Windows and Linux without a shell dependency.
 
 ## Exercises
 
-### E1 — Voltage formats (easy, ~11 min)
+### E1 — Supply a fresh fake power supply (easy, ~8 min)
 
-**Goal:** Parametrize one station voltage test over at least these six cases.
+**Goal:** Give each station test its own **PSU** (power supply unit), with repeatable responses to two instrument commands.
 
-**Signature:** `def test_e1_number_reply(reply: str, expected: float) -> None`
+**Signature:** `def fake_psu() -> FakeInstrument` (fixture).
 
-Add `@pytest.mark.parametrize` with the parameter names `"reply, expected"` and the following rows. Extra valid rows are welcome.
+Return a new provided `FakeInstrument` constructed with this dictionary of command-to-reply strings:
 
-| `reply` as a Python string literal | `expected` |
+| Command | Exact reply |
 | --- | --- |
-| `"0"` | `0.0` |
-| `"-12"` | `-12.0` |
-| `"+3.5"` | `3.5` |
-| `"6.02E+2"` | `602.0` |
-| `" 7.25 "` | `7.25` |
-| `"8.5\r\n"` | `8.5` |
+| `*IDN?` | `ACME,PSU-28,SIM001,1.0` |
+| `MEAS:VOLT?` | `28.0` |
 
-The body must call `parse_number(reply)` and assert that it equals `expected`; direct equality or `pytest.approx` is fine.
+These are **SCPI** (Standard Commands for Programmable Instruments) commands: `*IDN?` asks for identification, and `MEAS:VOLT?` asks for voltage. The replies are scripted, meaning fixed in advance. `FakeInstrument(replies)` copies the dictionary; `.query(command)` returns its reply without consuming it and raises `KeyError` for an unknown command. `.write(command)` appends to the public `.writes` list; queries do not append. No command touches hardware.
 
-**Example:** `parse_number("6.02E+2")` → `602.0`.
+**Example:** a test requesting `fake_psu` can call `fake_psu.query("MEAS:VOLT?")` → `"28.0"`. Its initial `fake_psu.writes` is `[]`.
 
-**Watch out:** A loop inside an undecorated test does not create six pytest cases. Check the returned value, not just whether a call completes. Your test must catch lost minus signs, ignored exponents, and rejection of surrounding whitespace.
+**Watch out:** Return the object, not the class. Keep the default function scope and construct a fresh instance inside the fixture. E3 depends on E1.
 
-**Reread:** pytest How to parametrize, section “@pytest.mark.parametrize: parametrizing test functions.”
+**Reread:** pytest, “Requesting fixtures,” “Fixtures are reusable,” and “Scope: sharing fixtures across classes, modules, packages or session.”
 
-### E2 — Searchable instrument errors (easy, ~12 min)
+### E2 — Create a temporary limits file (easy, ~9 min)
 
-**Goal:** Parametrize one error-queue test so an operator can find the failing reply format by its id. An error queue is the instrument's stored list of problems; code zero means it has no error to report.
+**Goal:** Give a station test a private limits file. A **limit** is an allowed measurement boundary; **CSV** means comma-separated values, a text table with a header and one row per record.
 
-**Signature:** `def test_e2_error_reply(reply: str, expected: tuple[int, str]) -> None`
+**Signature:** `def limits_file(tmp_path: Path) -> Path` (fixture).
 
-Use `@pytest.mark.parametrize` with `"reply, expected"` and these four rows. Each `expected` value is one tuple.
+Write `limits.csv` directly inside `tmp_path`, using UTF-8 (a standard encoding that maps text to bytes). Return its `Path`, after the file is written and closed. Its parsed header and rows must be exactly these, in this order; Windows and Linux line endings both work:
 
-| `reply` as a Python string literal | `expected` |
-| --- | --- |
-| `'0,"No error"'` | `(0, "No error")` |
-| `'-100,"Command error"'` | `(-100, "Command error")` |
-| `' -222, "Data out of range"\r\n'` | `(-222, "Data out of range")` |
-| `'-300,"Relay, stuck"'` | `(-300, "Relay, stuck")` |
+```csv
+name,low,high,unit
+bus_voltage,27.0,29.0,V
+supply_current,0.0,2.0,A
+```
 
-Assign each row a distinct explicit id, either through `ids=[...]` on the decorator or `pytest.param(..., id="...")`. Use nonempty ASCII letters, digits, and hyphens only, with at least one letter; for example, `queue-clear`. ASCII here means ordinary English letters and digits. You choose the names. Extra valid rows need ids too.
+`name` identifies the measurement; `low` and `high` are its lower and upper boundaries; `unit` is its measurement unit (`V` = volts, `A` = amperes). You are writing a test input, not evaluating limits.
 
-The body must call `parse_error(reply)` and assert equality with the entire `expected` tuple.
+**Example:** when pytest supplies a temporary directory `folder`, the result is `folder / "limits.csv"` containing the table above.
 
-**Example:** `parse_error('-300,"Relay, stuck"')` → `(-300, "Relay, stuck")`.
+**Watch out:** Return a `Path`, not a string or file handle. Request `tmp_path` by argument name. Pytest manages the temporary directory; no manual deletion is needed.
 
-**Watch out:** A message can contain a comma. Check signed codes and the exact full message, including capitalization. Generated default ids are not a substitute for the explicit readable ids requested here.
+**Reread:** pytest, “Requesting fixtures” and “Fixtures can request other fixtures”; follow its `tmp_path` link to “The tmp_path fixture.”
 
-**Reread:** pytest How to parametrize, examples using `ids` and `pytest.param`; Missing Semester Data Wrangling, the `grep`, `sed`, and `awk` examples for finding and extracting useful log text.
+### E3 — Always switch the output off (medium, ~16 min)
 
-### E3 — Select the quick station run (medium, ~10 min)
+**Goal:** Model a station step that enables a supply, lets the test run, then disables it even when an assertion fails.
 
-**Goal:** Label the station sweep so an operator can omit it during a quick run. A sweep checks several instrument channels in sequence.
+**Signature:** `def powered_psu(fake_psu: FakeInstrument) -> Iterator[FakeInstrument]` (yield fixture).
 
-**Signature:** `def test_e3_station_sweep() -> None`
+Write `"OUTP ON"` to the supplied `fake_psu` before yielding that exact object. `OUTP` means output: ON enables it and OFF disables it. Yield once, inside a `try` block, and write `"OUTP OFF"` in `finally` after the test finishes. Do not catch or suppress test failures. Do not create another fake or clear its command history.
 
-Add `@pytest.mark.slow`. Inside this single test, call `build_query` for channels `1`, `2`, and `3` and assert each complete command equals its expected string. A loop is appropriate here. Include the space before `(@...)` and the final newline.
+**Example:** if a test writes `"MEAS:START"` (a sample station command), the history after teardown is `["OUTP ON", "MEAS:START", "OUTP OFF"]` for both passing and failing tests. During the test, the final OFF has not happened yet.
 
-**Example:** `build_query(2)` → `"MEAS:VOLT? (@2)\n"`.
+**Watch out:** `return` would end the fixture without the teardown lifecycle. The checks launch tiny nested pytest runs, including an intentionally failing test; your outer check passes only when cleanup was recorded afterward. This does not require you to write or run a deliberately failing test yourself.
 
-The set's `pytest.ini` already registers `slow`. Our checks run pytest with `-m "not slow"` and verify that only your sweep is deselected, while other tests remain selected. You do not need to launch subprocesses yourself.
+**Reread:** pytest, “Teardown/Cleanup (AKA Fixture finalization),” “yield fixtures (recommended),” and “Safe teardowns.”
 
-**Watch out:** Put the marker only on this function, not on the whole module. Do not sleep or connect to hardware: this model stands in for a slow physical sweep and finishes immediately. The assertions must catch a driver that always queries channel 1.
+### E4 — Build independent measurement dictionaries (medium, ~12 min)
 
-**Reread:** pytest How to mark test functions, “Registering marks” and “Marking test functions and selecting them for a run.”
+**Goal:** Give tests a convenient factory for station readings. A **reading** is one measured value with its name and unit.
 
-### E4 — Keep the firmware defect visible (medium, ~12 min)
+**Signature:** `def make_reading() -> Callable[..., Reading]` (fixture). Return a function with the signature `def build_reading(name: str = "bus_voltage", value: float = 28.0, unit: str = "V") -> Reading`.
 
-**Goal:** Record the desired overload behavior while acknowledging the known FW-17 defect.
+Each call to that returned function creates a new dictionary with exactly the keys `"name"`, `"value"`, and `"unit"`. Use the corresponding argument values unchanged. All arguments are optional and support positional or keyword calls; omitted arguments use the displayed defaults. Accept empty strings, zero, and negative values; no validation or conversion is required.
 
-**Signature:** `def test_e4_overload_quirk() -> None`
+**Example:** a test requesting `make_reading` calls `make_reading(value=27.5)` → `{"name": "bus_voltage", "value": 27.5, "unit": "V"}`. Calling it twice produces separate dictionaries, so editing one cannot change another or any later default.
 
-Use `@pytest.mark.xfail(reason=..., strict=True)`. An **xfail** marks a test whose failure is expected because of a known defect. Supply a nonempty reason that names `FW-17` and explains the overload problem.
+**Watch out:** Return the inner function itself, without calling it. The fixture returns a factory; the factory returns a dictionary.
 
-Inside the test, use `with pytest.raises(ValueError, match="overload"):` around `read_voltage("OVLD")`. The `match` argument checks the exception's message. Test the desired exception, even though the supplied driver currently returns zero.
-
-**Example:** Current firmware returns `0.0`, so the desired-behavior test is reported as **XFAIL**, an expected failure. Our repaired driver raises `ValueError("overload")`, so that same test becomes **XPASS**, an unexpected pass.
-
-**Watch out:** `strict=True` makes XPASS fail the run, reminding the team to remove the obsolete xfail once firmware is repaired. Do not assert the buggy zero result, skip the test, call `pytest.xfail()` yourself, or set `run=False`; the test body must execute. An ordinary **skip** omits a test without checking the known defect.
-
-**Reread:** pytest How to mark test functions, the built-in `xfail` marker and linked “How to use skip and xfail”; pytest How to parametrize, the `pytest.param` example with an xfail mark.
+**Reread:** pytest, “Factories as fixtures.” For navigating these checks, revisit Missing Semester, “Finding files,” “Finding code,” and “Finding shell commands.”

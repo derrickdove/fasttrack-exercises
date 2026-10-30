@@ -1,167 +1,145 @@
-# d27 — Concurrency for I/O: threads, queues and clean shutdown
+# d27 — Telemetry reliability: gaps, duplicates and wraparound
 
-**Time:** about 53 minutes · **Read first:** [Python threading docs: Thread and Event](https://docs.python.org/3/library/threading.html), [Python queue docs](https://docs.python.org/3/library/queue.html), [Python glossary: global interpreter lock](https://docs.python.org/3/glossary.html#term-global-interpreter-lock), and [Pro Git 7.1: Revision Selection](https://git-scm.com/book/en/v2/Git-Tools-Revision-Selection) · **You edit:** `starter/workers.py`
+**Time:** about 65 minutes · **Read first:** [Wikipedia: Serial number arithmetic](https://en.wikipedia.org/wiki/Serial_number_arithmetic) (overview) and [The Linux Command Line, chapter 17: Searching for Files](https://linuxcommand.org/tlcl.php) (`find`, `xargs`). Python's [`collections.deque`](https://docs.python.org/3/library/collections.html#collections.deque) is a useful lookup; [RFC 1982 §3](https://www.rfc-editor.org/rfc/rfc1982#section-3) is optional. · **You edit:** `starter/sequence.py`
 
 ## What you're building
 
-A chassis test station must read instruments and receive telemetry (measurements sent by another device) while the operator continues working. Build background readers and a worker pool that finish cleanly when the station stops. All network tests use this computer only; no hardware is needed.
+A chassis test station receives **telemetry**, measurements sent by the hardware under test. Each **packet** (one transmitted message) has a **sequence number**, a counter that identifies its position in the stream. Build checks that distinguish lost packets, repeated packets and late arrivals, then report stream reliability to the operator.
 
 ## How this works
 
-1. Replace the `raise NotImplementedError(...)` lines in `starter/workers.py`. Don't edit `tests/`.
-2. Press **Ctrl+Shift+B → Test: d27** (or run `bash tools/run.sh d27` / `tools\run.ps1 d27`). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
+1. Replace the `raise NotImplementedError(...)` lines in `starter/sequence.py`. Don't edit `tests/`.
+2. Press Ctrl+Shift+B → **Test: d27** (or run `bash tools/run.sh d27` / `tools\run.ps1 d27`). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
-**I/O** means input/output, such as waiting for an instrument reply. **Concurrency** means tasks can make progress during one another's waits. A **thread** is a separate flow of execution in the same Python process; `Thread.start()` runs its `run()` method in the background, and `join(timeout=...)` waits for it to finish. `is_alive()` tells you whether it is still running.
+A **16-bit counter** has 65536 possible values, 0 through 65535. **Wraparound** means 65535 is followed by 0. **Serial arithmetic** compares counters on this ring rather than treating 0 as always older than 65535. `%` is the modulo operator: `65536 % 65536` is `0`.
 
-An **Event** is a shared signal: one thread calls `set()`, and another checks `is_set()` or uses `wait(timeout)`. A **Queue** safely transfers items between threads in first-in, first-out order. `get(timeout=...)` waits for an item or raises `queue.Empty`; `put_nowait(item)` adds an item without waiting. A **callable** is something you can call like a function. **Busy-waiting** repeatedly checks for work without blocking, wasting processor time.
+A **gap** is a run of skipped sequence numbers. A **duplicate** repeats a number in recent arrival history. **Out of order** means a nonduplicate arrival does not advance the stream's latest forward position. A **window** is the limited history used for this decision. Assume one continuous stream with no device resets, and forward jumps smaller than half the ring (32768); larger jumps cannot be distinguished from old packets using the sequence number alone.
+
+A **set** holds unique values and supports fast membership checks. A **dictionary** maps keys to values; here it can count how many copies of each number remain in history. A **deque** (double-ended queue) holds arrival order and can quickly remove its oldest item with `popleft()`:
 
 ```python
-from queue import Queue
-from threading import Event
-ready = Event()
-readings = Queue()
-readings.put_nowait(28.1)
-ready.set()
+from collections import deque
+recent_channels = deque([2, 4])
+recent_channels.append(7)
+oldest_channel = recent_channels.popleft()  # 2; remaining channels: 4, 7
 ```
 
-A **socket** is a network endpoint. **UDP** sends separate messages called **datagrams**; `recvfrom(size)` returns `(bytes_received, sender_address)`. A **parser** converts bytes into a usable value. A **timeout** bounds how long a blocking call waits. A **worker pool** is a fixed group of threads sharing jobs. A **sentinel** is a special queue item that tells a worker to exit.
-
-For this set, caller-supplied queues are unbounded (no fixed size limit; `Queue()`), and each source/parser/worker call finishes within 0.2 seconds. No forced thread cancellation is needed. `drain` and the background readers do not call `task_done()` (the optional queue task counter is outside this set). Use only the standard library. Never inspect private Queue fields.
+Chapter 17's `find` locates files and `xargs` builds commands from input. Use those ideas when locating saved telemetry logs at a Linux station; this set tests the counter analysis in Python and requires no shell commands.
 
 ## Exercises
 
-### E1 — Background instrument producer (easy, ~8 min)
+### E1 — Compare station packet counters (easy, ~6 min)
 
-**Goal:** Subclass `Thread` to collect successive instrument readings. A **subclass** extends an existing class; `super().__init__()` initializes its base class.
+**Goal:** Compute `a - b` as a signed difference on the 16-bit ring.
 
-**Signatures:** `Producer(source: Callable[[], object], output: Queue[object], stop_event: Event)` and `run() -> None`.
+**Signature:** `def seq_diff(a: int, b: int) -> int`
 
-Initialize the base `Thread` and save the arguments; construction does not start it. In `run`, check the event before every source call. Each call takes no arguments and returns one item; preserve items exactly, including `None`, and enqueue them in read order. `StopIteration` means the source is exhausted: return normally. If the event becomes set during a source call, discard that call's result and exit. An already-set event means zero source calls. Other source exceptions are outside this exercise.
+Return the unique equivalent difference in **-32768 through 32767**, inclusive. A positive result means `a` is ahead of `b`; a negative result means behind. Equal numbers return 0. At exactly half the ring, both comparison directions return **-32768**. This is this exercise's tie rule; RFC 1982 leaves the ordering at that distance undefined.
 
-**Example:** A source returning `28.1`, `28.2`, then raising `StopIteration` leaves `[28.1, 28.2]` in the output queue after `start()` and `join(timeout=2)`.
+**Example:** `seq_diff(1, 65535)` → `2`; `seq_diff(65535, 1)` → `-2`.
 
-**Watch out:** Override `run`, not `start`. Don't name an attribute `_stop`: `Thread` already uses it. The caller owns the event and joins the producer; don't clear the event.
+**Watch out:** All sequence inputs throughout this set are integers. Raise `ValueError` for any outside 0..65535; do not silently normalize them. You do not need to handle other input types.
 
-**Reread:** threading docs, “Thread objects” (`__init__`, `run`, `start`, `join`) and “Event objects”; queue docs, `Queue.put_nowait`.
+**Reread:** Wikipedia, overview and Comparison; optional RFC 1982 §3.2, Comparison.
 
-### E2 — Collect a burst of station readings (easy, ~7 min)
+### E2 — List packets skipped by the station (easy, ~8 min)
 
-**Goal:** Remove readings until the queue has been quiet for one timeout interval.
+**Goal:** Return missing sequence numbers between two arrivals, excluding both endpoints.
 
-**Signature:** `drain(q: Queue[T], timeout: float) -> list[T]`. `T` means any item type, preserved in the result.
+**Signature:** `def missing_between(last: int, new: int) -> list[int]`
 
-Call `q.get(timeout=timeout)` for each item, appending it to a list. Return on the first `Empty`. The timeout starts again for each get; it is an idle interval, not a total deadline. A zero timeout removes only immediately available items. Reject a negative timeout with `ValueError` before removing anything. Do not use `empty()`, `qsize()`, or a polling loop to decide when to stop.
+Use `seq_diff(new, last)` to decide direction. For a positive difference, return the skipped numbers in forward arrival order, wrapping through 0 when needed. Return a fresh empty list for equal values, backward steps or the half-ring tie. Validate both inputs as in E1, even when the result would be empty.
 
-**Example:** A queue containing `28.1`, `28.2` gives `drain(q, 0) == [28.1, 28.2]`, and the next call gives `[]`.
+**Example:** `missing_between(65534, 2)` → `[65535, 0, 1]`; `missing_between(12, 11)` → `[]`.
 
-**Watch out:** Empty right now does not mean a background producer has finished. A positive timeout lets a later reading arrive while `get` is waiting.
+**Watch out:** A consecutive arrival has no gap. The largest supported forward difference is 32767, so its gap contains 32766 numbers.
 
-**Reread:** queue docs, `Queue.get`, `Empty`, and the warnings on `empty()` and `qsize()`; threading docs, “Event objects”.
+**Reread:** Wikipedia, Addition and Comparison; optional RFC 1982 §3.1, Addition.
 
-### E3 — Stoppable UDP telemetry listener (medium, ~15 min)
+### E3 — Keep a live gap tracker (medium, ~20 min)
 
-**Goal:** Receive telemetry while the station runs, then release its network resource.
+**Goal:** Keep reliability state across packets arriving at a chassis test station.
 
-**Signatures:** `Listener(sock: socket, output: Queue[object], parse: Callable[[bytes], object])`, `start() -> None`, `stop() -> None`, and `_receive() -> None` (the internal receiver loop).
+**Signatures:** `class GapTracker`, `def __init__(self) -> None`, `def update(self, seq: int) -> list[int]`
 
-The caller supplies a UDP socket already bound to `127.0.0.1` (this computer) and port `0` (let the operating system select an available port). **Binding** assigns a socket its local address. The listener takes ownership: set its receive timeout to **0.2 seconds** in `__init__`, and close it in `stop`. Expose `stop_event: Event` (initially clear) and `thread: Thread | None` (initially `None`). Construction does not start a thread.
+Each new instance starts with public integer counters `received = 0`, `duplicates = 0`, `out_of_order = 0`, and `missing = set()`. Here `missing` is a set of still-absent sequence numbers, not a count. Keep a private latest forward position and private recent history. Each valid `update` follows these rules in order:
 
-`start` launches one thread running `_receive`. Every later `start`, including after stopping, raises `RuntimeError`. In the loop, receive with `recvfrom(65535)`, pass only the received bytes to `parse`, and enqueue the returned object unchanged, including `None`. On `socket.timeout`, check the stop event and keep listening. On a parser `ValueError`, discard that datagram and keep listening. Other parser errors and external socket closure are outside the contract.
+1. Increment `received` for **every** arrival, including duplicates and late packets.
+2. Check whether `seq` occurs in the **previous 1024 arrivals** (or all previous arrivals if fewer). If yes, increment `duplicates`, return `[]`, and leave the latest position and `missing` unchanged. Check before removing the oldest history item.
+3. Otherwise remove `seq` from `missing` if present. The first packet sets the latest position and returns `[]`. For later packets, compare with that latest position using E1. A positive difference advances the position, adds E2's gap to `missing`, and returns that gap. A zero or negative difference increments `out_of_order`, leaves the latest position unchanged, and returns `[]`.
+4. Every valid arrival enters history, including duplicates and out-of-order packets. Retain only the latest 1024 arrivals. Repeated numbers occupy separate history positions.
 
-`stop` sets the event, joins the receiver with a maximum two-second wait, and closes the socket after the thread exits. If a thread remains alive after that wait, raise `RuntimeError`. Stopping before starting closes the socket and prevents a future start. Repeated stops are harmless. Call `start`/`stop` only from the controlling thread; neither method returns a value.
+Reject an invalid sequence with `ValueError` **before changing any state**. Callers only read the public attributes. Instances must have independent state.
 
-**Example:** With `parse=lambda packet: float(packet.decode("ascii"))`, receiving `b"28.1"` adds `28.1` to the output queue; receiving `b"bad"` adds nothing.
+**Example:** Updates `10, 13, 11, 13` return `[], [11, 12], [], []`. The final attributes are `received=4`, `duplicates=1`, `out_of_order=1`, `missing={12}`. A subsequent `14` returns `[]`: the late `11` did not move the latest position backward.
 
-**Watch out:** `recvfrom` must time out so an idle listener can notice a stop request. Do not wait for another datagram to shut down. You may receive one final item if parsing was already underway when stopped.
+**Watch out:** A late packet can repair a previously detected gap. History counts arrivals, not distinct numbers. If you use a deque plus a dictionary of occurrence counts, removing one occurrence must not erase another. Avoid an ever-growing list of every arrival: long station runs must retain only bounded recent history. `missing` stores sequence values only; it does not distinguish losses with the same number on different full turns of the ring.
 
-**Reread:** threading docs, `Thread.start`, `Thread.join`, `Thread.is_alive`, and “Event objects”; queue docs, `Queue.put_nowait`. Optional API lookup: [socket timeouts](https://docs.python.org/3/library/socket.html#socket.socket.settimeout) and [recvfrom](https://docs.python.org/3/library/socket.html#socket.socket.recvfrom).
+**Reread:** Wikipedia, Comparison and its half-range limitation; Python `collections.deque`, `append` and `popleft`.
 
-### E4 — Parallel station checks with ordered results (medium, ~15 min)
+### E4 — Summarize a telemetry run (medium, ~11 min)
 
-**Goal:** Run independent instrument checks using threads sharing a job queue.
+**Goal:** Produce four numbers an operator can use to judge a captured stream.
 
-**Signature:** `run_pipeline(items: Iterable[T], workers: int, fn: Callable[[T], R]) -> list[R]`. An **iterable** supplies items one at a time; `R` means the result type may differ from the input type.
+**Signature:** `def loss_report(seqs: list[int]) -> dict[str, int | float]`
 
-`workers` is an integer. Reject values below 1 with `ValueError`, even for empty input, before consuming `items`. Consume the finite iterable once. For empty input return `[]` without calling `fn` or starting workers. Otherwise start `min(workers, number_of_items)` worker threads. Queue indexed jobs (each paired with its zero-based input position) and one exit sentinel per worker. Call `fn` exactly once for every input occurrence, including duplicates and `None`; the workers must actually overlap when there are multiple workers and waiting jobs.
+Process the list in its original arrival order using a fresh `GapTracker`. Return a dictionary with exactly these keys:
 
-Return results in input order, even when jobs finish in a different order. Catch ordinary `Exception` failures from `fn`, record them, and keep processing all remaining jobs. After every worker has stopped, re-raise the original exception object from the first failure recorded by a worker. Simultaneous failures may be recorded in either order. Use a queue to record failures safely. `KeyboardInterrupt` and other `BaseException` subclasses are outside the contract. Never return or raise while a worker is still alive. Use bounded waits when joining (for example, repeat `join(timeout=0.2)` while alive).
+- `"received"`: integer number of arrivals, including duplicates (`tracker.received`).
+- `"missing"`: integer size of the final still-missing set.
+- `"loss_pct"`: floating-point percentage, `100.0 * missing / (received - duplicates + missing)`. Return `0.0` when the denominator is zero. Excluding duplicates prevents repeats from improving this estimate.
+- `"longest_gap"`: largest number of skipped packets returned by any one `update`, or 0 if none. This is a historical maximum; late repairs do not reduce it.
 
-**Example:** `run_pipeline(["CH1", "CH2"], 2, lambda channel: channel + ":PASS")` gives `["CH1:PASS", "CH2:PASS"]`. A failed CH1 still allows CH2 to finish before the failure reaches the caller.
+**Example:** `loss_report([10, 13, 11, 13])` → `{"received": 4, "missing": 1, "loss_pct": 25.0, "longest_gap": 2}`. An empty input returns all zeros, with `loss_pct` equal to `0.0`.
 
-**Watch out:** Store each job's input index alongside its result. Do not use `None` alone as a job; it is a valid input. Do not use `ThreadPoolExecutor` here: practice `Thread` and `Queue` directly.
+**Watch out:** Do not sort or change the input list. Propagate `ValueError` for invalid numbers. Avoid rescanning the whole capture for each packet: the speed test analyzes **500,000 consecutive packets, including multiple wraps, in at most 2 seconds** (only the function call is timed). This report shares E3's sequence-value-only missing-set simplification.
 
-**Reread:** threading docs, “Thread objects”; queue docs, “Queue objects” and the worker-thread example. For investigating a shutdown regression later, reread Pro Git 7.1, “Double Dot” and “Triple Dot”: a **revision** is a saved commit, and a **range** selects commits between revisions for `git log`. For example, `git log HEAD~3..HEAD` lists the last three commits on a straight history. As a companion investigation command, `git blame path` identifies the commits that last changed each line. No Git changes are required for this set.
+**Reread:** Wikipedia, overview and Comparison; Python `collections.deque`, bounded history operations. Chapter 17's `find` and `xargs` explain how a station operator could locate captures before running this analysis.
 
-Optional reading: *The Pragmatic Programmer*, topic on concurrency.
+### E5 — Count events in the last N milliseconds (medium, ~20 min)
 
+**Goal:** The telemetry monitor records one event each time a packet is dropped. Let the operator ask how many drops occurred in the last N milliseconds. A **millisecond** (ms) is one thousandth of a second; an event's **timestamp** is the clock value when it was recorded.
 
-### E5 — Threads, processes and the GIL (easy, ~8 min)
+**Signatures:**
 
-**Goal:** Choose how to share instrument work safely between threads and processes. This is a concept check: return your answers rather than starting any workers.
+```python
+class EventCounter:
+    def __init__(self, clock: Callable[[], int]) -> None: ...
+    def record(self) -> None: ...
+    def count_last(self, ms: int) -> int: ...
+    def __len__(self) -> int: ...
+```
 
-**Signature:** `gil_answers() -> dict[str, str]`.
+A function can be passed around like any other value. A **callable** is a value you can call with parentheses; `Callable[[], int]` describes one that takes no arguments and returns an integer. Pass the function itself as `clock`, then call `clock()` whenever you need the current time. Its result is integer milliseconds and never goes backwards; you may assume this promise holds. Passing the clock in makes the class testable: tests supply a **fake clock**, a callable whose returned time they control, instead of waiting for real time to pass.
 
-Return a dictionary with exactly the keys `"Q1"`, `"Q2"`, `"Q3"`, and `"Q4"`. Each value is the uppercase option letter (`"A"`, `"B"`, `"C"`, or `"D"`) you choose for that question.
+Start with no events. `record()` records one event at `clock()` and returns `None`. Many events may share the same millisecond; each counts separately. `count_last(ms)` reads the current time as `now` and returns the number of recorded events whose timestamp `t` satisfies **`now - ms <= t <= now`**, inclusive at both ends. Thus `ms=0` counts events at exactly `now`, and `ms=10_000` includes events exactly 10,000 ms old. Queries may request windows in any order and do not consume events.
 
-**Example:** `sorted(gil_answers())` gives `['Q1', 'Q2', 'Q3', 'Q4']`. This shows the question IDs, not the answer letters.
+Raise `ValueError` unless `ms` is an integer in **0..10_000**. Reject `True` and `False` too: Python treats booleans as integers in `isinstance(value, int)`, so that check alone is insufficient. Floats such as `5.0` and strings such as `"5"` are invalid; do not convert them.
 
-A **process** is a running program with its own memory; threads within it share memory. **CPython** is the usual Python implementation, written in C, a compiled programming language. The **CPU** (central processing unit) performs calculations; a **core** is a CPU execution unit that can work independently of other cores. **Bytecode** is the sequence of instructions CPython executes for Python code. The **global interpreter lock (GIL)** is a lock used inside CPython to control that execution. These questions assume CPython with its GIL enabled; optional builds that disable it are outside this exercise.
+On `record()`, a valid `count_last()`, and `len(counter)`, remove events strictly older than `now - 10_000` from a deque using `popleft()`. No allowed future query can need them. Implement `__len__` so `len(counter)` returns the number of stored events after this cleanup, even if the clock has advanced without another event. Never discard a younger event just because the current query requests a short window. Storage should depend on events in the last 10,000 ms, rather than the whole station run; this is a time limit, not a fixed limit on the number of drops. This includes auxiliary storage such as a timestamp list: expired entries must be removed periodically even if `len(counter)` already reports only live events. Each counter has independent history.
 
-**Q1.** Two station worker threads are doing calculations written in Python. What does the GIL mean for executing their Python bytecode within one process?
+**Example:** A fake clock lets you try exact boundaries without sleeping:
 
-- **A.** Both threads execute Python bytecode at the same time if the computer has two processor cores.
-- **B.** Only one thread executes Python bytecode at a time in that process.
-- **C.** Only the main thread can execute Python bytecode; workers can only wait for instruments.
-- **D.** A thread holds the GIL until it exits, so another thread cannot make progress before then.
+```python
+now = 1_000
 
-<details>
-<summary>Why it matters on the job — Q1</summary>
-Choosing a worker design starts with understanding how the interpreter schedules station calculations.
-</details>
+def fake_clock() -> int:
+    return now
 
-**Serial** communication sends bytes through a device port; **VISA** (Virtual Instrument Software Architecture) is an interface used to communicate with test instruments.
+counter = EventCounter(fake_clock)
+counter.record()
+counter.record()                 # another drop at 1,000 ms
+now = 1_005
+counter.record()
+counter.count_last(5)             # 3: includes both 1,000 and 1,005
+counter.count_last(0)             # 1: only the drop at 1,005
+len(counter)                     # 3
+now = 11_001
+counter.count_last(10_000)        # 1: the two drops at 1,000 have expired
+len(counter)                     # 1
+```
 
-**Q2.** Several instrument readers spend most of their time waiting on sockets, serial ports, or VISA replies. Why can threads still help even with the GIL?
+**Watch out:** The speed test requires **200,000 records plus 200,000 queries in at most 2 seconds**. Scanning every retained event for every query is too slow. One approach is to keep a sorted timestamp list alongside the deque. An **index** is a position in a list, starting at 0. **Binary search** repeatedly halves a sorted search range; `bisect_left(times, cutoff, lo=start)` returns the index of the first timestamp at least `cutoff`, searching from index `start` (or the list length if none matches). Subtract that index from the list length to count the matching events. Since the clock never goes backwards, appending keeps timestamps sorted. Track how many list entries have expired as a starting index; occasionally copy only the remaining part with a **slice**, `times[start:]`, when expired entries are at least as numerous as retained entries. That keeps the extra list bounded without copying all remaining entries on every removal. A deque is fast at its ends; repeatedly looking up its middle is not fast, so use a list for binary search.
 
-- **A.** Starting a second instrument thread disables the GIL for the whole process.
-- **B.** Each thread has a separate interpreter and its own GIL, even within the same process.
-- **C.** Blocking I/O waits release the GIL, letting other threads run while a reader waits.
-- **D.** Threads yield the GIL only when code explicitly calls Event.wait(); blocking instrument I/O alone cannot let another thread run.
-
-<details>
-<summary>Why it matters on the job — Q2</summary>
-An operator display should remain responsive while multiple instruments take time to reply.
-</details>
-
-A **waveform** is a sequence of captured signal measurements; an **FFT** (fast Fourier transform) calculates its frequency content. **Multiprocessing** runs work in separate processes. A **C-backed library** performs some work in compiled C code; **NumPy** is one such library for numerical arrays.
-
-**Q3.** FFT calculations on captured waveforms are CPU-heavy: calculation takes most of the time. Which approach can use multiple processor cores despite the GIL?
-
-- **A.** Use multiprocessing, or a C-backed library such as NumPy whose relevant operations release the GIL.
-- **B.** Add more threads running only Python bytecode; each thread automatically gets a separate processor core for simultaneous execution.
-- **C.** Put calculations in a Queue; a Queue automatically starts a separate process for each item.
-- **D.** Use an Event to start all Python calculation threads together; simultaneous starts bypass the GIL.
-
-<details>
-<summary>Why it matters on the job — Q3</summary>
-Waveform analysis must finish quickly enough for the next station test step.
-</details>
-
-A **shared counter** is a number that several threads update. An **atomic** operation cannot be interleaved with another thread's operations partway through. A **Lock** lets one thread at a time enter a protected section of code; a Queue can instead send updates to one thread that owns the counter.
-
-**Q4.** Two reader threads both do `count += 1` after receiving a measurement. Does the GIL make this shared counter update safe without coordination?
-
-- **A.** Yes: the GIL makes every Python statement atomic, including `count += 1`.
-- **B.** Yes: integer values cannot change in place, so updates to a shared integer cannot be lost.
-- **C.** No, but calling `join()` on both readers afterward recovers any lost increments.
-- **D.** No: `count += 1` is not atomic; protect updates with a Lock or send them through a Queue to one counter-owning thread.
-
-<details>
-<summary>Why it matters on the job — Q4</summary>
-Lost measurement counts can make a station report disagree with the readings it collected.
-</details>
-
-**Watch out:** Return option letters, not option text. A single successful threaded run is not proof that a shared update is safe. No NumPy installation or instrument connection is needed for this quiz.
-
-**Reread:** For Q1 and Q3, the Python glossary entry “global interpreter lock” and the threading docs introduction, “GIL and performance considerations”. For Q2, the same threading section on I/O-bound tasks (tasks that spend most of their time waiting for input/output). For Q4, threading docs, “Lock objects”, and queue docs, “Queue objects”.
+**Reread:** The day's serial-number arithmetic overview for the surrounding telemetry work; Python `collections.deque`, `append` and `popleft` (reread from d15). For the suggested fast lookup, see Python's [`bisect_left`](https://docs.python.org/3/library/bisect.html#bisect.bisect_left).

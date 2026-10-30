@@ -1,99 +1,81 @@
-# d13 — Practical speed: big-O on sensor data
+# d13 — Logging and structured reports
 
-**Time:** about 45 minutes · **Read first:** *A Common-Sense Guide to DSA*, the first chapters on Big O and the chapters on stacks and queues (your book; skip the end-of-chapter exercises because this set is today's practice); [Python `collections.deque` documentation](https://docs.python.org/3/library/collections.html#collections.deque); [Missing Semester: Version Control (git's data model)](https://missing.csail.mit.edu/2020/version-control/) · **You edit:** `starter/windows.py`
+**Time:** about 45 minutes · **Read first:** [Python Logging HOWTO, Basic Logging Tutorial](https://docs.python.org/3/howto/logging.html#basic-logging-tutorial); Pro Git [3.5 Remote Branches](https://git-scm.com/book/en/v2/Git-Branching-Remote-Branches) and [3.6 Rebasing](https://git-scm.com/book/en/v2/Git-Branching-Rebasing); Python [`collections`: Counter and defaultdict](https://docs.python.org/3/library/collections.html) · **You edit:** `starter/reporting.py`
 
 ## What you're building
 
-A chassis test station records thousands of sensor readings each second. Build helpers that smooth those readings, show the largest recent reading, flag sudden increases, and remove repeated instrument serial numbers before an operator sees the report.
+A test station runs checks on instrument channels (named measurement inputs, such as `CH1`). Operators need a readable event log and a machine-readable report to find failed checks and decide whether a run passed. You will build both from recorded check results; no instrument or network connection is needed.
 
 ## How this works
 
-1. Replace the `raise NotImplementedError(...)` lines in `starter/windows.py`. Don't edit `tests/`.
-2. Press **Ctrl+Shift+B → Test: d13** (or run `bash tools/run.sh d13` / `tools\run.ps1 d13`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+1. Replace the `raise NotImplementedError(...)` lines in `starter/reporting.py`. Don't edit `tests/`.
+2. Press Ctrl+Shift+B → **Test: d13** (or run `bash tools/run.sh d13` / `tools\run.ps1 d13` from the repo root). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
-Allow about 2 minutes to read these shared rules, then use the exercise times below.
+**UTF-8** is a text encoding that supports non-English characters. In type hints, `Any` means a value of any Python type; `Path` is a filesystem path object from `pathlib`.
 
-- An **index** is a position in a list, starting at zero. Readings arrive in list order.
-- A **window** is a consecutive group of `window` readings. A **full window** has exactly that many readings; partial groups produce no output.
-- A **mean** is the sum divided by the number of readings. A **running sum** keeps a total and updates it when one reading leaves and another enters.
-- **Big O** describes how work grows as input grows. Here `n` is the number of input items: **O(n)** means linear work (roughly twice the work for twice the data); **O(n × window)** means rescanning every window. **O(1)** means constant work per operation, independent of input length.
-- A **stack** removes the newest item first; a **queue** removes the oldest item first. A **deque** (double-ended queue, pronounced "deck") supports adding/removing at either end in O(1): `append` adds right, `pop` removes right, and `popleft` removes left. Accessing either end with `[0]` or `[-1]` is also O(1). Avoid `list.pop(0)`, which shifts the remaining items.
-- A **set** stores distinct items and supports membership (`item in seen`) in average O(1). Keep a separate list when output order matters.
+A **logger** receives named events; a **handler** sends them somewhere, such as a file; a **formatter** controls their text. A **level** describes importance: DEBUG < INFO < WARNING < ERROR < CRITICAL. A logger's **propagation** setting controls whether parent loggers also receive its events.
 
-This short deque example holds pending station messages; it is not a sliding-window calculation:
+A **status** is a check's outcome: `PASS` means within requirements, `FAIL` means outside requirements, and `ERROR` means the check could not finish. A **Counter** counts repeated values. A **defaultdict** supplies a new default value for a missing key, such as an empty list for a channel. Convert either to an ordinary `dict` when returning results.
 
 ```python
-from collections import deque
-pending = deque(["read CH1", "read CH2"])
-pending.append("read CH3")
-next_step = pending.popleft()  # "read CH1"
+from collections import Counter, defaultdict
+visits = Counter(["CH2", "CH2", "CH4"])
+notes = defaultdict(list)
+notes["CH4"].append("connector reseated")
+print(visits["CH2"], notes["CH4"])  # 2 ['connector reseated']
 ```
 
-Shared contracts: return a new list where a list is requested; never change an input list. For E1–E3, `window` is an integer: raise `ValueError` when it is zero or negative, even for empty input. Otherwise a window longer than the input is valid. Inputs have the annotated types; readings and factors are finite numbers (no infinity or NaN, meaning "not a number"), with ordinary sensor magnitudes. You need not validate those preconditions. Small floating-point rounding differences in means are accepted.
+**JSON** is a text format for dictionaries, lists, strings, numbers, booleans and null. **Metadata** describes the run, such as station and operator names. **UTC** is the shared world time reference. An **aware datetime** includes a time-zone offset; ISO 8601 is a standard timestamp spelling, such as `2026-10-28T12:30:00+00:00`. An **injectable time** lets tests supply a fixed datetime instead of reading the clock.
 
-E1, E2 and E4 have timed checks allowing **2 seconds per function call**, excluding input construction. E1 and E2 use 200,000 readings with a window of 1,000. Additional small checks count how many readings your code accesses and, for E1, additions on the readings (even after copying the list), so repeated window slicing/scanning fails even on fast machines. Use linear algorithms; avoid recalculating every sum or maximum and checking membership in a growing output list.
-
-The git reading supports today's workflow: a **commit** records a snapshot of tracked files and its parent history; a **branch** is a name pointing to a commit. Spend a moment relating this to saving a working exercise version in your own clone. No git commands are graded today.
+For E2–E4, every input result is a dictionary containing string keys `channel`, `status`, and `message`; all three values are strings. Status is always exactly `PASS`, `FAIL`, or `ERROR`. Other JSON-compatible fields may be present and must be preserved in reports. Inputs are valid; you do not need to validate malformed results. Do not change input dictionaries or lists. File paths accept `str` or `pathlib.Path`; parent directories already exist. Let file errors reach the caller.
 
 ## Exercises
 
-### E1 — Smooth a sensor trace (easy, ~10 min)
+### E1 — Station event log (easy, ~12 min)
 
-**Goal:** Return the mean of each full window, moving one reading right each time. Output element `j` summarizes `values[j:j + window]`. There are `max(0, len(values) - window + 1)` outputs. Use O(n) total work.
+**Goal:** Return the named `logging.Logger`, configured to append UTF-8 text to the supplied file. Set both logger and file handler to INFO, and set `propagate = False`. Use this exact formatter string: `"%(asctime)s %(levelname)s %(name)s: %(message)s"`, with logging's default timestamp format. Each accepted event occupies one line for the single-line messages used here.
 
-**Signature:** `def rolling_mean(values: list[float], window: int) -> list[float]`
+**Signature:** `def get_station_logger(name: str, path: str | Path) -> logging.Logger`
 
-**Example:** `rolling_mean([2.0, 4.0, 8.0, 10.0], 2)` → `[3.0, 6.0, 9.0]`
+**Example:** After `log = get_station_logger("station.chassis", "run.log")`, `log.info("power enabled")` adds a line ending `INFO station.chassis: power enabled`.
 
-**Watch out:** Empty input or a window longer than the list returns `[]`. A window of one returns the readings; a window equal to the list length returns one mean. Compute the first total once, then remove the outgoing reading and add the incoming one. Negative readings are allowed.
+**Watch out:** DEBUG events must be omitted; INFO through CRITICAL must be recorded. Repeating a call with the same name and same path returns the same logger with exactly one file handler, so each event appears once. Existing file text stays intact. Different names use independent files. Names are fresh on first call; reconfiguring a name for a different path or handling externally installed handlers is outside this exercise. The caller owns closing the returned logger's handlers when finished; do not close them inside the function. No root logger configuration is needed.
 
-**Reread:** *A Common-Sense Guide to DSA*, Big O chapters: counting operations inside loops and nested loops.
+**Reread:** Logging HOWTO → “Logging to a file”, “Logging from multiple modules”, “Changing the format of displayed messages”, and “Displaying the date/time in messages”. The supplied `logging` module exposes `FileHandler` and `Formatter` for the named-logger setup.
 
-### E2 — Largest recent load (medium, ~17 min)
+### E2 — Overall run outcome (easy, ~10 min)
 
-**Goal:** Return the largest value in each full window, in the same output order and count as E1. Use a monotonic deque of candidate indices for O(n) total work. **Monotonic** here means their values never increase from the front to the back.
+**Goal:** Use `Counter` to count result statuses. Return exactly `{"counts": <ordinary dict of observed statuses and counts>, "overall": <worst status>}`. Worst means `ERROR` before `FAIL` before `PASS`, regardless of input order. Include only observed statuses in `counts`. Empty input returns `{"counts": {}, "overall": "PASS"}`: this helper treats a run with no failed checks as passing.
 
-**Signature:** `def max_in_windows(values: list[float], window: int) -> list[float]`
+**Signature:** `def summarize(results: list[dict[str, Any]]) -> dict[str, Any]`
 
-**Example:** `max_in_windows([4.0, 2.0, 3.0, 1.0, 5.0], 3)` → `[4.0, 3.0, 5.0]`
+**Example:** Two PASS results and one FAIL result → `{"counts": {"PASS": 2, "FAIL": 1}, "overall": "FAIL"}`. Dictionary key order does not matter.
 
-Build the idea one step at a time:
+**Watch out:** Count checks, not distinct channels: repeated checks on one channel count separately. Status severity is a stated rule, not alphabetical order or the most frequent status.
 
-1. Store indices in the deque, oldest at the left. Indices let you tell when a reading has left the current window.
-2. At incoming index `i`, the window starts at `i - window + 1`. Remove indices smaller than that start from the left.
-3. Remove indices from the right while their readings are less than or equal to the incoming reading. The incoming reading is at least as large and will remain in the window longer, so those older candidates cannot be needed again.
-4. Append `i` to the right. The front now points to the largest reading still in the window.
-5. Only append a maximum to the result once `i >= window - 1`, when the first full window exists.
+**Reread:** `collections` → “Counter objects”; Logging HOWTO → “When to use logging” for the related idea of event importance. Result statuses here are separate from logging levels.
 
-For the example, at index 2 the candidates are `[0, 2]`, holding values `[4.0, 3.0]`, so emit `4.0`. At index 3, index 0 expires; the candidates become `[2, 3]` and emit `3.0`. At index 4, the new `5.0` removes both smaller candidates and emits `5.0`.
+### E3 — Operator failure list (easy, ~9 min)
 
-**Watch out:** Empty or too-short input returns `[]`. Negative values and repeated maxima work normally. Each index enters once and leaves at most once, so the loops together do O(n) work even though one loop is inside another. The deque needs at most O(window) storage, plus the output list.
+**Goal:** Use `defaultdict(list)` to collect messages from FAIL and ERROR results under their channel names. Return an ordinary dictionary mapping each affected channel to its list of messages. Omit PASS results and channels without failures. Within each channel, keep input order and repeated or empty messages. Empty input returns `{}`.
 
-**Reread:** *A Common-Sense Guide to DSA*, stacks and queues chapters; `collections.deque` docs: `append`, `pop`, `popleft`, and the performance discussion.
+**Signature:** `def failures_by_channel(results: list[dict[str, Any]]) -> dict[str, list[str]]`
 
-### E3 — First sudden increase (medium, ~10 min)
+**Example:** FAIL `CH1: voltage low`, PASS `CH2: ready`, ERROR `CH1: timeout` → `{"CH1": ["voltage low", "timeout"]}`.
 
-**Goal:** A **spike** is a reading strictly greater than `factor` times the mean of the immediately preceding `window` readings. Return the first spike's original index, or `None` if none exists. Begin checking at index `window`; exclude the current reading from its baseline (the preceding mean). Use a running sum for O(n) total work.
+**Watch out:** Each channel needs its own list. A message reports what happened; it need not be unique. Dictionary key order does not matter.
 
-Floating-point arithmetic can slightly shift an equal threshold. Treat a reading and its threshold as equal when `math.isclose(reading, threshold, rel_tol=1e-9, abs_tol=1e-12)` is true; equal readings are not spikes. Here `rel_tol` allows a difference up to one billionth of the larger absolute value, and `abs_tol` allows a difference up to `1e-12` near zero. Exceeding either allowance alone is not enough: a spike must be above the threshold and outside both allowances. You can import `math` or use an equivalent comparison.
+**Reread:** `collections` → “defaultdict objects” and its examples of grouping values into lists; Logging HOWTO → “Logging variable data”.
 
-**Signature:** `def first_spike(values: list[float], window: int, factor: float) -> int | None`
+### E4 — Save the run report (medium, ~14 min)
 
-**Example:** `first_spike([2.0, 2.0, 4.0, 9.0], 2, 2.0)` → `3` (index 2 equals its threshold; index 3 exceeds `2 × 3.0`).
+**Goal:** Write a UTF-8 JSON file containing exactly the top-level keys `meta`, `summary`, and `results`. `summary` is E2's output, and `results` is the original list with its order and all fields preserved. `meta` is a copy of the supplied metadata with `generated_utc` added (or replaced). Return `None` and overwrite any existing report file.
 
-**Watch out:** `factor` must be positive; zero or negative raises `ValueError`, even for empty input. Positive factors below one are valid. Fewer than `window + 1` readings returns `None`. Compare before sliding the previous-window total. Zero and negative means use the same signed formula: do not take absolute values or divide by the mean. This is a simple threshold exercise, not a statistical detector.
+**Signature:** `def write_report(results: list[dict[str, Any]], path: str | Path, meta: dict[str, Any], *, now: datetime | None = None) -> None`
 
-**Reread:** *A Common-Sense Guide to DSA*, Big O chapters: eliminating repeated work; `collections.deque` docs for the idea of items entering and leaving a queue (a deque is optional here).
+**Example:** With `results=[]`, `meta={"station": "A1"}`, and `now=datetime(2026, 10, 28, 12, 30, tzinfo=timezone.utc)`, the decoded file is `{"meta": {"station": "A1", "generated_utc": "2026-10-28T12:30:00+00:00"}, "summary": {"counts": {}, "overall": "PASS"}, "results": []}`.
 
-### E4 — Clean the instrument list (easy, ~6 min)
+**Watch out:** When `now` is supplied, it is always an aware datetime. Convert it to UTC and use `.isoformat()` (retain fractional seconds if present; use `+00:00`, not `Z`). When omitted, obtain the current aware UTC datetime with `datetime.now(timezone.utc)`. `generated_utc` belongs inside `meta`, not beside it. Never add it to the caller's metadata. JSON indentation and escaping are up to you; tests decode the file. Reuse `summarize` instead of repeating E2's logic.
 
-**Goal:** **Deduplicate** means remove repeated items. Return only the first occurrence of each serial number, in its original order, using a set for O(n) average total work.
-
-**Signature:** `def dedupe_keep_order(serials: list[str]) -> list[str]`
-
-**Example:** `dedupe_keep_order(["PSU-7", "DMM-2", "PSU-7", "PSU-8"])` → `["PSU-7", "DMM-2", "PSU-8"]`
-
-**Watch out:** Compare exact strings: `"PSU-7"`, `"psu-7"` and `" PSU-7 "` are different. An empty string is also a valid value. Do not sort or trim. Empty input returns `[]`. A set alone does not express the required first-seen order; keep the result in a list.
-
-**Reread:** *A Common-Sense Guide to DSA*, Big O chapters: linear scans and how repeating a search changes the total work.
+**Reread:** Logging HOWTO → “Displaying the date/time in messages” for why timestamps help investigations; `collections` → “Counter objects” for the embedded summary. The supplied `json`, `datetime`, and `timezone` imports support the report. Pro Git 3.5 → “Tracking Branches” and 3.6 → “The Basic Rebase” are today's workflow reading; this set does not run Git commands.

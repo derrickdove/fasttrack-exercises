@@ -1,6 +1,6 @@
-# r3 — Week 3 review: a signal-generator test step
+# r3 — Block 3 review: a signal-generator test step
 
-**Time:** about 60 minutes (43 minutes on this week, 17 on earlier weeks) · **Read first:** no new reading; review the d04, d13 and d15–d20 readings named below · **You edit:** `starter/review3.py`
+**Time:** about 60 minutes (43 minutes on this week, 17 on earlier weeks) · **Read first:** no new reading; review the d04, d15 and d16–d23 readings named below · **You edit:** `starter/review3.py`
 
 ## What you're building
 
@@ -15,13 +15,13 @@ A chassis test station uses a **signal generator**, an instrument that produces 
 Earlier readings to revisit as needed (there is no new reading on review day):
 
 - **d04:** Python Tutorial §7.2, reading files; Python `csv`, `DictReader`; Python `pathlib`, `Path.open`.
-- **d13:** *A Common-Sense Guide to DSA*, Big O, stacks and queues; Python `collections.deque`, queue behavior.
-- **d15:** Python Tutorial §3, strings versus bytes; Python `bytes` documentation; Wikipedia, “Standard Commands for Programmable Instruments” (overview).
-- **d16:** PyVISA, “Communicating with your instrument”; PyVISA-sim documentation.
-- **d17:** Python `typing.Protocol` documentation; Python `abc` documentation; *The Pragmatic Programmer*, “Decoupling”.
-- **d18:** Python `contextlib` documentation; Python Tutorial §8.7, “Defining Clean-up Actions”; Python `functools.wraps` documentation.
-- **d19:** pySerial, “Short introduction” and “URL handlers”; SparkFun, “Serial Communication”.
-- **d20:** Python “Socket Programming HOWTO”; Python `socket` documentation, `create_connection` and `settimeout`.
+- **d15:** *A Common-Sense Guide to DSA*, Big O, stacks and queues; Python `collections.deque`, queue behavior.
+- **d16:** Python Tutorial §3, strings versus bytes; Python `bytes` documentation; Wikipedia, “Standard Commands for Programmable Instruments” (overview).
+- **d17:** PyVISA, “Communicating with your instrument”; PyVISA-sim documentation.
+- **d19:** Python `typing.Protocol` documentation; Python `abc` documentation; *The Pragmatic Programmer*, “Decoupling”.
+- **d20:** Python `contextlib` documentation; Python Tutorial §8.7, “Defining Clean-up Actions”; Python `functools.wraps` documentation.
+- **d22:** pySerial, “Short introduction” and “URL handlers”; SparkFun, “Serial Communication”.
+- **d23:** Python “Socket Programming HOWTO”; Python `socket` documentation, `create_connection` and `settimeout`.
 
 A **driver** translates station actions into instrument commands. A **transport** sends commands and gets replies; a **fake** replaces it with predictable in-memory behavior. **SCPI** (Standard Commands for Programmable Instruments) is the text-command convention used here. A **protocol** describes the methods an object must offer without requiring a particular parent class.
 
@@ -58,7 +58,7 @@ Copy the supplied reply dictionary at construction so later caller changes do no
 
 **Watch out:** Both transport methods use text, with no encoding or terminator added by the fake. Do not invent a reply for an unknown query.
 
-**Reread:** d17 — `typing.Protocol`, protocol examples; *The Pragmatic Programmer*, “Decoupling”.
+**Reread:** d19 — `typing.Protocol`, protocol examples; *The Pragmatic Programmer*, “Decoupling”.
 
 ### E2 — Drive a sine-wave source (easy–medium, ~7 min)
 
@@ -81,7 +81,7 @@ To keep this review short, validation and formatting are supplied: call `configu
 
 **Watch out:** An invalid amplitude must not leave a changed frequency behind. Validate both inputs first. Tests also use a transport different from your E1 fake.
 
-**Reread:** d15 — SCPI overview and Python Tutorial §3, strings versus bytes; d16 — PyVISA “Communicating with your instrument”, `query`; d17 — `typing.Protocol` and “Decoupling”.
+**Reread:** d16 — SCPI overview and Python Tutorial §3, strings versus bytes; d17 — PyVISA “Communicating with your instrument”, `query`; d19 — `typing.Protocol` and “Decoupling”.
 
 ### E3 — Turn the stimulus off on every exit (medium, ~10 min)
 
@@ -97,7 +97,7 @@ If enable or measurement fails, propagate that same exception object after attem
 
 **Watch out:** A plain `finally` can replace the original error when cleanup itself raises. Keep the original failure as the one reported to the operator.
 
-**Reread:** d18 — Python Tutorial §8.7, “Defining Clean-up Actions”; `contextlib`, cleanup and exception propagation.
+**Reread:** d20 — Python Tutorial §8.7, “Defining Clean-up Actions”; `contextlib`, cleanup and exception propagation.
 
 ### E4 — Separate complete instrument replies (medium, ~8 min)
 
@@ -113,7 +113,7 @@ Use the supplied `decode_reply(line)` on each complete line after removing its L
 
 **Watch out:** A CR may arrive in one chunk and its LF in the next. Do not use `strip()`, which would remove meaningful spaces from replies.
 
-**Reread:** d15 — Python `bytes`, splitting and decoding; d19 — pySerial “Short introduction”, line endings; d20 — “Socket Programming HOWTO”, partial receives and message boundaries.
+**Reread:** d16 — Python `bytes`, splitting and decoding; d22 — pySerial “Short introduction”, line endings; d23 — “Socket Programming HOWTO”, partial receives and message boundaries.
 
 ### E5 — Read one reply with a receive budget (medium, ~10 min)
 
@@ -136,7 +136,7 @@ Raise `TimeoutError` if that budget is exhausted without a complete reply. Keep 
 
 **Watch out:** Do not assume one receive call equals one reply. Empty reply text (`""`, from `b"\n"`) is valid and differs from a closed connection (`b""`). This exercise builds on E4.
 
-**Reread:** d20 — “Socket Programming HOWTO”, `recv`, buffering and disconnection; Python `socket`, `settimeout`; d19 — pySerial “Short introduction”, timeout behavior.
+**Reread:** d23 — “Socket Programming HOWTO”, `recv`, buffering and disconnection; Python `socket`, `settimeout`; d22 — pySerial “Short introduction”, timeout behavior.
 
 ### E6 — Load the station's channel hold list (easy, ~8 min)
 
@@ -176,4 +176,4 @@ Use **O(n)** time (one pass over the `n` events) and **O(1)** extra storage (onl
 
 **Watch out:** Return the peak, not the final count or total number of sends. Exception-message wording is your choice.
 
-Reread: d13
+Reread: d15

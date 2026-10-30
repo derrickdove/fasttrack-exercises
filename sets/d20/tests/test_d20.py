@@ -1,324 +1,410 @@
-﻿"""Loopback station tests: no instrument, internet, or fixed port required."""
-from __future__ import annotations
-
-from collections.abc import Callable, Iterator
-from io import BytesIO
-import socket
-from threading import Event, Thread
-from unittest.mock import Mock
-
+"""Deterministic station safety checks: no hardware or real waiting."""
 import pytest
 
-from starter.tcp_instrument import TcpInstrument
+from starter.safety import OutputGuard, ramp_voltage, retry, with_deadline
 
 
-class FakeInstrument:
-    """Accept one station client and run a bounded instrument script."""
+class FakePSU:
+    def __init__(self) -> None:
+        self.events: list[tuple[object, ...]] = []
+        self.off_errors: dict[int, BaseException] = {}
+        self.write_error: BaseException | None = None
+        self.fail_at: float | None = None
 
-    def __init__(self, script: Callable[[socket.socket], None]) -> None:
-        self.listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.listener.bind(("127.0.0.1", 0))
-        self.listener.listen(1)
-        self.listener.settimeout(0.05)
-        self.host, self.port = self.listener.getsockname()
-        self.script = script
-        self.client: socket.socket | None = None
-        self.stopping = Event()
-        self.errors: list[BaseException] = []
-        self.thread = Thread(target=self._run, name="d20-fake-instrument", daemon=True)
-        self.thread.start()
+    def output(self, ch: int, on: bool) -> None:
+        self.events.append(("output", ch, on))
+        if not on and ch in self.off_errors:
+            raise self.off_errors[ch]
 
-    def _run(self) -> None:
-        try:
-            while not self.stopping.is_set():
-                try:
-                    client, _ = self.listener.accept()
-                except TimeoutError:
-                    continue
-                self.client = client
-                with client:
-                    client.settimeout(1.5)
-                    self.script(client)
-                return
-        except OSError as error:
-            if not self.stopping.is_set():
-                self.errors.append(error)
-        except BaseException as error:
-            self.errors.append(error)
+    def set_voltage(self, ch: int, voltage: float) -> None:
+        self.events.append(("voltage", ch, voltage))
+        if voltage == self.fail_at and self.write_error is not None:
+            raise self.write_error
 
-    def stop(self) -> None:
-        self.stopping.set()
-        if self.client is not None:
-            try:
-                self.client.shutdown(socket.SHUT_RDWR)
-            except OSError:
-                pass  # The handler may already have closed the accepted socket.
-        self.listener.close()
-        self.thread.join(timeout=2.0)
-        assert not self.thread.is_alive(), "fake instrument thread did not stop"
-        assert not self.errors, f"fake instrument script failed: {self.errors!r}"
+
+class FakeTime:
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.sleeps: list[float] = []
+        self.clock_calls = 0
+
+    def clock(self) -> float:
+        self.clock_calls += 1
+        assert self.clock_calls <= 100, "polling must stop at the deadline"
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        assert 0 < seconds <= 0.01, "sleep must be positive and at most 0.01 s"
+        self.sleeps.append(seconds)
+        self.now += seconds
 
 
 @pytest.fixture
-def instrument_server() -> Iterator[Callable[[Callable[[socket.socket], None]], FakeInstrument]]:
-    servers: list[FakeInstrument] = []
-
-    def start(script: Callable[[socket.socket], None]) -> FakeInstrument:
-        server = FakeInstrument(script)
-        servers.append(server)
-        return server
-
-    yield start
-    for server in servers:
-        server.stop()
+def psu() -> FakePSU:
+    return FakePSU()
 
 
-def read_command(connection: socket.socket) -> bytes:
-    """Read an exact command including its LF, without consuming the next one."""
-    command = b""
-    while not command.endswith(b"\n"):
-        chunk = connection.recv(1)
-        if not chunk:
-            raise AssertionError(f"client closed before command newline: {command!r}")
-        command += chunk
-    return command
+def test_e1_entry_and_normal_exit(psu: FakePSU) -> None:
+    guard = OutputGuard(psu, [2, 1])
+    assert psu.events == [], "construction must not touch the supply"
+    with guard as entered:
+        assert entered is guard, "with ... as must receive the guard"
+        assert psu.events == [], "entry must not enable or disable outputs"
+        psu.events.append(("measurement",))
+    assert psu.events == [("measurement",), ("output", 2, False), ("output", 1, False)]
 
 
-def observe_close(closed: Event) -> Callable[[socket.socket], None]:
-    def script(connection: socket.socket) -> None:
-        assert connection.recv(1) == b"", "closing a client must not send a command"
-        closed.set()
-    return script
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_e1_preserves_block_error_and_continues_cleanup(psu: FakePSU, cleanup_fails: bool) -> None:
+    original = OSError("measurement failed")
+    if cleanup_fails:
+        psu.off_errors[2] = RuntimeError("channel 2 shutdown failed")
+    guard = OutputGuard(psu, [2, 1])
+    with pytest.raises(OSError) as caught:
+        with guard:
+            raise original
+    assert caught.value is original, "the measurement error must survive failed cleanup"
+    assert psu.events == [("output", 2, False), ("output", 1, False)]
 
 
-class SocketView:
-    """Keep real TCP but force small receives or a deterministic send timeout."""
-
-    def __init__(self, connection: socket.socket, *, fail_send: bool = False) -> None:
-        self.connection = connection
-        self.fail_send = fail_send
-        self.receive_calls = 0
-
-    def __getattr__(self, name: str):
-        return getattr(self.connection, name)
-
-    def recv(self, size: int) -> bytes:
-        self.receive_calls += 1
-        return self.connection.recv(min(size, 2))
-
-    def sendall(self, payload: bytes) -> None:
-        if self.fail_send:
-            raise TimeoutError("simulated full transmit buffer")
-        self.connection.sendall(payload)
+def test_e1_reports_first_cleanup_error_after_attempting_all(psu: FakePSU) -> None:
+    first = OSError("first shutdown failure")
+    psu.off_errors = {3: first, 2: RuntimeError("second failure")}
+    guard = OutputGuard(psu, [3, 2, 1])
+    with pytest.raises(OSError) as caught:
+        with guard:
+            pass
+    assert caught.value is first
+    assert psu.events == [("output", 3, False), ("output", 2, False), ("output", 1, False)]
 
 
-@pytest.mark.parametrize("timeout", [None, 0.35])
-def test_e1_connects_with_timeout_and_closes(instrument_server, monkeypatch, timeout) -> None:
-    closed = Event()
-    server = instrument_server(observe_close(closed))
-    original = socket.create_connection
-    connections: list[socket.socket] = []
-    calls = []
-
-    def connect(address, timeout=None):
-        calls.append((address, timeout))
-        connection = original(address, timeout=timeout)
-        connections.append(connection)
-        return connection
-
-    monkeypatch.setattr(socket, "create_connection", connect)
-    client = (TcpInstrument(server.host, server.port) if timeout is None
-              else TcpInstrument(server.host, server.port, timeout=timeout))
-    try:
-        expected_timeout = 2.0 if timeout is None else timeout
-        assert calls == [((server.host, server.port), expected_timeout)], "use create_connection with the requested timeout"
-        assert connections[0].gettimeout() == expected_timeout, "reads and writes need the same timeout"
-    finally:
-        client.close()
-    client.close()
-    assert closed.wait(1.0), "close() must release the station's TCP connection"
+@pytest.mark.parametrize("channels", [[], [1, 1], [3, 1]])
+def test_e1_snapshots_channels_and_keeps_duplicates(psu: FakePSU, channels: list[int]) -> None:
+    expected = [("output", ch, False) for ch in channels]
+    guard = OutputGuard(psu, channels)
+    channels.append(99)
+    with guard:
+        pass
+    assert psu.events == expected, "cleanup must use the original channel sequence"
 
 
-def test_e1_context_returns_self_and_closes(instrument_server) -> None:
-    closed = Event()
-    server = instrument_server(observe_close(closed))
-    client = TcpInstrument(server.host, server.port)
-    try:
-        with client as entered:
-            assert entered is client, "with must yield the connected instrument"
-        assert closed.wait(1.0), "leaving with must close the connection"
-    finally:
-        client.close()
+def test_e1_handles_operator_interrupt(psu: FakePSU) -> None:
+    original = KeyboardInterrupt("operator stop")
+    psu.off_errors[1] = KeyboardInterrupt("shutdown interrupted")
+    guard = OutputGuard(psu, [1, 2])
+    with pytest.raises(KeyboardInterrupt) as caught:
+        with guard:
+            raise original
+    assert caught.value is original
+    assert psu.events == [("output", 1, False), ("output", 2, False)]
 
 
-def test_e1_context_preserves_operator_error(instrument_server) -> None:
-    closed = Event()
-    server = instrument_server(observe_close(closed))
-    with pytest.raises(ValueError, match="operator cancelled"):
-        with TcpInstrument(server.host, server.port):
-            raise ValueError("operator cancelled")
-    assert closed.wait(1.0), "with must also close after a test-step exception"
+@pytest.mark.parametrize("result", [0, None, False, "ready"])
+def test_e2_forwards_arguments_result_and_metadata(result: object) -> None:
+    sleeps: list[float] = []
+    calls: list[tuple[int, str]] = []
+
+    def read_status(ch: int, *, mode: str) -> object:
+        """Read the station status."""
+        calls.append((ch, mode))
+        return result
+
+    wrapped = retry(3, (OSError,), sleep=sleeps.append)(read_status)
+    assert wrapped(2, mode="quick") is result, "a falsey result is still a successful call"
+    assert calls == [(2, "quick")]
+    assert sleeps == []
+    assert wrapped.__name__ == read_status.__name__
+    assert wrapped.__doc__ == read_status.__doc__
+    assert getattr(wrapped, "__wrapped__", None) is read_status, "use functools.wraps"
 
 
-@pytest.mark.parametrize("cmd", ["*RST", "OUTP ON", "DISP:TEXT café"])
-def test_e2_write_sends_exact_bytes_without_reading(instrument_server, cmd) -> None:
-    received: list[bytes] = []
-    done = Event()
+@pytest.mark.parametrize("delay", [0.0, 0.2])
+def test_e2_retries_matching_errors_and_sleeps_between(delay: float) -> None:
+    events: list[tuple[object, ...]] = []
+    attempts = 0
 
-    def script(connection: socket.socket) -> None:
-        received.append(read_command(connection))
-        done.set()  # Deliberately send no reply to a write-only command.
-        assert connection.recv(1) == b"", "write must send exactly one command line"
+    def read_status() -> str:
+        nonlocal attempts
+        attempts += 1
+        events.append(("read", attempts))
+        if attempts == 1:
+            raise ConnectionError("temporary connection failure")
+        if attempts == 2:
+            raise ValueError("temporary incomplete response")
+        return "ready"
 
-    server = instrument_server(script)
-    with TcpInstrument(server.host, server.port, timeout=0.2) as client:
-        assert client.write(cmd) is None, "write has no return value"
-        assert done.wait(1.0), "instrument never received the command"
-    assert received == [(cmd + "\n").encode("utf-8")], "append one LF and encode the command"
+    def sleep(seconds: float) -> None:
+        events.append(("sleep", seconds))
 
-
-@pytest.mark.parametrize("reply", [b"  12.50 V  \n", b"\n", "Température OK\n".encode("utf-8")])
-def test_e2_query_returns_only_reply_text(instrument_server, reply) -> None:
-    def script(connection: socket.socket) -> None:
-        assert read_command(connection) == b"MEAS:VOLT?\n"
-        connection.sendall(reply)
-
-    server = instrument_server(script)
-    with TcpInstrument(server.host, server.port) as client:
-        got = client.query("MEAS:VOLT?")
-    assert got == reply[:-1].decode("utf-8"), "remove only LF; preserve spaces and allow an empty reply"
+    wrapped = retry(4, (OSError, ValueError), delay_s=delay, sleep=sleep)(read_status)
+    assert wrapped() == "ready"
+    assert events == [("read", 1), ("sleep", delay), ("read", 2), ("sleep", delay), ("read", 3)]
 
 
-def test_e2_query_handles_several_receives(instrument_server, monkeypatch) -> None:
-    reply = "BENCH,LOAD,Température-OK,1.0"
+@pytest.mark.parametrize("times", [1, 3])
+def test_e2_exhaustion_preserves_last_error(times: int) -> None:
+    errors = [OSError(f"instrument failure {number}") for number in range(times)]
+    attempts = 0
+    sleeps: list[float] = []
 
-    def script(connection: socket.socket) -> None:
-        assert read_command(connection) == b"*IDN?\n"
-        connection.sendall((reply + "\n").encode("utf-8"))
+    def read_status() -> str:
+        nonlocal attempts
+        error = errors[attempts]
+        attempts += 1
+        raise error
 
-    server = instrument_server(script)
-    original = socket.create_connection
-    views: list[SocketView] = []
-
-    def connect(address, timeout=None):
-        view = SocketView(original(address, timeout=timeout))
-        views.append(view)
-        return view
-
-    monkeypatch.setattr(socket, "create_connection", connect)
-    with TcpInstrument(server.host, server.port) as client:
-        got = client.query("*IDN?")
-    assert got == reply, "one recv is not one reply; decode after collecting the complete line"
+    wrapped = retry(times, (OSError,), 0.1, sleeps.append)(read_status)
+    with pytest.raises(OSError) as caught:
+        wrapped()
+    assert caught.value is errors[-1]
+    assert attempts == times, "times includes the first attempt"
+    assert sleeps == [0.1] * (times - 1), "never sleep after the final failure"
 
 
-def test_e2_query_preserves_buffered_reply_between_calls(monkeypatch) -> None:
-    replies = BytesIO(b"first\nsecond\n")
-    connection = Mock(spec=socket.socket)
-    # Share one byte stream for direct recv and buffered socket readers.
-    connection.recv.side_effect = replies.read
-    connection.makefile.return_value = replies
-    monkeypatch.setattr(socket, "create_connection", lambda *args, **kwargs: connection)
+@pytest.mark.parametrize("scenario", ["unlisted", "empty", "sleep_error"])
+def test_e2_unlisted_errors_and_sleep_errors_propagate(scenario: str) -> None:
+    original = OSError("offline")
+    sleep_error = RuntimeError("timer failed")
+    attempts = 0
+    sleeps: list[float] = []
 
-    with TcpInstrument("127.0.0.1", 0) as client:
-        assert client.query("FIRST?") == "first", "return only the first complete reply"
-        assert client.query("SECOND?") == "second", "keep the next reply across query calls"
+    def read_status() -> str:
+        nonlocal attempts
+        attempts += 1
+        raise original
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        raise sleep_error
+
+    errors = (OSError,) if scenario == "sleep_error" else ((ValueError,) if scenario == "unlisted" else ())
+    wrapped = retry(3, errors, 0.2, sleep)(read_status)
+    expected = sleep_error if scenario == "sleep_error" else original
+    with pytest.raises(type(expected)) as caught:
+        wrapped()
+    assert caught.value is expected
+    assert attempts == 1
+    assert sleeps == ([0.2] if scenario == "sleep_error" else [])
 
 
-def test_e2_query_reports_closed_connection(instrument_server) -> None:
-    def script(connection: socket.socket) -> None:
-        assert read_command(connection) == b"READ?\n"
-        connection.sendall(b"unfinished")  # Closing without LF is not a valid reply.
+def test_e2_attempt_budget_resets_each_invocation() -> None:
+    calls: list[int] = []
+    sleeps: list[float] = []
 
-    server = instrument_server(script)
-    with TcpInstrument(server.host, server.port) as client:
-        with pytest.raises(ConnectionError):
-            client.query("READ?")
+    def read_status() -> str:
+        calls.append(1)
+        if len(calls) % 2:
+            raise OSError("busy")
+        return "ready"
+
+    wrapped = retry(2, (OSError,), sleep=sleeps.append)(read_status)
+    assert wrapped() == "ready"
+    assert wrapped() == "ready", "each operator request gets its own budget"
+    assert len(calls) == 4
+    assert sleeps == [0, 0]
 
 
-@pytest.mark.parametrize("cmd,partial", [
-    ("MEAS:CURR?", b""),
-    ("FETCH:VOLT?", b"12.3"),
-    (r'DISP:TEXT "C:\station\log"', b""),
-    ('DISP:TEXT "station\tlog"', b"12.3"),
+@pytest.mark.parametrize("times,delay", [(0, 0), (-1, 0), (1, -0.1)])
+def test_e2_rejects_invalid_settings_at_factory_call(times: int, delay: float) -> None:
+    with pytest.raises(ValueError):
+        retry(times, (OSError,), delay)
+
+
+@pytest.mark.parametrize("result", [True, "ready", {"ready": True}])
+def test_e3_checks_immediately_even_with_zero_timeout(result: object) -> None:
+    timer = FakeTime()
+    calls: list[int] = []
+
+    def read_ready() -> object:
+        calls.append(1)
+        return result
+
+    assert with_deadline(read_ready, 0, timer.clock, timer.sleep) is result
+    assert calls == [1]
+    assert timer.sleeps == []
+
+
+def test_e3_polls_falsey_values_until_exact_truthy_result() -> None:
+    timer = FakeTime()
+    timer.now = 50.0
+    ready = {"channel": 2}
+    answers = iter([None, 0, [], ready])
+    starts: list[float] = []
+
+    def read_ready() -> object:
+        starts.append(timer.now)
+        return next(answers)
+
+    assert with_deadline(read_ready, 0.1, timer.clock, timer.sleep) is ready
+    assert starts == pytest.approx([50, 50.01, 50.02, 50.03])
+    assert timer.sleeps == [0.01, 0.01, 0.01]
+
+
+@pytest.mark.parametrize("timeout,starts,sleeps", [
+    (0.0, [0.0], []),
+    (0.005, [0.0], [0.005]),
+    (0.025, [0.0, 0.01, 0.02], [0.01, 0.01, 0.005]),
 ])
-def test_e3_read_timeout_names_command(instrument_server, cmd, partial) -> None:
-    def script(connection: socket.socket) -> None:
-        assert read_command(connection) == (cmd + "\n").encode("utf-8")
-        if partial:
-            connection.sendall(partial)
-        connection.recv(1)  # Wait for the client to close; no timing sleeps.
+def test_e3_deadline_is_fixed_and_sleep_is_clamped(
+    timeout: float, starts: list[float], sleeps: list[float]
+) -> None:
+    timer = FakeTime()
+    actual_starts: list[float] = []
 
-    server = instrument_server(script)
-    with TcpInstrument(server.host, server.port, timeout=0.1) as client:
-        with pytest.raises(TimeoutError) as failure:
-            client.query(cmd)
-        assert cmd in str(failure.value), "the operator needs the command that timed out"
+    def not_ready() -> bool:
+        actual_starts.append(timer.now)
+        assert len(actual_starts) <= 5, "deadline must not restart after each poll"
+        return False
 
-
-@pytest.mark.parametrize("operation", ["write", "query"])
-@pytest.mark.parametrize("cmd", ["OUTP OFF", r'DISP:TEXT "C:\station\log"', 'DISP:TEXT "station\tlog"'])
-def test_e3_send_timeout_names_command(instrument_server, monkeypatch, operation, cmd) -> None:
-    closed = Event()
-    server = instrument_server(observe_close(closed))
-    original = socket.create_connection
-
-    def connect(address, timeout=None):
-        return SocketView(original(address, timeout=timeout), fail_send=True)
-
-    monkeypatch.setattr(socket, "create_connection", connect)
-    with TcpInstrument(server.host, server.port) as client:
-        with pytest.raises(TimeoutError) as failure:
-            getattr(client, operation)(cmd)
-        assert cmd in str(failure.value), "send timeouts also need command context"
+    with pytest.raises(TimeoutError):
+        with_deadline(not_ready, timeout, timer.clock, timer.sleep)
+    assert actual_starts == pytest.approx(starts), "do not poll at or beyond the deadline"
+    assert timer.sleeps == pytest.approx(sleeps)
+    assert timer.now == pytest.approx(timeout)
 
 
-def test_e4_pipeline_sends_every_command_before_reading(instrument_server) -> None:
-    commands = ["MEAS:VOLT?", "MEAS:CURR?", "*OPC?"]
+@pytest.mark.parametrize("source", ["fn", "clock", "sleep"])
+def test_e3_dependency_errors_propagate_without_retry(source: str) -> None:
+    timer = FakeTime()
+    original = OSError(f"{source} failed")
+    calls: list[str] = []
 
-    def script(connection: socket.socket) -> None:
-        for cmd in commands:
-            assert read_command(connection) == (cmd + "\n").encode("utf-8")
-        # One combined transmission exercises preservation of later reply bytes.
-        connection.sendall(b" 28.0 \n\n1\n")
+    def read_ready() -> bool:
+        calls.append("fn")
+        if source == "fn":
+            raise original
+        return False
 
-    server = instrument_server(script)
-    with TcpInstrument(server.host, server.port, timeout=0.5) as client:
-        got = client.query_many(commands)
-    assert got == [" 28.0 ", "", "1"], "pipeline all writes, then match one reply per command"
-    assert commands == ["MEAS:VOLT?", "MEAS:CURR?", "*OPC?"], "do not mutate the caller's list"
+    def clock() -> float:
+        if source == "clock":
+            raise original
+        return timer.clock()
 
+    def sleep(seconds: float) -> None:
+        calls.append("sleep")
+        raise original
 
-def test_e4_empty_batch_has_no_network_traffic(instrument_server) -> None:
-    closed = Event()
-    server = instrument_server(observe_close(closed))
-    with TcpInstrument(server.host, server.port) as client:
-        assert client.query_many([]) == [], "no commands means no replies to wait for"
-    assert closed.wait(1.0), "empty batch must leave the connection quiet"
-
-
-def test_e4_repeated_commands_and_followup_query(instrument_server) -> None:
-    def script(connection: socket.socket) -> None:
-        assert read_command(connection) == b"READ?\n"
-        assert read_command(connection) == b"READ?\n"
-        connection.sendall(b"3.2\n3.3\n")
-        assert read_command(connection) == b"*IDN?\n"
-        connection.sendall(b"BENCH,DMM\n")
-
-    server = instrument_server(script)
-    with TcpInstrument(server.host, server.port) as client:
-        assert client.query_many(["READ?", "READ?"]) == ["3.2", "3.3"], "keep duplicate commands and reply order"
-        assert client.query("*IDN?") == "BENCH,DMM", "the same connection must work after a batch"
+    with pytest.raises(OSError) as caught:
+        with_deadline(read_ready, 1, clock, sleep)
+    assert caught.value is original
+    assert calls == ([] if source == "clock" else ["fn"] if source == "fn" else ["fn", "sleep"])
 
 
-def test_e4_timeout_names_current_pending_command(instrument_server) -> None:
-    def script(connection: socket.socket) -> None:
-        assert read_command(connection) == b"MEAS:VOLT?\n"
-        assert read_command(connection) == b"MEAS:CURR?\n"
-        connection.sendall(b"28.0\n")
-        connection.recv(1)
+def test_e3_rejects_negative_timeout_before_dependencies() -> None:
+    calls: list[str] = []
 
-    server = instrument_server(script)
-    with TcpInstrument(server.host, server.port, timeout=0.1) as client:
-        with pytest.raises(TimeoutError) as failure:
-            client.query_many(["MEAS:VOLT?", "MEAS:CURR?"])
-        assert "MEAS:CURR?" in str(failure.value), "name the pending reply, not the first batch command"
+    def dependency() -> float:
+        calls.append("dependency")
+        return 0.0
+
+    with pytest.raises(ValueError):
+        with_deadline(dependency, -1, clock=dependency)
+    assert calls == []
+
+
+def test_e3_accounts_for_time_in_poll_and_accepts_started_success() -> None:
+    timer = FakeTime()
+    calls: list[int] = []
+
+    def slow_not_ready() -> bool:
+        calls.append(1)
+        timer.now += 0.5
+        return False
+
+    with pytest.raises(TimeoutError):
+        with_deadline(slow_not_ready, 0.1, timer.clock, timer.sleep)
+    assert calls == [1]
+    assert timer.sleeps == []
+
+    def slow_ready() -> str:
+        timer.now += 0.5
+        return "ready"
+
+    assert with_deadline(slow_ready, 0.1, timer.clock, timer.sleep) == "ready"
+
+
+@pytest.mark.parametrize("target,step,levels", [
+    (5.0, 2.0, [2.0, 4.0, 5.0]),
+    (4.0, 2.0, [2.0, 4.0]),
+    (0.5, 2.0, [0.5]),
+    (0.0, 1.0, []),
+    (0.3, 0.1, [0.1, 0.2, 0.3]),
+])
+def test_e4_ramp_order_clamp_and_settle(
+    psu: FakePSU, target: float, step: float, levels: list[float]
+) -> None:
+    def settle() -> None:
+        psu.events.append(("settle",))
+
+    assert ramp_voltage(psu, 2, target, step, settle) is None
+    expected = [event for level in levels for event in [("voltage", 2, level), ("settle",)]]
+    assert psu.events == expected, "each write needs one settle; success leaves output enabled"
+    assert all(event[2] <= target for event in psu.events if event[0] == "voltage")
+
+
+@pytest.mark.parametrize("source,fail_at", [("write", 2.0), ("write", 5.0), ("settle", 2.0), ("settle", 5.0)])
+def test_e4_write_or_settle_failure_recovers_and_reraises(
+    psu: FakePSU, source: str, fail_at: float
+) -> None:
+    original = OSError("ramp failed")
+    if source == "write":
+        psu.fail_at, psu.write_error = fail_at, original
+
+    def settle() -> None:
+        last_voltage = psu.events[-1][2]
+        psu.events.append(("settle",))
+        if source == "settle" and last_voltage == fail_at:
+            raise original
+
+    with pytest.raises(OSError) as caught:
+        ramp_voltage(psu, 3, 5, 2, settle)
+    assert caught.value is original
+    expected: list[tuple[object, ...]] = []
+    for level in [2.0, 4.0, 5.0]:
+        expected.append(("voltage", 3, level))
+        if source != "write" or level != fail_at:
+            expected.append(("settle",))
+        if level == fail_at:
+            break
+    expected.extend([("voltage", 3, 0.0), ("output", 3, False)])
+    assert psu.events == expected, "stop the ramp and perform only the two cleanup commands"
+
+
+@pytest.mark.parametrize("voltage_fails,off_fails", [(True, False), (False, True), (True, True)])
+def test_e4_cleanup_failures_do_not_replace_original(
+    psu: FakePSU, voltage_fails: bool, off_fails: bool
+) -> None:
+    original = ValueError("settling failed")
+    if voltage_fails:
+        psu.fail_at, psu.write_error = 0.0, OSError("reset failed")
+    if off_fails:
+        psu.off_errors[4] = RuntimeError("shutdown failed")
+
+    def settle() -> None:
+        raise original
+
+    with pytest.raises(ValueError) as caught:
+        ramp_voltage(psu, 4, 5, 2, settle)
+    assert caught.value is original
+    assert psu.events == [("voltage", 4, 2), ("voltage", 4, 0), ("output", 4, False)]
+
+
+@pytest.mark.parametrize("target,step", [(-1, 1), (1, 0), (1, -1), (0, 0)])
+def test_e4_invalid_inputs_do_not_touch_device(psu: FakePSU, target: float, step: float) -> None:
+    calls: list[int] = []
+    with pytest.raises(ValueError):
+        ramp_voltage(psu, 1, target, step, lambda: calls.append(1))
+    assert psu.events == [], "validation errors must not send commands"
+    assert calls == []
+
+
+def test_e4_operator_interrupt_also_recovers(psu: FakePSU) -> None:
+    original = KeyboardInterrupt("operator stop")
+
+    def settle() -> None:
+        raise original
+
+    with pytest.raises(KeyboardInterrupt) as caught:
+        ramp_voltage(psu, 1, 1, 1, settle)
+    assert caught.value is original
+    assert psu.events == [("voltage", 1, 1), ("voltage", 1, 0), ("output", 1, False)]

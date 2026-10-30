@@ -1,4 +1,4 @@
-# r6 — Week 6 station review
+# r6 — Block 6 station review
 
 **Time:** about 60 minutes · **Read first:** review day: no new reading; revisit the earlier readings named below · **You edit:** `starter/review6.py`
 
@@ -15,13 +15,13 @@ This set mixes this week's material with new problems from earlier weeks. An ope
 Earlier readings used here:
 
 - d04: Python Tutorial §7.2; `csv` documentation (`DictReader`, quoted fields).
-- d17: `typing.Protocol` documentation; *The Pragmatic Programmer*, "Decoupling" (drivers and fake transports).
+- d19: `typing.Protocol` documentation; *The Pragmatic Programmer*, "Decoupling" (drivers and fake transports).
 
-- d36: Python `configparser` documentation; `systemd.service` and `systemd.unit`, service policy and section format.
-- d37: FastAPI tutorial **First Steps** and **Testing**.
-- d39: **tomllib** documentation; *A Common-Sense Guide to DSA*, the chapter on graphs (topological ordering). This review supplies dictionaries, so you do not load a file.
-- d40: learncpp **O.2 Bitwise operators**, **O.3 Bit manipulation with bitwise operators and bit masks**, and **13.7 Introduction to structs**; *C++ Primer*, chapter 4, bitwise operators.
-- d41: learncpp **12.7 Introduction to pointers** and **14.2 Introduction to classes**; *C++ Primer*, chapter 7, classes. E4 revisits the driver's error-reply boundary in Python.
+- d41: Python `configparser` documentation; `systemd.service` and `systemd.unit`, service policy and section format.
+- d43: FastAPI tutorial **First Steps** and **Testing**.
+- d45: **tomllib** documentation; *A Common-Sense Guide to DSA*, the chapter on graphs (topological ordering). This review supplies dictionaries, so you do not load a file.
+- d47: learncpp **O.2 Bitwise operators**, **O.3 Bit manipulation with bitwise operators and bit masks**, and **13.7 Introduction to structs**; *C++ Primer*, chapter 4, bitwise operators.
+- d48: learncpp **12.7 Introduction to pointers** and **14.2 Introduction to classes**; *C++ Primer*, chapter 7, classes. E4 revisits the driver's error-reply boundary in Python.
 
 An **INI file** groups `key=value` settings under `[section]` headers. A **systemd service** is a background program managed by Linux's service manager; its **unit file** describes how to run it. `configparser` reads INI text.
 A **Boolean** is either `True` or `False`. A **dictionary** maps keys to values. A **type hint**, such as `list[str]`, describes the expected input or output. A **ValueError** signals that a value has the right general type but invalid contents.
@@ -49,7 +49,7 @@ The supplied `_service_settings(text)` helper handles parsing; use its returned 
 
 **Watch out:** The supplied parser preserves exact key names and literal percent signs. Use missing-key defaults when checking the policy.
 
-**Reread:** d36, Python `configparser` docs, `read_string`, mapping access, `optionxform`, and interpolation; `systemd.service`, `ExecStart`, `Restart`; `systemd.unit`, section format.
+**Reread:** d41, Python `configparser` docs, `read_string`, mapping access, `optionxform`, and interpolation; `systemd.service`, `ExecStart`, `Restart`; `systemd.unit`, section format.
 
 ### E2 — Decode an instrument status byte (easy, ~7 min)
 
@@ -72,7 +72,7 @@ Ignore all other bits. Multiple flags can be true together.
 
 **Watch out:** A bitwise result such as `value & 8` is an integer; convert it to `bool`.
 
-**Reread:** d40, learncpp **O.2 Bitwise operators** and **O.3 Bit manipulation with bitwise operators and bit masks**; *C++ Primer*, chapter 4, bitwise operators.
+**Reread:** d47, learncpp **O.2 Bitwise operators** and **O.3 Bit manipulation with bitwise operators and bit masks**; *C++ Primer*, chapter 4, bitwise operators.
 
 ### E3 — Plan instrument setup (medium, ~8 min)
 
@@ -90,7 +90,7 @@ Validate references before ordering: if references are missing from the keys, ra
 
 **Watch out:** Sorting all the IDs once is insufficient. A newly ready `dmm` must come before an already ready `scope`. Kahn's algorithm repeatedly removes a ready node; `heapq` can keep ready names in alphabetical order.
 
-**Reread:** d39, *A Common-Sense Guide to DSA*, graphs chapter, topological ordering.
+**Reread:** d45, *A Common-Sense Guide to DSA*, graphs chapter, topological ordering.
 
 ### E4 — Interpret a driver error reply (easy, ~8 min)
 
@@ -106,7 +106,7 @@ Raise `ValueError` for a missing comma, a code that `int` cannot convert, an unm
 
 **Watch out:** A lone double quote is invalid. This is a small driver reply parser, not a general CSV parser.
 
-**Reread:** d41, learncpp **14.2 Introduction to classes** and *C++ Primer*, chapter 7, classes; revisit the driver's `parseErrorReply` responsibility from d41 E2.
+**Reread:** d48, learncpp **14.2 Introduction to classes** and *C++ Primer*, chapter 7, classes; revisit the driver's `parseErrorReply` responsibility from d48 E2.
 
 ### E5 — Serve the station snapshot (medium, ~11 min)
 
@@ -126,7 +126,7 @@ Start with the supplied `_health_app(station)`, which returns a fresh app with `
 
 **Watch out:** JSON spells Booleans `true`/`false`; Python uses `True`/`False`. FastAPI converts them. Complete E2 first. The tests use `TestClient`, an in-process request client, so do not start a server or use global application state.
 
-**Reread:** d37, FastAPI tutorial **First Steps** (route decorators) and **Testing** (`TestClient`).
+**Reread:** d43, FastAPI tutorial **First Steps** (route decorators) and **Testing** (`TestClient`).
 
 
 ### E6 — Count logged ceiling crossings (easy, ~9 min)
@@ -161,4 +161,4 @@ A write or query exception must reach the caller unchanged; invalid numeric text
 
 **Watch out:** Validate in one pass before starting the instrument loop. Checking each channel only just before writing could leave a partly completed scan for an invalid request. The tests provide the fake; you only implement the scan.
 
-Reread: d17
+Reread: d19

@@ -1,90 +1,99 @@
-# d15 — Bytes, text and SCPI syntax
+# d15 — Practical speed: big-O on sensor data
 
-**Time:** about 45 minutes · **Read first:** [SCPI in plain words: commands, queries, short forms, error queue (Wikipedia overview)](https://en.wikipedia.org/wiki/Standard_Commands_for_Programmable_Instruments); [Bytes vs text: bytes, encode() and decode()](https://docs.python.org/3/library/stdtypes.html#binary-sequence-types-bytes-bytearray-memoryview); [The Linux Command Line, chapter 10: processes (ps, top, kill)](https://linuxcommand.org/tlcl.php); [Python Tutorial §3.1.2: Text](https://docs.python.org/3/tutorial/introduction.html#text) · **You edit:** `starter/scpi.py`
+**Time:** about 45 minutes · **Read first:** *A Common-Sense Guide to DSA*, the first chapters on Big O and the chapters on stacks and queues (your book; skip the end-of-chapter exercises because this set is today's practice); [Python `collections.deque` documentation](https://docs.python.org/3/library/collections.html#collections.deque); [Missing Semester: Version Control (git's data model)](https://missing.csail.mit.edu/2020/version-control/) · **You edit:** `starter/windows.py`
 
 ## What you're building
 
-A chassis test station sends settings to a power supply and asks a meter for measurements. You will build small helpers for SCPI (Standard Commands for Programmable Instruments), a text command language used by instruments. These helpers prepare and read messages locally; no instrument connection is needed.
+A chassis test station records thousands of sensor readings each second. Build helpers that smooth those readings, show the largest recent reading, flag sudden increases, and remove repeated instrument serial numbers before an operator sees the report.
 
 ## How this works
 
-1. Replace the `raise NotImplementedError(...)` lines in `starter/scpi.py`. Don't edit `tests/`.
-2. Press Ctrl+Shift+B → **Test: d15** (or run `bash tools/run.sh d15` / `tools\run.ps1 d15`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+1. Replace the `raise NotImplementedError(...)` lines in `starter/windows.py`. Don't edit `tests/`.
+2. Press **Ctrl+Shift+B → Test: d15** (or run `bash tools/run.sh d15` / `tools\run.ps1 d15`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
-A **string** (`str`) holds text; **bytes** hold integer byte values from 0 to 255, as sent over an instrument connection. An **encoding** maps text characters to bytes; **ASCII** is an encoding limited to values 0–127. `encode("ascii")` converts text to bytes; `decode("ascii")` converts bytes to text. A **terminator** is the ending that marks a message boundary, commonly `"\n"` (line feed) or `"\r\n"` (carriage return followed by line feed). **Whitespace** means spaces, tabs, line endings, and other characters removed by `str.strip()`.
+Allow about 2 minutes to read these shared rules, then use the exercise times below.
+
+- An **index** is a position in a list, starting at zero. Readings arrive in list order.
+- A **window** is a consecutive group of `window` readings. A **full window** has exactly that many readings; partial groups produce no output.
+- A **mean** is the sum divided by the number of readings. A **running sum** keeps a total and updates it when one reading leaves and another enters.
+- **Big O** describes how work grows as input grows. Here `n` is the number of input items: **O(n)** means linear work (roughly twice the work for twice the data); **O(n × window)** means rescanning every window. **O(1)** means constant work per operation, independent of input length.
+- A **stack** removes the newest item first; a **queue** removes the oldest item first. A **deque** (double-ended queue, pronounced "deck") supports adding/removing at either end in O(1): `append` adds right, `pop` removes right, and `popleft` removes left. Accessing either end with `[0]` or `[-1]` is also O(1). Avoid `list.pop(0)`, which shifts the remaining items.
+- A **set** stores distinct items and supports membership (`item in seen`) in average O(1). Keep a separate list when output order matters.
+
+This short deque example holds pending station messages; it is not a sliding-window calculation:
 
 ```python
-label = "station A2"
-payload = label.encode("ascii")
-assert payload == b"station A2"  # b marks a bytes literal
-assert payload.decode("ascii") == label
+from collections import deque
+pending = deque(["read CH1", "read CH2"])
+pending.append("read CH3")
+next_step = pending.popleft()  # "read CH1"
 ```
 
-A SCPI **header** is a command's name, such as `MEAS:VOLT?`; colons separate its keyword levels. An **argument** is a supplied value after the header. A **query** requests a reply and has `?` at the end of its header. `*IDN?` is a **common command**, shared across instrument types, that requests identification. An **error queue** stores instrument-reported errors for later queries; this set only formats text and does not read that queue.
+Shared contracts: return a new list where a list is requested; never change an input list. For E1–E3, `window` is an integer: raise `ValueError` when it is zero or negative, even for empty input. Otherwise a window longer than the input is valid. Inputs have the annotated types; readings and factors are finite numbers (no infinity or NaN, meaning "not a number"), with ordinary sensor magnitudes. You need not validate those preconditions. Small floating-point rounding differences in means are accepted.
 
-A **boolean** (`bool`) is `True` or `False`. For Python, `*args` collects extra positional arguments in a tuple (an ordered collection). `channels=` is a **keyword-only argument**: pass it by name. A **channel** is a numbered instrument input; SCPI writes a channel list as `(@1,2)`. An **exception** signals failure; `ValueError` here means an input cannot be represented under our rules.
+E1, E2 and E4 have timed checks allowing **2 seconds per function call**, excluding input construction. E1 and E2 use 200,000 readings with a window of 1,000. Additional small checks count how many readings your code accesses and, for E1, additions on the readings (even after copying the list), so repeated window slicing/scanning fails even on fast machines. Use linear algorithms; avoid recalculating every sum or maximum and checking membership in a growing output list.
 
-The Linux reading explains a **process**, a running program: `ps` lists processes, `top` shows live activity, and `kill` sends a signal (a request such as termination). Those commands help when a station driver hangs; this set requires no process commands.
+The git reading supports today's workflow: a **commit** records a snapshot of tracked files and its parent history; a **branch** is a name pointing to a commit. Spend a moment relating this to saving a working exercise version in your own clone. No git commands are graded today.
 
 ## Exercises
 
-### E1 — Prepare a power-supply command (easy, ~9 min)
+### E1 — Smooth a sensor trace (easy, ~10 min)
 
-**Goal:** Turn operator-entered text into bytes the power supply can receive.
+**Goal:** Return the mean of each full window, moving one reading right each time. Output element `j` summarizes `values[j:j + window]`. There are `max(0, len(values) - window + 1)` outputs. Use O(n) total work.
 
-**Signature:** `def encode_command(cmd: str, term: str = "\n") -> bytes`
+**Signature:** `def rolling_mean(values: list[float], window: int) -> list[float]`
 
-**Contract:** Both `cmd` and `term` must contain only ASCII characters. `term` must not be empty. Raise `ValueError` otherwise. Remove every complete trailing copy of `term` from `cmd`, append one copy, then return ASCII bytes. Leave all other characters, including spaces, unchanged. An empty command is allowed and returns just the terminator. Compare whole terminators, not individual characters.
+**Example:** `rolling_mean([2.0, 4.0, 8.0, 10.0], 2)` → `[3.0, 6.0, 9.0]`
 
-**Examples:** `encode_command("VOLT 5")` → `b"VOLT 5\n"`; `encode_command("OUTP ON\n\n")` → `b"OUTP ON\n"`; `encode_command("*IDN?", "\r\n")` → `b"*IDN?\r\n"`.
+**Watch out:** Empty input or a window longer than the list returns `[]`. A window of one returns the readings; a window equal to the list length returns one mean. Compute the first total once, then remove the outgoing reading and add the incoming one. Negative readings are allowed.
 
-**Watch out:** `UnicodeEncodeError` means encoding encountered a character outside ASCII; catch it and raise `ValueError`. Check for an empty terminator before removing repeated endings.
+**Reread:** *A Common-Sense Guide to DSA*, Big O chapters: counting operations inside loops and nested loops.
 
-**Reread:** Bytes vs text, `bytes` and `str.encode()`; SCPI overview, command syntax.
+### E2 — Largest recent load (medium, ~17 min)
 
-### E2 — Read a meter reply (easy, ~10 min)
+**Goal:** Return the largest value in each full window, in the same output order and count as E1. Use a monotonic deque of candidate indices for O(n) total work. **Monotonic** here means their values never increase from the front to the back.
 
-**Goal:** Turn a meter's received bytes into text ready for later measurement checking.
+**Signature:** `def max_in_windows(values: list[float], window: int) -> list[float]`
 
-**Signature:** `def decode_reply(data: bytes, term: str = "\n") -> str`
+**Example:** `max_in_windows([4.0, 2.0, 3.0, 1.0, 5.0], 3)` → `[4.0, 3.0, 5.0]`
 
-**Contract:** Require a nonempty ASCII `term`, or raise `ValueError`. Decode `data` as ASCII; catch `UnicodeDecodeError` and raise a plain `ValueError` instead. First remove at most one exact trailing copy of `term`, if present, then strip surrounding whitespace. Return the resulting string, including `""` for an empty reply. A missing terminator is allowed. Do not convert numbers, change internal spaces, or interpret instrument errors.
+Build the idea one step at a time:
 
-**Examples:** `decode_reply(b"  +5.020 \r\n")` → `"+5.020"`; `decode_reply(b"READY||", "|")` → `"READY|"`; `decode_reply(b"  -100, bad command  ")` → `"-100, bad command"`.
+1. Store indices in the deque, oldest at the left. Indices let you tell when a reading has left the current window.
+2. At incoming index `i`, the window starts at `i - window + 1`. Remove indices smaller than that start from the left.
+3. Remove indices from the right while their readings are less than or equal to the incoming reading. The incoming reading is at least as large and will remain in the window longer, so those older candidates cannot be needed again.
+4. Append `i` to the right. The front now points to the largest reading still in the window.
+5. Only append a maximum to the result once `i >= window - 1`, when the first full window exists.
 
-**Watch out:** Removal happens before whitespace stripping: `decode_reply(b"READY|  ", "|")` returns `"READY|"`. Stripping may remove additional whitespace terminators, but must not remove additional non-whitespace terminators. A byte such as `b"\xff"` is not ASCII.
+For the example, at index 2 the candidates are `[0, 2]`, holding values `[4.0, 3.0]`, so emit `4.0`. At index 3, index 0 expires; the candidates become `[2, 3]` and emit `3.0`. At index 4, the new `5.0` removes both smaller candidates and emits `5.0`.
 
-**Reread:** Bytes vs text, `bytes.decode()` and the linked `str.strip()` description; Python Tutorial §3.1.2, strings and their methods.
+**Watch out:** Empty or too-short input returns `[]`. Negative values and repeated maxima work normally. Each index enters once and leaves at most once, so the loops together do O(n) work even though one loop is inside another. The deque needs at most O(window) storage, plus the output list.
 
-### E3 — Build settings and measurement requests (medium, ~14 min)
+**Reread:** *A Common-Sense Guide to DSA*, stacks and queues chapters; `collections.deque` docs: `append`, `pop`, `popleft`, and the performance discussion.
 
-**Goal:** Format power-supply settings and requests for selected meter inputs.
+### E3 — First sudden increase (medium, ~10 min)
 
-**Signature:** `def build(header: str, *args: str | int | float | bool, channels: list[int] | None = None) -> str`
+**Goal:** A **spike** is a reading strictly greater than `factor` times the mean of the immediately preceding `window` readings. Return the first spike's original index, or `None` if none exists. Begin checking at index `window`; exclude the current reading from its baseline (the preceding mean). Use a running sum for O(n) total work.
 
-**Contract:** Return `header` unchanged when there are no values or channels. Otherwise append exactly one space, then comma-separated values with no spaces added around commas. Convert booleans to `ON` / `OFF`; convert other arguments with `str()`. Preserve strings literally, including any quotes or spaces they already contain. If `channels` is nonempty, append `(@` plus its comma-separated numbers plus `)` as the final value. `None` and `[]` both omit that value. Preserve channel order and duplicates, and do not modify the input list. Do not add a terminator.
+Floating-point arithmetic can slightly shift an equal threshold. Treat a reading and its threshold as equal when `math.isclose(reading, threshold, rel_tol=1e-9, abs_tol=1e-12)` is true; equal readings are not spikes. Here `rel_tol` allows a difference up to one billionth of the larger absolute value, and `abs_tol` allows a difference up to `1e-12` near zero. Exceeding either allowance alone is not enough: a spike must be above the threshold and outside both allowances. You can import `math` or use an equivalent comparison.
 
-**Examples:** `build("VOLT", 5)` → `"VOLT 5"`; `build("MEAS:VOLT?", channels=[1, 2])` → `"MEAS:VOLT? (@1,2)"`; `build("OUTP", True)` → `"OUTP ON"`; `build("SOUR:VOLT", 2.5, "MIN", channels=[3])` → `"SOUR:VOLT 2.5,MIN,(@3)"`.
+**Signature:** `def first_spike(values: list[float], window: int, factor: float) -> int | None`
 
-**Watch out:** Python treats booleans as a kind of integer, so handle booleans before general conversion. You may assume headers are valid, nonempty ASCII without surrounding whitespace, arguments have the supplied types, floats (decimal numbers) are finite (neither infinity nor NaN, meaning "not a number"), and channel numbers are positive integers. No extra input validation or automatic quoting is required.
+**Example:** `first_spike([2.0, 2.0, 4.0, 9.0], 2, 2.0)` → `3` (index 2 equals its threshold; index 3 exceeds `2 × 3.0`).
 
-**Reread:** SCPI overview, syntax and parameter lists; Python Tutorial §3.1.2, text and string operations.
+**Watch out:** `factor` must be positive; zero or negative raises `ValueError`, even for empty input. Positive factors below one are valid. Fewer than `window + 1` readings returns `None`. Compare before sliding the previous-window total. Zero and negative means use the same signed formula: do not take absolute values or divide by the mean. This is a simple threshold exercise, not a statistical detector.
 
-### E4 — Recognize queries and abbreviate headers (medium, ~12 min)
+**Reread:** *A Common-Sense Guide to DSA*, Big O chapters: eliminating repeated work; `collections.deque` docs for the idea of items entering and leaving a queue (a deque is optional here).
 
-**Goal:** Help the station identify commands that need replies and display the instrument manual's short names.
+### E4 — Clean the instrument list (easy, ~6 min)
 
-**Signatures:** `def is_query(cmd: str) -> bool` and `def short_form(header: str) -> str`
+**Goal:** **Deduplicate** means remove repeated items. Return only the first occurrence of each serial number, in its original order, using a set for O(n) average total work.
 
-**Contract for `is_query`:** Split the text on whitespace and inspect only the first token (piece). Return `True` exactly when that token ends with `?`. Empty or whitespace-only text returns `False`. Leading/trailing whitespace and arguments are allowed. A `?` in an argument does not make a command a query. Inputs contain at most one command; you do not need to parse multiple commands or validate SCPI grammar.
+**Signature:** `def dedupe_keep_order(serials: list[str]) -> list[str]`
 
-**Examples:** `is_query("  MEAS:VOLT? (@1,2)\n")` → `True`; `is_query('DISP:TEXT "Ready?"')` → `False`.
+**Example:** `dedupe_keep_order(["PSU-7", "DMM-2", "PSU-7", "PSU-8"])` → `["PSU-7", "DMM-2", "PSU-8"]`
 
-**Contract for `short_form`:** A manual's mixed-case notation uses uppercase letters for the required abbreviation and lowercase letters for the optional longer spelling. Remove only lowercase ASCII letters (`a`–`z`), preserving uppercase letters, digits, colons, a leading `*` or `:`, and a trailing `?`. Return a string. Inputs are valid manual-style headers without arguments or whitespace; each keyword already contains its uppercase short form. Do not guess abbreviations for arbitrary lowercase text.
+**Watch out:** Compare exact strings: `"PSU-7"`, `"psu-7"` and `" PSU-7 "` are different. An empty string is also a valid value. Do not sort or trim. Empty input returns `[]`. A set alone does not express the required first-seen order; keep the result in a list.
 
-**Examples:** `short_form("MEASure:VOLTage:DC?")` → `"MEAS:VOLT:DC?"`; `short_form(":SENSe1:VOLTage?")` → `":SENS1:VOLT?"`; `short_form("*IDN?")` → `"*IDN?"`.
-
-**Watch out:** Uppercasing the whole header would keep optional letters. `is_query` inspects the header even when channel arguments follow it.
-
-**Reread:** SCPI overview, command/query syntax and uppercase/lowercase short forms; Python Tutorial §3.1.2, string indexing and methods.
+**Reread:** *A Common-Sense Guide to DSA*, Big O chapters: linear scans and how repeating a search changes the total work.

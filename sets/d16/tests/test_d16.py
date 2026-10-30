@@ -1,170 +1,176 @@
-from contextlib import closing
-from pathlib import Path
-from unittest.mock import Mock, patch
-
-import pyvisa
-from pyvisa.errors import VisaIOError
-from pyvisa.resources import MessageBasedResource
 import pytest
-import yaml
 
-from starter.visa_basics import identify, list_instruments, open_resource, read_voltage
-
-
-STATION = Path(__file__).resolve().parents[1] / "data" / "station.yaml"
-DMM = "GPIB0::8::INSTR"
-PSU = "GPIB0::12::INSTR"
+from starter.scpi import build, decode_reply, encode_command, is_query, short_form
 
 
-@pytest.fixture
-def manager():
-    # PyVISA shares managers for the same backend; close all sessions after each test.
-    with closing(pyvisa.ResourceManager(f"{STATION}@sim")) as resource_manager:
-        yield resource_manager
-
-
-@pytest.fixture(params=[
-    (DMM, {"manufacturer": "Fasttrack", "model": "DMM-100", "serial": "DMM001", "firmware": "1.0"}, 2.5),
-    (PSU, {"manufacturer": "Fasttrack", "model": "PSU-200", "serial": "PSU002", "firmware": "2.1"}, 12.0),
-], ids=["dmm", "psu"])
-def instrument(request, manager):
-    name, identity, voltage = request.param
-    with manager.open_resource(
-        name, read_termination="\n", write_termination="\n", timeout=2000
-    ) as resource:
-        yield resource, identity, voltage
-
-
-@pytest.mark.parametrize("name", [DMM, PSU])
-def test_e1_opens_and_configures_instrument(name, manager):
-    resource = open_resource(name, str(STATION))
-    try:
-        assert isinstance(resource, MessageBasedResource), "Return the open instrument, not its manager"
-        assert resource.resource_name == name, "Open the resource name requested by the operator"
-        assert resource.read_termination == "\n", "Replies end with a newline"
-        assert resource.write_termination == "\n", "Commands must end with a newline"
-        assert resource.timeout == 2000, "The station timeout must be 2000 milliseconds"
-    finally:
-        resource.close()
-
-
-def test_e1_returned_session_stays_open(manager):
-    resource = open_resource(DMM, str(STATION))
-    try:
-        assert resource.query("*IDN?") == "Fasttrack,DMM-100,DMM001,1.0"
-        assert resource.query("MEAS:VOLT:DC?") == "+2.500000E+00"
-    finally:
-        resource.close()
-
-
-def test_e1_uses_supplied_file_with_spaces(tmp_path):
-    station = tmp_path / "alternate station.yaml"
-    station.write_text(STATION.read_text(encoding="utf-8").replace("DMM001", "ALT099"), encoding="utf-8")
-    with closing(pyvisa.ResourceManager(f"{station}@sim")):
-        resource = open_resource(DMM, str(station))
-        try:
-            assert resource.query("*IDN?") == "Fasttrack,DMM-100,ALT099,1.0", "Use sim_file, not a built-in simulation"
-        finally:
-            resource.close()
-
-
-def test_e2_identifies_each_simulated_instrument(instrument):
-    resource, expected, _ = instrument
-    assert identify(resource) == expected, "Preserve the four instrument identification fields"
-    assert identify(resource) == expected, "Leave the session open for the next station step"
-
-
-@pytest.mark.parametrize("reply, expected", [
-    ("  Bench Works , DMM X , 00042 , rev 3 \r\n", {"manufacturer": "Bench Works", "model": "DMM X", "serial": "00042", "firmware": "rev 3"}),
-    ("Lab,PSU,0,0", {"manufacturer": "Lab", "model": "PSU", "serial": "0", "firmware": "0"}),
+@pytest.mark.parametrize("cmd, expected", [
+    ("VOLT 5", b"VOLT 5\n"),
+    ("*IDN?", b"*IDN?\n"),
+    ("", b"\n"),
+    (" OUTP ON ", b" OUTP ON \n"),
 ])
-def test_e2_strips_fields_and_queries_once(reply, expected):
-    resource = Mock(spec=MessageBasedResource)
-    resource.query.return_value = reply
-    assert identify(resource) == expected, "Strip surrounding whitespace, preserving field contents"
-    resource.query.assert_called_once_with("*IDN?")
-    resource.close.assert_not_called()
+def test_e1_ascii_command(cmd: str, expected: bytes) -> None:
+    got = encode_command(cmd)
+    assert isinstance(got, bytes), "the instrument connection needs bytes"
+    assert got == expected, f"command {cmd!r}: expected {expected!r}, got {got!r}"
 
 
-@pytest.mark.parametrize("reply", ["", "Lab,DMM,42", "Lab,DMM,42,1,extra", "Lab, ,42,1", "Lab,DMM,42,"])
-def test_e2_rejects_malformed_identification(reply):
-    resource = Mock(spec=MessageBasedResource)
-    resource.query.return_value = reply
+@pytest.mark.parametrize("cmd, term, expected", [
+    ("OUTP OFF\n", "\n", b"OUTP OFF\n"),
+    ("OUTP OFF\n\n\n", "\n", b"OUTP OFF\n"),
+    ("*IDN?\r\n\r\n", "\r\n", b"*IDN?\r\n"),
+    ("READ?", "\r\n", b"READ?\r\n"),
+    ("READ?;END;END", ";END", b"READ?;END"),
+    ("", "\r\n", b"\r\n"),
+])
+def test_e1_exactly_one_terminator(cmd: str, term: str, expected: bytes) -> None:
+    got = encode_command(cmd, term)
+    assert got == expected, f"normalize complete {term!r} endings: got {got!r}"
+
+
+def test_e1_preserves_message_body() -> None:
+    got = encode_command("DISP:TEXT \"line\"\nNEXT\r", "\r\n")
+    assert got == b'DISP:TEXT "line"\nNEXT\r\r\n', "preserve internal text and partial endings"
+
+
+@pytest.mark.parametrize("cmd, term", [("VOLT \u00b5", "\n"), ("OUTP ON", "\u00e9"), ("\u00e9", "\u00e9")])
+def test_e1_rejects_non_ascii(cmd: str, term: str) -> None:
+    with pytest.raises(ValueError) as caught:
+        encode_command(cmd, term)
+    assert type(caught.value) is ValueError, "translate encoding failure into plain ValueError"
+
+
+def test_e1_rejects_empty_terminator() -> None:
     with pytest.raises(ValueError):
-        identify(resource)
+        encode_command("VOLT 5", "")
 
 
-def test_e2_propagates_query_errors():
-    resource = Mock(spec=MessageBasedResource)
-    error = VisaIOError(pyvisa.constants.StatusCode.error_timeout)
-    resource.query.side_effect = error
-    with pytest.raises(VisaIOError) as caught:
-        identify(resource)
-    assert caught.value is error, "Let the caller handle the original communication error"
+@pytest.mark.parametrize("data, expected", [
+    (b"  +5.020 \r\n", "+5.020"),
+    (b"-100, bad command", "-100, bad command"),
+    (b"  CH1  READY\t", "CH1  READY"),
+    (b"", ""),
+    (b" \t\n\n", ""),
+])
+def test_e2_ascii_reply(data: bytes, expected: str) -> None:
+    got = decode_reply(data)
+    assert isinstance(got, str), "reply checking needs text"
+    assert got == expected, f"reply {data!r}: expected {expected!r}, got {got!r}"
 
 
-def test_e3_reads_each_simulated_instrument(instrument):
-    resource, _, expected = instrument
-    result = read_voltage(resource)
-    assert type(result) is float, "Return a float in volts"
-    assert result == pytest.approx(expected), "Convert the actual reply from this instrument"
-    assert read_voltage(resource) == pytest.approx(expected), "Keep the session open"
+@pytest.mark.parametrize("data, term, expected", [
+    (b"  READY||", "|", "READY|"),
+    (b"READY|  ", "|", "READY|"),
+    (b"READY;END;END", ";END", "READY;END"),
+    (b"READY;EN", ";END", "READY;EN"),
+    (b"  2.5\r\n", "\r\n", "2.5"),
+    (b"|", "|", ""),
+])
+def test_e2_removes_one_exact_suffix_then_whitespace(data: bytes, term: str, expected: str) -> None:
+    got = decode_reply(data, term)
+    assert got == expected, f"remove one {term!r} before stripping: got {got!r}"
 
 
-@pytest.mark.parametrize("reply, expected", [(" -1.25e-3\n", -0.00125), ("0", 0.0), ("+12.000", 12.0)])
-def test_e3_queries_once_and_converts_numeric_text(reply, expected):
-    resource = Mock(spec=MessageBasedResource)
-    resource.query.return_value = reply
-    result = read_voltage(resource)
-    assert type(result) is float
-    assert result == pytest.approx(expected)
-    resource.query.assert_called_once_with("MEAS:VOLT:DC?")
-    resource.close.assert_not_called()
+@pytest.mark.parametrize("data", [b"\xff", b"READY\x80\n", b"\xc2\xb5\n"])
+def test_e2_translates_decode_errors(data: bytes) -> None:
+    with pytest.raises(ValueError) as caught:
+        decode_reply(data)
+    assert type(caught.value) is ValueError, "UnicodeDecodeError must become plain ValueError"
 
 
-@pytest.mark.parametrize("reply", ["", "OVERLOAD", "5 V"])
-def test_e3_rejects_nonnumeric_replies(reply):
-    resource = Mock(spec=MessageBasedResource)
-    resource.query.return_value = reply
-    with pytest.raises(ValueError):
-        read_voltage(resource)
+@pytest.mark.parametrize("term", ["", "\u00e9"])
+def test_e2_validates_terminator(term: str) -> None:
+    with pytest.raises(ValueError) as caught:
+        decode_reply(b"READY", term)
+    assert type(caught.value) is ValueError, "empty/non-ASCII terminators are invalid"
 
 
-def test_e3_propagates_query_errors():
-    resource = Mock(spec=MessageBasedResource)
-    error = VisaIOError(pyvisa.constants.StatusCode.error_timeout)
-    resource.query.side_effect = error
-    with pytest.raises(VisaIOError) as caught:
-        read_voltage(resource)
-    assert caught.value is error, "Let the station decide whether to retry a failed query"
+def test_e2_preserves_internal_terminators() -> None:
+    got = decode_reply(b"  CH1|READY|", "|")
+    assert got == "CH1|READY", f"only the trailing terminator is removed: {got!r}"
 
 
-def test_e4_lists_sorted_station_resources():
-    result = list_instruments(str(STATION))
-    assert result == [PSU, DMM], "Sort resource names as strings, not by numeric bus address"
-    assert type(result) is list, "Convert the manager's tuple into a list"
+@pytest.mark.parametrize("header", ["*IDN?", "MEAS:VOLT?", ":SYST:ERR?"])
+def test_e3_header_without_values(header: str) -> None:
+    got = build(header)
+    assert got == header, "a header alone needs no trailing space or terminator"
 
 
-@pytest.mark.parametrize("names", [["GPIB0::4::INSTR"], ["GPIB0::9::INSTR", "GPIB0::2::INSTR", "GPIB0::10::INSTR"]])
-def test_e4_reads_resource_names_from_supplied_file(tmp_path, names):
-    document = yaml.safe_load(STATION.read_text(encoding="utf-8"))
-    document["resources"] = {name: {"device": "dmm"} for name in names}
-    station = tmp_path / "operator station.yaml"
-    station.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
-    assert list_instruments(str(station)) == sorted(names), "Discover names instead of hard-coding the supplied station"
+@pytest.mark.parametrize("value, expected", [
+    (5, "VOLT 5"),
+    (-2, "VOLT -2"),
+    (0, "VOLT 0"),
+    (2.5, "VOLT 2.5"),
+    (1.0, "VOLT 1.0"),
+    ("MIN", "VOLT MIN"),
+])
+def test_e3_scalar_arguments(value: str | int | float, expected: str) -> None:
+    got = build("VOLT", value)
+    assert got == expected, f"format the supplied value with str(): got {got!r}"
 
 
-def test_e4_can_repeat_discovery():
-    first = list_instruments(str(STATION))
-    second = list_instruments(str(STATION))
-    assert first == second == [PSU, DMM], "Discovery must work again after closing its manager"
+@pytest.mark.parametrize("enabled, expected", [(True, "OUTP ON"), (False, "OUTP OFF")])
+def test_e3_boolean_arguments(enabled: bool, expected: str) -> None:
+    got = build("OUTP", enabled)
+    assert got == expected, f"SCPI boolean spelling is ON/OFF: got {got!r}"
 
 
-def test_e4_handles_empty_resource_tuple_and_closes_manager():
-    manager = Mock()
-    manager.list_resources.return_value = ()
-    with patch("starter.visa_basics.pyvisa.ResourceManager", return_value=manager) as factory:
-        assert list_instruments("empty station.yaml") == [], "An empty discovery result becomes an empty list"
-    factory.assert_called_once_with("empty station.yaml@sim")
-    manager.list_resources.assert_called_once_with()
-    manager.close.assert_called_once_with()
+@pytest.mark.parametrize("channels, expected", [
+    (None, "MEAS:VOLT?"),
+    ([], "MEAS:VOLT?"),
+    ([1, 2], "MEAS:VOLT? (@1,2)"),
+    ([3], "MEAS:VOLT? (@3)"),
+    ([12, 2, 12], "MEAS:VOLT? (@12,2,12)"),
+])
+def test_e3_channel_arguments(channels: list[int] | None, expected: str) -> None:
+    before = None if channels is None else channels.copy()
+    got = build("MEAS:VOLT?", channels=channels)
+    assert got == expected, f"format channels in supplied order: got {got!r}"
+    assert channels == before, "building a command must not change the channel list"
+
+
+def test_e3_multiple_values_and_literal_strings() -> None:
+    got = build("SOUR:VOLT", 2.5, "MIN", True, channels=[3, 1])
+    assert got == "SOUR:VOLT 2.5,MIN,ON,(@3,1)", f"use commas between all values: {got!r}"
+    assert build("DISP:TEXT", '"Bench A"') == 'DISP:TEXT "Bench A"', "preserve supplied quotes"
+    assert build("DISP:TEXT", "Bench A") == "DISP:TEXT Bench A", "do not add quotes"
+    assert build("DISP:TEXT", "") == "DISP:TEXT ", "an empty string is still one value"
+    assert build("VOLT", 5, channels=[]) == "VOLT 5", "empty channels add no comma"
+
+
+@pytest.mark.parametrize("cmd", ["*IDN?", "MEAS:VOLT? (@1,2)", "  :SYST:ERR?\n", "\tREAD?\t(@3) ", "MEASure:VOLTage:DC?"])
+def test_e4_detects_query_header(cmd: str) -> None:
+    assert is_query(cmd) is True, f"header requests a reply: {cmd!r}"
+
+
+@pytest.mark.parametrize("cmd", ["", " \t\r\n", "OUTP ON", 'DISP:TEXT "Ready?"', "DISP:TEXT Ready?", "SOUR?CE:VOLT 5"])
+def test_e4_ignores_question_marks_outside_header_end(cmd: str) -> None:
+    assert is_query(cmd) is False, f"header does not end in ?: {cmd!r}"
+
+
+@pytest.mark.parametrize("header, expected", [
+    ("MEASure:VOLTage:DC?", "MEAS:VOLT:DC?"),
+    ("SOURce:CURRent", "SOUR:CURR"),
+    ("SYSTem:ERRor?", "SYST:ERR?"),
+])
+def test_e4_shortens_manual_spelling(header: str, expected: str) -> None:
+    got = short_form(header)
+    assert got == expected, f"keep required uppercase letters from {header!r}: got {got!r}"
+
+
+@pytest.mark.parametrize("header, expected", [
+    (":SENSe1:VOLTage?", ":SENS1:VOLT?"),
+    ("OUTPut12:STATe", "OUTP12:STAT"),
+    ("*IDN?", "*IDN?"),
+    ("MEAS:VOLT:DC?", "MEAS:VOLT:DC?"),
+])
+def test_e4_preserves_digits_and_punctuation(header: str, expected: str) -> None:
+    got = short_form(header)
+    assert got == expected, f"digits and SCPI punctuation must survive: got {got!r}"
+
+
+def test_e4_shortening_keeps_query_meaning() -> None:
+    header = short_form("MEASure:VOLTage:DC?")
+    command = header + " (@1,2)"
+    assert command == "MEAS:VOLT:DC? (@1,2)", f"unexpected meter request: {command!r}"
+    assert is_query(command) is True, "shortened meter request still requires a reply"

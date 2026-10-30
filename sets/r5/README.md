@@ -1,6 +1,6 @@
-# r5 — Week 5 review
+# r5 — Block 5 review
 
-**Time:** about 60 minutes · **Read first:** no new reading; review d04 (CSV) and d23 (CRC), plus d29–d34: Missing Semester, "Command-line Environment" and "Shell Tools and Scripting"; *The Linux Command Line*, chapters on writing your first script, flow control, and positional parameters; Python's `subprocess`, `signal`, and `argparse` documentation and Argparse Tutorial; Wikipedia's "Finite-state machine" overview; *A Common-Sense Guide to DSA*, graphs chapter; *Pro Git*, branching basics and "Contributing to a Project"; GitHub Docs, "Building and testing Python". · **You edit:** `starter/review5.py` and `starter/station_summary.sh`.
+**Time:** about 60 minutes · **Read first:** no new reading; review d04 (CSV) and d26 (CRC), plus d33–d40: Missing Semester, "Command-line Environment" and "Shell Tools and Scripting"; *The Linux Command Line*, chapters on writing your first script, flow control, and positional parameters; Python's `subprocess`, `signal`, and `argparse` documentation and Argparse Tutorial; Wikipedia's "Finite-state machine" overview; *A Common-Sense Guide to DSA*, graphs chapter; *Pro Git*, branching basics and "Contributing to a Project"; GitHub Docs, "Building and testing Python". · **You edit:** `starter/review5.py` and `starter/station_summary.sh`.
 
 ## What you're building
 
@@ -53,7 +53,7 @@ Return `(exit_code, stdout, stderr)`. Use `subprocess.run`, capture both streams
 
 **Watch out:** Pass the argument list directly; a semicolon inside an argument is literal text. Don't strip output or raise on a nonzero exit.
 
-**Reread:** d29, Python `subprocess` docs: `run`, `CompletedProcess`, and `TimeoutExpired`; Missing Semester "Command-line Environment", process exit status.
+**Reread:** d33, Python `subprocess` docs: `run`, `CompletedProcess`, and `TimeoutExpired`; Missing Semester "Command-line Environment", process exit status.
 
 ### E2 — Summarize a shift's outcomes (easy, ~8 min)
 
@@ -65,7 +65,7 @@ Require exactly one argument naming an existing regular file, assumed readable. 
 
 **Watch out:** Quote paths containing spaces. `IFS= read -r line` preserves whitespace and backslashes; add a loop condition for a last line without a newline. An arithmetic assignment such as `count=$((count + 1))` works with `set -e` even when the old count is zero.
 
-**Reread:** d31, Missing Semester "Shell Tools and Scripting", quoting and loops; *The Linux Command Line*, flow control and positional parameters.
+**Reread:** d36, Missing Semester "Shell Tools and Scripting", quoting and loops; *The Linux Command Line*, flow control and positional parameters.
 
 ### E3 — Select an operator command (easy, ~8 min)
 
@@ -84,7 +84,7 @@ Use `argparse` with required **subcommands** (the first word selects a different
 
 **Watch out:** A store-true flag takes no value. Do not read the real process arguments; parse the supplied `argv`.
 
-**Reread:** d32, Python **Argparse Tutorial**, optional arguments and `store_true`; **argparse** documentation, subcommands (`add_subparsers`).
+**Reread:** d38, Python **Argparse Tutorial**, optional arguments and `store_true`; **argparse** documentation, subcommands (`add_subparsers`).
 
 ### E4 — Stop a sequence and release instruments (medium, ~11 min)
 
@@ -104,7 +104,7 @@ Return `(final_state, history)`. History is a fresh list starting with `IDLE`, `
 
 **Watch out:** Register a cleanup before attempting its run. One cleanup error must not prevent earlier resources from being released. `KeyboardInterrupt` is not a subclass of `Exception`.
 
-**Reread:** d33, Wikipedia "Finite-state machine", states and transitions; *A Common-Sense Guide to DSA*, graphs and directed edges (allowed moves). For E4's cleanup behavior, revisit the d33 sequence exercise; for interrupts, d29's `signal` docs and Missing Semester job control.
+**Reread:** d39, Wikipedia "Finite-state machine", states and transitions; *A Common-Sense Guide to DSA*, graphs and directed edges (allowed moves). For E4's cleanup behavior, revisit the d39 sequence exercise; for interrupts, d33's `signal` docs and Missing Semester job control.
 
 ### E5 — Apply measurement review comments (easy, ~8 min)
 
@@ -120,7 +120,7 @@ Raise `ValueError` if either limit is nonfinite or `low > high`. Otherwise retur
 
 **Watch out:** A test checking only an ordinary in-range value misses both review defects. Think of the boundary and NaN cases you would request in a pull request (a proposed change submitted for review).
 
-**Reread:** d34, *Pro Git*, "Contributing to a Project", reviewing proposed changes; GitHub Docs "Building and testing Python", running tests in CI (continuous integration: automatic checks on changes). Revisit d34's two limit-checker review comments and the day 30 limit-validation checkpoint (`check30`).
+**Reread:** d40, *Pro Git*, "Contributing to a Project", reviewing proposed changes; GitHub Docs "Building and testing Python", running tests in CI (continuous integration: automatic checks on changes). Revisit d40's two limit-checker review comments and the day 34 limit-validation checkpoint (`check34`).
 
 
 ### E6 — Build the operator's rerun list (easy, ~9 min)
@@ -141,7 +141,7 @@ Reread: d04
 
 ### E7 — Check a telemetry acknowledgment (easy–medium, ~9 min)
 
-**Goal:** Reject a damaged reply before the station trusts whether its telemetry message was accepted. This compact reply format is separate from d23's measurement packet.
+**Goal:** Reject a damaged reply before the station trusts whether its telemetry message was accepted. This compact reply format is separate from d26's measurement packet.
 
 **Signature:** `def decode_ack(packet: bytes) -> tuple[int, bool]`
 
@@ -159,4 +159,4 @@ Return `(sequence, accepted)`, where `accepted` is a Boolean: False for status 0
 
 **Watch out:** The stored CRC is excluded from its own calculation. A status other than 0 or 1 is invalid even with a matching CRC.
 
-Reread: d23
+Reread: d26

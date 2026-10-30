@@ -1,108 +1,140 @@
-# d44 — Verification language: requirements and traceability
+# d44 — Docker and Ansible: a test station as files
 
-**Time:** about 45 minutes · **Read first:** [NASA Systems Engineering Handbook §5.3, Product Verification](https://www.nasa.gov/reference/5-3-product-verification/); glossary pass below (one-line meanings in the NASA handbook/job-posting context); [Wikipedia, Hardware-in-the-loop simulation](https://en.wikipedia.org/wiki/Hardware-in-the-loop_simulation), overview · **You edit:** `starter/trace.py`
+**Time:** about 57 minutes · **Read first:** Docker [Get started](https://docs.docker.com/get-started/) and the [Dockerfile reference](https://docs.docker.com/reference/dockerfile/); Ansible [Getting started](https://docs.ansible.com/ansible/latest/getting_started/index.html), [Intro to playbooks](https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_intro.html), and [Roles](https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_reuse_roles.html) · **You edit:** `starter/Dockerfile`, `starter/playbook.yml`, `starter/inventory.ini`, and `starter/deploycheck.py`
 
 ## What you're building
 
-A chassis test station needs evidence that its requirements were checked. A **requirement** is a stated condition the product must satisfy; **verification** gathers evidence that it does; **traceability** links each requirement to that evidence. Build a small coverage report and a **traceability matrix**, a table showing those links, so an operator can spot missing checks before a review.
+An operator needs the same chassis tester software on every bench computer. You will describe its Python environment and station setup in files, then write a Python check that spots commands which may change the station every time setup runs. These are structural checks: they read files, never build an image, install software, or contact a station. Docker, Ansible, Linux, and a running chassis application are not needed for this set.
 
 ## How this works
 
-1. Replace the `raise NotImplementedError(...)` lines in `starter/trace.py`. Don't edit `tests/`.
-2. Press **Ctrl+Shift+B → Test: d44** (or run `bash tools/run.sh d44` / `tools\run.ps1 d44`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+1. E1–E3: replace the placeholder comments in the three deployment files. E4: replace `raise NotImplementedError(...)` in `starter/deploycheck.py`. Don't edit `tests/` or the empty `starter/__init__.py`.
+2. Press **Ctrl+Shift+B → Test: d44** (or run `bash tools/run.sh d44` / `tools\run.ps1 d44`). At first you'll see `Exercises: 0 / 5 passed`. Comment-only deployment files deliberately report `NotImplementedError`; once filled in, they get structural assertions. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
-A glossary pass for the station vocabulary:
+A **deployment** is putting software and configuration on a computer. A Docker **image** is a packaged filesystem and startup recipe; a **container** is a running instance of that image. A **Dockerfile** lists instructions for constructing an image. A **base image** supplies the starting filesystem; its **tag**, such as `3.12-slim`, selects a version and variant. **Root** is Linux's unrestricted administrator account; the station process should use another account.
 
-- **EMI (electromagnetic interference):** unwanted electromagnetic energy that can disturb electronics or signals.
-- **TVAC (thermal vacuum):** checking equipment in low pressure while controlling temperature to represent a space environment.
-- **Harness checks:** inspections or electrical checks of a cable assembly's connections, wiring, and labels.
-- **ATE (automated test equipment):** instruments and software that run checks and record results with limited operator work.
-- **UUT (unit under test):** the particular product connected to the station for checking.
-- **HIL (hardware-in-the-loop):** testing real hardware connected to a simulation that responds as its surrounding system would.
+An Ansible **inventory** lists managed computers, called **hosts**, grouped by purpose. A host **alias** is the inventory name used for a computer. A **playbook** is a YAML document containing **plays**: each play selects hosts and lists **tasks** to run on them. A task calls a **module**, a named Ansible operation such as copying a file. `ansible.builtin.` identifies Ansible's built-in modules. A **role** bundles reusable tasks and related files; roles are reading context today, and you won't create one here.
 
-The four **verification methods**, or ways to gather evidence, are **Test** (measure behavior under controlled conditions), **Analysis** (use calculations or models), **Inspection** (examine physical features or records), and **Demonstration** (show an observable capability in operation).
+**YAML** is a text format whose indentation expresses structure. A **mapping** pairs keys with values (a Python `dict` after loading); a **sequence** holds ordered items (a Python `list`). A **boolean** is true or false; write `true` and `false` without quotes in YAML. **PyYAML** is the installed Python library for reading YAML; `yaml.safe_load(text)` loads data without constructing arbitrary Python objects. An empty or comment-only document loads as `None`.
 
-A **dictionary** maps a key (a lookup label) to a value; here the outer key is a requirement identifier (**id**, a unique label). A **list** holds multiple records. **CSV** is a text table with comma-separated fields; use `csv` so quoted commas work. **JSON** stores structured data as text; `json.load` turns the supplied log into Python lists and dictionaries. A **set** stores unique values; `sorted` returns a new list in ascending order. A `pathlib.Path` represents a file or directory location. **UTF-8** is the text encoding used for these files.
+For example, this diagnostic play loads as a list of play dictionaries:
 
 ```python
-import csv
-import io
-
-rows = csv.DictReader(io.StringIO('channel,note\nCH1,"supply, startup"\n'))
-notes = {row["channel"]: row["note"] for row in rows}
-print(notes["CH1"])  # supply, startup
+import yaml
+text = "- hosts: diagnostics\n  tasks: []\n"
+plays = yaml.safe_load(text)
+print(plays[0]["hosts"])  # diagnostics
 ```
-
-### Shared data contract
-
-`Requirements` means `dict[str, dict[str, str]]`. For example:
-
-```python
-reqs = {"REQ-01": {"id": "REQ-01", "text": "Supply shall meet limits.", "method": "Test"}}
-results = [{"req_id": "REQ-01", "test_name": "startup_voltage", "status": "PASS"}]
-```
-
-`Results` means `list[dict[str, str]]`. Each record has exactly `req_id`, `test_name`, and `status`; names and ids are nonempty strings and status is exactly `PASS` or `FAIL`. The caller loads `data/results.json` with `json.load`; none of your functions needs to load that file. `test_name` labels any evidence-producing check, including an inspection or demonstration. Multiple records can refer to the same requirement or check.
-
-**Coverage** means accounting for the evidence available for each requirement. For E2–E4, inputs already follow these shapes, requirements have valid methods, and each dictionary key equals its inner `id`. Do not strip or otherwise change them. Ignore evidence whose `req_id` is absent from `reqs`, and never mutate either input. No additional input validation is required in E2–E4.
-
-A requirement is `failed` if **any** matching record is `FAIL`, otherwise `verified` if it has at least one `PASS`, otherwise `not-run`. This is a simplified evidence rule for this exercise, applied to all four methods. A later pass does not erase a failure; real acceptance also needs the planned procedure and review. Every output list and matrix row uses ascending, case-sensitive string order of requirement ids, regardless of input order.
 
 ## Exercises
 
-### E1 — Read the verification plan (easy, ~14 min)
+### E1 — Package the tester environment (easy, ~10 min)
 
-**Goal:** Load the station's requirement records from a UTF-8 CSV file.
+**Goal:** Write `starter/Dockerfile` for the chassis tester. A **working directory** is the default folder for later instructions. `COPY` places files in the image, `RUN` executes a build step, `USER` selects the runtime account, and `CMD` or `ENTRYPOINT` sets the startup command.
 
-**Signature:** `def load_requirements(path: str | Path) -> Requirements`
+**File contract** (no Python function):
 
-**Contract:** The header must contain exactly `id,text,method`, once each, in any order. Strip surrounding whitespace from every data field (not the header); keep interior whitespace and capitalization. Each nonblank row must have exactly three fields, all nonempty after stripping. `method` must be exactly `Test`, `Analysis`, `Inspection`, or `Demonstration`. Reject duplicate ids after stripping. Raise `ValueError` for an invalid header or row; the error message is your choice. Completely empty lines are ignored. A valid header with no data returns `{}`; an empty file is invalid. Let file errors such as `FileNotFoundError` propagate.
+- Use one build stage (one base image and its following instructions): the first instruction is `FROM python:3.12-slim`. Other Python 3.12 slim tags are accepted, including `python:3.12.8-slim-bookworm`.
+- Set an absolute `WORKDIR`, such as `/station`, before copying. Use shell form (space-separated arguments): `COPY . .` or `COPY . /station` to copy the entire project into that directory. Trailing `/` characters on `WORKDIR` or the destination are accepted. The dot means the current project directory.
+- Include `RUN pip install PACKAGE` or `RUN python -m pip install PACKAGE`. Here `PACKAGE` is a package name or path; `.` installs the copied project, so the project `COPY` must come before any installation from `.`. `python3` is also accepted.
+- The effective startup command must invoke `python -m chassis`; optional arguments may follow. Docker uses the last `CMD` and last `ENTRYPOINT`; setting `ENTRYPOINT` clears an earlier `CMD`. An argument-list `ENTRYPOINT` receives `CMD` as arguments, while a shell-form `ENTRYPOINT` ignores `CMD`. Use either a JSON argument list (brackets with quoted strings, like `["tool", "--help"]`) or shell form. `python3` is also accepted. `-m` runs the named Python module.
+- The final `USER` must be a non-root username or nonzero numeric user ID. A `user:group` form is accepted. If you choose a username, include a build step to create that account; account creation isn't executed or checked here.
 
-**Example:** A row `REQ-01,Supply shall meet limits.,Test` becomes `{"REQ-01": {"id": "REQ-01", "text": "Supply shall meet limits.", "method": "Test"}}`.
+**Example:** `WORKDIR /station` makes `/station` the directory used by following instructions. This is one instruction, not the complete Dockerfile.
 
-**Watch out:** A quoted comma belongs inside its field. Use `csv.reader` or `csv.DictReader`, open with `encoding="utf-8", newline=""`, and accept either a string path or `pathlib.Path`. `data/requirements.csv` supplies all four methods.
+**Watch out:** Use one instruction per line, without continuation lines or inline comments. Full-line `#` comments and blank lines are allowed; instruction names are case insensitive. Use a single stage without build aliases. The hypothetical project supplies the `chassis` module and packaging metadata; this set does not supply a buildable project.
 
-**Reread:** NASA §5.3, Product Verification: the discussion of verification methods and preparing verification activities.
+**Reread:** Docker Get started, “Docker concepts” (images and containers); Dockerfile reference, `FROM`, `WORKDIR`, `COPY`, `RUN`, `USER`, `CMD`, and `ENTRYPOINT`.
 
-### E2 — Summarize evidence coverage (easy/medium, ~11 min)
+### E2 — Describe station setup (easy, ~12 min)
 
-**Goal:** Tell the operator which requirements have passing evidence, failures, or no recorded check.
+**Goal:** Write `starter/playbook.yml`. **Privilege escalation**, selected by `become: true`, lets setup perform administrator operations. A **service unit** is a file describing a background process to Linux's **systemd** service manager.
 
-**Signature:** `def coverage(reqs: Requirements, results: Results) -> dict[str, list[str]]`
+**File contract** (no Python function): write a YAML list with exactly one play. It must have `hosts: test_stations`, `become: true`, and a nonempty `tasks` list. Every task has a nonempty string `name` and exactly one `ansible.builtin.*` module. Use separate tasks for the three operations:
 
-**Contract:** Return exactly the keys `verified`, `failed`, and `not-run`, each mapping to a sorted list of requirement ids. Follow the shared evidence rule. Include every known requirement in exactly one list; with no requirements return three empty lists.
+- Install the unit using `ansible.builtin.copy` or `ansible.builtin.template`. Its parameter mapping needs a nonempty `src` (source filename) and `dest: /etc/systemd/system/chassis-telemetry.service`. A template is a source file whose variables Ansible fills in.
+- Install the tester package using `ansible.builtin.pip` with a nonempty `name`, or `ansible.builtin.command` with a nonempty command string (or mapping with `cmd`). Prefer `pip` for this exercise. The check only verifies this structure, not what a command installs.
+- Manage the service using `ansible.builtin.systemd` or `ansible.builtin.systemd_service`. Set `name` to `chassis-telemetry` or `chassis-telemetry.service`, `enabled: true`, `state: started`, and `daemon_reload: true`. Enabled means start at boot; started means running now; daemon reload tells systemd to reread unit definitions.
 
-**Example:** For the shared one-requirement example, return `{"verified": ["REQ-01"], "failed": [], "not-run": []}`. For the supplied files: verified is `REQ-01, REQ-04, REQ-06`; failed is `REQ-02`; not-run is `REQ-03, REQ-05` (each shown here as a list of ids).
+**Example:** a task name such as `Install meter driver` describes an operation to the operator; the module key underneath selects the operation.
 
-**Watch out:** Record order must not change the outcome. Ignore `RETIRED-99` in the supplied log because the plan no longer contains it. Duplicate passes still produce one id.
+**Watch out:** Use spaces for YAML indentation. Quoted `"true"` is a string and fails the boolean checks. Source files and packages represent a future deployment; you don't need to create them. E2 checks structure separately from E4, so a command installation task can pass E2 even when E4 would flag it.
 
-**Reread:** NASA §5.3, Product Verification: comparing verification results with requirements and recording the evidence.
+**Reread:** Ansible Getting started, “Creating a playbook”; Intro to playbooks, “Playbook syntax” and “Executing playbooks”; Roles, “Role directory structure” (context for grouping these files later).
 
-### E3 — Find tests that have not run (easy, ~7 min)
+### E3 — Group the bench computers (easy, ~5 min)
 
-**Goal:** Produce the station's remaining Test-method work list.
+**Goal:** Write `starter/inventory.ini`, using Ansible's INI inventory format (text divided into named sections): `[group]` headers followed by one host alias per line, optionally followed by variables like `ansible_host=192.0.2.20`. `ansible_host` gives an address when the alias isn't a resolvable network name.
 
-**Signature:** `def untested(reqs: Requirements, results: Results) -> list[str]`
+**File contract** (no Python function): define `bench` with at least one host. Define `test_stations` so it includes every bench host. Either repeat the bench host aliases in `[test_stations]`, or define `[test_stations:children]` with `bench` on the next line. A **child group** contributes all its hosts to its parent. No other child-group nesting is needed. Extra direct hosts are allowed.
 
-**Contract:** Return only ids whose method is exactly `Test` and whose coverage status is `not-run`, sorted. A failed test has run, so it is not untested. Missing Analysis, Inspection, and Demonstration evidence never belongs in this list. Empty inputs return `[]`.
+**Example:** `[diagnostics]` followed by `diag01 ansible_host=192.0.2.20` defines a diagnostics group with one host. Use your required group names for this station set.
 
-**Example:** With the supplied files, `untested(reqs, results)` returns `["REQ-03"]`.
+**Watch out:** Do not write the literal header `[test_stations:children]` followed by a host: it lists group names. Blank lines and full-line `#` or `;` comments are allowed. The tests read aliases and group membership; addresses never get contacted.
 
-**Watch out:** Missing evidence is different from failed evidence. You may reuse E2.
+**Reread:** Ansible Getting started, “Building an inventory,” including host groups and parent/child groups.
 
-**Reread:** NASA §5.3, the four verification methods; the glossary's EMI and TVAC entries; Wikipedia's HIL overview for an example of where Test evidence can come from.
+### E4 — Find commands needing review (medium, ~18 min)
 
-### E4 — Export the review matrix (medium, ~13 min)
+**Goal:** Implement `idempotent_tasks` in `starter/deploycheck.py`. Despite the supplied function name, its result lists tasks **missing** an idempotence guard.
 
-**Goal:** Write a CSV table the operator can open during the station verification review.
+**Idempotence** means repeating an operation has the same effect as doing it once. Modules such as `copy` usually compare the current and desired state. Raw commands may repeat a change on every run, so station setup needs extra care:
 
-**Signature:** `def matrix_csv(reqs: Requirements, results: Results, path: str | Path) -> None`
+- `creates: PATH` skips a command when that path already exists.
+- `removes: PATH` skips a command when that path is absent.
+- `changed_when` controls whether Ansible reports a task as changed; `changed_when: false` is useful for a read-only instrument query. This controls reporting and does not itself prevent side effects.
 
-**Contract:** Create or overwrite the UTF-8 file at `path` with exactly this header: `req_id,method,test_names,status`. Write one row per known requirement, sorted by id. Copy its method; join its unique matching `test_name` values in sorted order with `;` and no added spaces. Use an empty field when there are no names. Status is exactly `verified`, `failed`, or `not-run`, using E2's rule. Empty requirements still write the header. Return `None`. The parent directory already exists; propagate file errors. Use `csv.writer` or `csv.DictWriter` and `newline=""`; either standard CSV line ending is accepted. Accept a string or `Path`.
+**Signature:** `def idempotent_tasks(playbook_path: str | Path) -> list[str]`
 
-**Example:** One output row for the supplied files is `REQ-02,Test,command_latency;command_retry,failed`.
+**Exact contract:**
 
-**Watch out:** Preserve names verbatim; quote commas, quotes, or newlines through the CSV library. Names in this exercise never contain `;`. Include non-Test requirements too. You may reuse E2.
+1. Read the path as UTF-8 (a standard text encoding) and load it with `yaml.safe_load`. An empty/comment-only document, or `[]`, returns `[]`.
+2. Otherwise the input is a list of play mappings. Inspect each play's direct `tasks` list, in document order. A missing `tasks` key means an empty list. Tasks are mappings with string `name` values. Each task has at most one action module.
+3. Consider only `ansible.builtin.command` and `ansible.builtin.shell`. Their value is either a command string or a parameter mapping with `cmd`. Ignore other modules. Only these fully qualified names are in scope.
+4. A considered task is guarded if **any** of these keys is present: `creates` or `removes` in the module's parameter mapping, `creates` or `removes` in the task's `args` mapping, or `changed_when` at task level. Check key presence, not truthiness: `changed_when: false` still counts. Missing `args` means an empty mapping.
+5. Return unguarded task names in play/task order. Preserve duplicate names. Don't inherit guards from another task or the play. `register` stores a result, `when` decides whether a task runs, and `chdir` selects a directory; none counts as a guard here.
+6. Let file-reading errors (`OSError`, including `FileNotFoundError`) and invalid YAML errors (`yaml.YAMLError`) propagate to the caller. You don't need to validate other document shapes or evaluate commands, paths, or conditions.
 
-**Reread:** NASA §5.3, Product Verification: documenting results and maintaining links between requirements and verification evidence.
+**Example:** a task named `Read serial number` using `ansible.builtin.command: station-id` with no guard contributes `"Read serial number"`. Add task-level `changed_when: false` and it contributes nothing.
+
+**Watch out:** This is a small review rule, not a proof that a deployment is idempotent. It accepts any present `changed_when` value, even `true`. Inputs use direct tasks only: no roles, nested task blocks, handlers (tasks triggered by changes), task includes, short module aliases, or inline `creates=...`/`removes=...` inside command strings. All guarded paths use explicit YAML keys. Tests use temporary playbooks, so E4 can pass before E2 is finished.
+
+**Reread:** Ansible Intro to playbooks, “Desired state and idempotency”; Getting started, “Creating a playbook.”
+
+### E5 — Check an Ansible role layout (easy–medium, ~12 min)
+
+**Goal:** Implement `role_problems` in `starter/deploycheck.py` by replacing its `raise NotImplementedError(...)` line. The team groups station setup into reusable roles. Check the supplied folders in `data/roles/` before a role reaches a bench computer. You only read files; you never run Ansible.
+
+A role's `tasks/main.yml` is its starting task list. `defaults/main.yml` holds default variable values (settings that callers may replace). `handlers/main.yml` lists named handlers, such as a service restart. A task's **notification**, written as `notify`, names a handler to trigger when that task changes something. This check only matches the names in the files; it does not predict whether a task will change anything.
+
+**Signature:** `def role_problems(role_dir: Path) -> list[str]`
+
+**Exact contract:**
+
+1. `role_dir` is a `pathlib.Path` pointing to an existing role folder. Report `"tasks/main.yml: missing"` when that file is absent, but keep checking the other files. `defaults/main.yml` and `handlers/main.yml` are optional; their absence alone is fine.
+2. Read each inspected file as UTF-8 and load it with `yaml.safe_load`. If `defaults/main.yml` is present but does not load as a mapping (`dict`), report `"defaults/main.yml: expected a mapping"`. An empty mapping (`{}`) is valid; an empty/comment-only file loads as `None` and is invalid.
+3. Inspect every file directly inside `tasks/` whose extension is `.yml`, including `main.yml`. Ignore nested folders, other extensions, and all other role files. Each task file must load as a list; otherwise report `"tasks/<file>.yml: expected a list"` and skip its tasks. An empty list (`[]`) is valid; an empty/comment-only file is invalid.
+4. Items in each task list are mappings. Count tasks starting at 1 separately in each file. A task needs a nonempty string `name`; a missing key, `null`, a non-string, or a string containing only whitespace (spaces, tabs, or newlines) counts as no name. Report `"tasks/<file>.yml: task <number> has no name"`. Continue checking that task's notifications too.
+5. When present, `handlers/main.yml` is a list of mappings with unique, nonempty string `name` values; you may assume that shape. `[]` is allowed. A task's `notify` is either one handler-name string or a list of such strings; a missing `notify` means no notifications. You may assume those shapes too. Match handler names exactly, including case and spaces, across all inspected task files.
+6. For each task, report each distinct missing handler once as `"tasks/<file>.yml: task <number> notifies unknown handler '<name>'"`. If two tasks notify the same missing handler, report it once for each task. For each defined handler that no inspected task notifies, report `"handlers/main.yml: handler '<name>' is never notified"`. Duplicate notifications within one task cause no extra messages. A notification in a task without a name still counts.
+7. Return all messages in ascending string order, using `sorted`. Use `/` in message paths on Windows and Linux, never include `role_dir` itself, and replace the angle-bracket placeholders above with the actual filename, number, or handler name. No problems means `[]`.
+8. Let file-reading errors (`OSError`) and invalid YAML errors (`yaml.YAMLError`) propagate. You do not need to validate other input shapes. There are no nested task blocks, task includes (instructions to load another task file), or handler aliases (`listen`, an alternative notification name). Do not follow references or evaluate modules.
+
+**Example:** with your working directory set to `sets/d44/`, using the supplied role folders:
+
+```python
+from pathlib import Path
+from starter.deploycheck import role_problems
+roles = Path("data/roles")
+role_problems(roles / "good")
+# []
+role_problems(roles / "notify_mismatch")
+# ["handlers/main.yml: handler 'Restart station' is never notified",
+#  'tasks/main.yml: task 1 has no name',
+#  "tasks/main.yml: task 2 notifies unknown handler 'Reload driver'"]
+```
+
+**Watch out:** Task and handler names serve different purposes: a task's `notify` must match a handler's `name`, not another task's name. Use `isinstance(value, dict)` or `isinstance(value, list)` to check the loaded document shape before iterating. Missing `tasks/main.yml` is a problem even if other task files exist. Use fresh collections on each call.
+
+**Reread:** Ansible Roles, “Role directory structure”; Intro to playbooks, “Handlers: running operations on change” (linked from that guide).

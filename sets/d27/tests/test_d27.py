@@ -1,398 +1,205 @@
-from __future__ import annotations
-
-from collections.abc import Iterator
-from queue import Empty, Queue
-import socket
-from threading import Barrier, Event, Lock, Thread, current_thread
 from time import perf_counter
 
 import pytest
 
-from starter.workers import Listener, Producer, drain, run_pipeline
+from starter.sequence import GapTracker, loss_report, missing_between, seq_diff
 
 
-def test_e1_reads_until_source_exhausted() -> None:
-    readings = iter([28.1, None, 28.2])
-    output: Queue[object] = Queue()
-    stop = Event()
-    producer = Producer(lambda: next(readings), output, stop)
-    assert isinstance(producer, Thread), "Producer must subclass Thread"
-    assert not producer.is_alive(), "construction must not start the producer"
-    try:
-        producer.start()
-        producer.join(timeout=2)
-        assert not producer.is_alive(), "StopIteration must finish the producer"
-        assert [output.get_nowait() for _ in range(3)] == [28.1, None, 28.2]
-        with pytest.raises(Empty):
-            output.get_nowait()
-    finally:
-        stop.set()
-        if producer.ident is not None:
-            producer.join(timeout=2)
-        assert not producer.is_alive(), "producer leaked a thread"
+@pytest.mark.parametrize(
+    "a,b,expected",
+    [(0, 0, 0), (42, 42, 0), (12, 9, 3), (9, 12, -3),
+     (0, 65535, 1), (65535, 0, -1), (1, 65535, 2), (65535, 1, -2)],
+)
+def test_e1_station_counter_differences(a: int, b: int, expected: int) -> None:
+    got = seq_diff(a, b)
+    assert got == expected, f"seq_diff({a}, {b}) should be {expected}, got {got}"
 
 
-def test_e1_preset_stop_never_calls_source() -> None:
-    calls: list[str] = []
-    stop = Event()
-    stop.set()
-    output: Queue[object] = Queue()
-    producer = Producer(lambda: calls.append("read"), output, stop)
-    try:
-        producer.start()
-        producer.join(timeout=2)
-        assert not producer.is_alive()
-        assert calls == [], "an already-stopped producer must not read"
-        with pytest.raises(Empty):
-            output.get_nowait()
-    finally:
-        producer.join(timeout=2)
+@pytest.mark.parametrize(
+    "a,b,expected",
+    [(32767, 0, 32767), (0, 32767, -32767),
+     (32768, 0, -32768), (0, 32768, -32768),
+     (65535, 32767, -32768), (0, 32769, 32767)],
+)
+def test_e1_half_ring_boundary(a: int, b: int, expected: int) -> None:
+    assert seq_diff(a, b) == expected, "use the documented negative half-ring tie"
 
 
-def test_e1_discards_read_that_sets_stop() -> None:
-    stop = Event()
-    output: Queue[object] = Queue()
-
-    def source() -> object:
-        stop.set()
-        return "late CH1 reading"
-
-    producer = Producer(source, output, stop)
-    try:
-        producer.start()
-        producer.join(timeout=2)
-        assert not producer.is_alive()
-        with pytest.raises(Empty):
-            output.get_nowait()
-    finally:
-        stop.set()
-        producer.join(timeout=2)
-
-
-def test_e1_external_stop_during_read() -> None:
-    entered = Event()
-    release = Event()
-    stop = Event()
-    output: Queue[object] = Queue()
-
-    def source() -> object:
-        entered.set()
-        # Only the controller releases this read; the timeout guards deadlock.
-        assert release.wait(timeout=5), "controller never released the source"
-        return 28.4
-
-    producer = Producer(source, output, stop)
-    try:
-        producer.start()
-        assert entered.wait(timeout=5), "producer never called the source"
-        stop.set()
-        release.set()
-        producer.join(timeout=2)
-        assert not producer.is_alive(), "producer ignored stop_event"
-        with pytest.raises(Empty):
-            output.get_nowait()
-    finally:
-        stop.set()
-        release.set()
-        producer.join(timeout=2)
-
-
-def test_e2_zero_timeout_preserves_queue_order() -> None:
-    q: Queue[object] = Queue()
-    for item in ["CH1", None, "CH1", 0]:
-        q.put_nowait(item)
-    assert drain(q, 0) == ["CH1", None, "CH1", 0]
-    assert drain(q, 0) == []
-
-
-def test_e2_negative_timeout_leaves_queue_untouched() -> None:
-    q: Queue[str] = Queue()
-    q.put_nowait("CH2")
+@pytest.mark.parametrize("a,b", [(-1, 0), (65536, 0), (0, -1), (0, 65536)])
+def test_e1_rejects_invalid_counter(a: int, b: int) -> None:
     with pytest.raises(ValueError):
-        drain(q, -0.1)
-    assert q.get_nowait() == "CH2", "validate before removing readings"
+        seq_diff(a, b)
 
 
-def test_e2_waits_with_get_instead_of_polling() -> None:
-    class CheckedQueue(Queue[int]):
-        def get(self, block: bool = True, timeout: float | None = None) -> int:
-            assert block and timeout == 0.01, "use get(timeout=timeout) on every read"
-            return super().get(block=block, timeout=timeout)
-
-        def empty(self) -> bool:
-            pytest.fail("empty() is a snapshot, not a waiting strategy")
-
-        def qsize(self) -> int:
-            pytest.fail("qsize() is a snapshot, not a waiting strategy")
-
-    q = CheckedQueue()
-    q.put_nowait(28)
-    assert drain(q, 0.01) == [28]
+@pytest.mark.parametrize(
+    "last,new,expected",
+    [(10, 14, [11, 12, 13]), (10, 11, []), (65534, 2, [65535, 0, 1]),
+     (65535, 0, []), (65535, 2, [0, 1])],
+)
+def test_e2_station_gap_order(last: int, new: int, expected: list[int]) -> None:
+    assert missing_between(last, new) == expected, "list skipped packets in forward order"
 
 
-def test_e2_accepts_arrival_while_get_is_waiting() -> None:
-    waiting = Event()
-    reading_sent = Event()
-
-    class SignallingQueue(Queue[str]):
-        def get(self, block: bool = True, timeout: float | None = None) -> str:
-            waiting.set()
-            # Script arrival before starting the real queue's idle timeout.
-            assert reading_sent.wait(timeout=5), "sender never queued the reading"
-            return super().get(block=block, timeout=timeout)
-
-    q = SignallingQueue()
-
-    def send_reading() -> None:
-        if waiting.wait(timeout=5):
-            q.put_nowait("CH3 ready")
-            reading_sent.set()
-
-    sender = Thread(target=send_reading)
-    sender.start()
-    try:
-        assert drain(q, 0.1) == ["CH3 ready"], "wait for a reading arriving after drain begins"
-    finally:
-        waiting.set()
-        sender.join(timeout=5)
-        assert not sender.is_alive()
+@pytest.mark.parametrize("last,new", [(10, 10), (11, 10), (0, 65535), (0, 32768), (32768, 0)])
+def test_e2_nonforward_has_no_gap(last: int, new: int) -> None:
+    first = missing_between(last, new)
+    second = missing_between(last, new)
+    assert first == [], "equal, backward and half-ring steps have no gap"
+    assert first is not second, "each call must return a fresh list"
 
 
-class ObservedSocket(socket.socket):
-    """Let tests coordinate on a real socket timeout without sleeping."""
-
-    def __init__(self) -> None:
-        super().__init__(socket.AF_INET, socket.SOCK_DGRAM)
-        self.timed_out = Event()
-
-    def recvfrom(self, bufsize: int, flags: int = 0) -> tuple[bytes, tuple[str, int]]:
-        try:
-            return super().recvfrom(bufsize, flags)
-        except socket.timeout:
-            self.timed_out.set()
-            raise
+def test_e2_largest_forward_gap() -> None:
+    gap = missing_between(65530, 32761)
+    expected = list(range(65531, 65536)) + list(range(32761))
+    assert gap == expected, "a forward distance of 32767 skips 32766 sequence numbers"
 
 
-@pytest.fixture
-def udp_socket() -> Iterator[ObservedSocket]:
-    with ObservedSocket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        yield sock
-
-
-def send(sock: socket.socket, packet: bytes) -> None:
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
-        sender.bind(("127.0.0.1", 0))
-        sender.settimeout(0.2)
-        sender.sendto(packet, sock.getsockname())
-
-
-def test_e3_parses_in_order_and_skips_bad_packets(udp_socket: ObservedSocket) -> None:
-    output: Queue[object] = Queue()
-    listener = Listener(udp_socket, output, lambda packet: float(packet.decode("ascii")))
-    try:
-        assert listener.thread is None, "constructor must not start receiving"
-        assert not listener.stop_event.is_set()
-        assert udp_socket.gettimeout() == 0.2
-        listener.start()
-        for packet in [b"bad", b"28.1", b"28.2"]:
-            send(udp_socket, packet)
-        assert output.get(timeout=1) == 28.1
-        assert output.get(timeout=1) == 28.2
-    finally:
-        listener.stop()
-        assert listener.thread is None or not listener.thread.is_alive()
-    assert udp_socket.fileno() == -1, "stop must close the owned socket"
-    with pytest.raises(Empty):
-        output.get_nowait()
-
-
-def test_e3_none_is_a_valid_parsed_item(udp_socket: ObservedSocket) -> None:
-    output: Queue[object] = Queue()
-    listener = Listener(udp_socket, output, lambda packet: None)
-    try:
-        listener.start()
-        send(udp_socket, b"heartbeat")
-        assert output.get(timeout=1) is None
-    finally:
-        listener.stop()
-        assert listener.thread is None or not listener.thread.is_alive()
-
-
-def test_e3_timeout_keeps_listening_then_idle_stop_is_bounded(udp_socket: ObservedSocket) -> None:
-    output: Queue[object] = Queue()
-    listener = Listener(udp_socket, output, lambda packet: packet.decode("ascii"))
-    try:
-        listener.start()
-        assert udp_socket.timed_out.wait(timeout=1), "recvfrom must time out while idle"
-        assert listener.thread is not None and listener.thread.is_alive(), "timeout must not end the loop"
-        send(udp_socket, b"CH4:PASS")
-        assert output.get(timeout=1) == "CH4:PASS"
-    finally:
-        before = perf_counter()
-        listener.stop()
-        elapsed = perf_counter() - before
-        assert listener.thread is None or not listener.thread.is_alive(), "stop returned with a live thread"
-    assert elapsed <= 2, f"idle shutdown took {elapsed:.3f}s; limit is 2s"
-    assert listener.stop_event.is_set()
-
-
-def test_e3_repeated_stop_and_start_rejection(udp_socket: ObservedSocket) -> None:
-    listener = Listener(udp_socket, Queue(), lambda packet: packet)
-    try:
-        listener.start()
-        with pytest.raises(RuntimeError):
-            listener.start()
-    finally:
-        listener.stop()
-        assert listener.thread is None or not listener.thread.is_alive()
-    listener.stop()
-    with pytest.raises(RuntimeError):
-        listener.start()
-
-
-def test_e3_stop_before_start_closes_socket(udp_socket: ObservedSocket) -> None:
-    listener = Listener(udp_socket, Queue(), lambda packet: packet)
-    listener.stop()
-    listener.stop()
-    assert udp_socket.fileno() == -1
-    assert listener.thread is None
-    assert listener.stop_event.is_set()
-    with pytest.raises(RuntimeError):
-        listener.start()
-
-@pytest.mark.parametrize("workers", [1, 2, 8])
-def test_e4_preserves_duplicate_and_none_inputs(workers: int) -> None:
-    values = ["CH1", None, "CH1", "CH2"]
-    calls: Queue[object] = Queue()
-
-    def check(item: object) -> str:
-        calls.put_nowait(item)
-        return f"{item}:PASS"
-
-    assert run_pipeline(iter(values), workers, check) == [f"{item}:PASS" for item in values]
-    observed = [calls.get_nowait() for _ in values]
-    assert observed.count("CH1") == 2 and observed.count(None) == 1 and observed.count("CH2") == 1
-    with pytest.raises(Empty):
-        calls.get_nowait()
-
-
-@pytest.mark.parametrize("workers", [0, -2])
-def test_e4_rejects_worker_count_before_consuming_input(workers: int) -> None:
-    def readings() -> Iterator[str]:
-        pytest.fail("validate workers before consuming the input")
-        yield "CH1"
-
+@pytest.mark.parametrize("last,new", [(-1, 4), (65536, 0), (3, -1), (0, 65536)])
+def test_e2_rejects_invalid_counter(last: int, new: int) -> None:
     with pytest.raises(ValueError):
-        run_pipeline(readings(), workers, str)
+        missing_between(last, new)
+
+
+def test_e3_new_station_and_independent_runs() -> None:
+    tracker = GapTracker()
+    assert (tracker.received, tracker.duplicates, tracker.out_of_order, tracker.missing) == (0, 0, 0, set())
+    assert tracker.update(65535) == [], "the first packet cannot establish a gap"
+    assert tracker.received == 1
+    other = GapTracker()
+    assert other.update(100) == []
+    assert other.update(103) == [101, 102]
+    assert tracker.missing == set(), "separate station runs must not share their missing set"
+    assert tracker.update(0) == [], "65535 to 0 is consecutive"
+    assert tracker.received == 2
+
+
+def test_e3_forward_gaps_across_wrap() -> None:
+    tracker = GapTracker()
+    assert tracker.update(65533) == []
+    assert tracker.update(1) == [65534, 65535, 0]
+    assert tracker.update(4) == [2, 3]
+    assert tracker.missing == {65534, 65535, 0, 2, 3}
+    assert (tracker.received, tracker.duplicates, tracker.out_of_order) == (3, 0, 0)
+
+
+def test_e3_late_repairs_do_not_move_forward_position() -> None:
+    tracker = GapTracker()
+    tracker.update(65534)
+    assert tracker.update(2) == [65535, 0, 1]
+    assert tracker.update(0) == []
+    assert tracker.missing == {65535, 1}, "late packet 0 repairs its own missing entry"
+    assert tracker.update(65533) == [], "an older packet need not have been missing"
+    assert tracker.update(32770) == [], "the exact half-ring tie is out of order"
+    assert tracker.update(3) == [], "late arrivals must not move the latest forward position"
+    assert (tracker.received, tracker.duplicates, tracker.out_of_order) == (6, 0, 3)
+    assert tracker.missing == {65535, 1}
+
+
+def test_e3_duplicates_take_priority_over_ordering() -> None:
+    tracker = GapTracker()
+    outputs = [tracker.update(seq) for seq in [10, 13, 11, 13, 11, 10, 14]]
+    assert outputs == [[], [11, 12], [], [], [], [], []]
+    assert (tracker.received, tracker.duplicates, tracker.out_of_order) == (7, 3, 1)
+    assert tracker.missing == {12}, "duplicates cannot add gaps or remove other missing entries"
+
+
+def test_e3_window_is_previous_1024_arrivals_including_repeats() -> None:
+    tracker = GapTracker()
+    for seq in range(1024):
+        tracker.update(seq)
+    assert tracker.update(0) == []
+    assert tracker.duplicates == 1, "the oldest of 1024 arrivals is still in the duplicate window"
+    assert tracker.update(1) == []
+    assert tracker.duplicates == 2, "checking a duplicate must not forget another recent number"
+
+    expired = GapTracker()
+    for seq in range(1025):
+        expired.update(seq)
+    assert expired.update(0) == []
+    assert (expired.duplicates, expired.out_of_order) == (0, 1), "arrival 0 expired after 1024 newer arrivals"
+
+    repeated = GapTracker()
+    repeated.update(0)
+    repeated.update(1)
+    for _ in range(1023):
+        repeated.update(1)
+    assert repeated.duplicates == 1023, "evicting one copy must retain membership for other copies"
+    assert repeated.update(0) == []
+    assert repeated.out_of_order == 1, "repeated arrivals must also age old numbers out of history"
+    assert repeated.received == 1026
+    assert repeated.update(1) == []
+    assert repeated.duplicates == 1024, "recent duplicate copies remain in the window"
+
+    same_position = GapTracker()
+    same_position.update(100)
+    for _ in range(1024):
+        same_position.update(0)
+    assert same_position.update(100) == []
+    assert same_position.out_of_order == 2, "an expired equal-position packet is nonforward, not a recent duplicate"
+    assert same_position.duplicates == 1023
+
+
+@pytest.mark.parametrize("invalid", [-1, 65536])
+def test_e3_rejects_without_changing_state(invalid: int) -> None:
+    tracker = GapTracker()
+    for seq in range(1024):
+        tracker.update(seq)
     with pytest.raises(ValueError):
-        run_pipeline([], workers, str)
+        tracker.update(invalid)
+    assert (tracker.received, tracker.duplicates, tracker.out_of_order, tracker.missing) == (1024, 0, 0, set())
+    assert tracker.update(0) == []
+    assert tracker.duplicates == 1, "invalid arrivals must not evict valid duplicate history"
+    assert tracker.update(1025) == [1024], "invalid arrivals must not change the latest forward position"
 
 
-def test_e4_empty_input_starts_no_workers(monkeypatch: pytest.MonkeyPatch) -> None:
-    def unexpected_start(self: Thread) -> None:
-        pytest.fail("empty input must not start threads")
-
-    def unexpected_check(item: object) -> object:
-        pytest.fail("empty input must not call fn")
-
-    monkeypatch.setattr(Thread, "start", unexpected_start)
-    assert run_pipeline(iter([]), 3, unexpected_check) == []
+@pytest.mark.parametrize("seqs", [[], [60000], [7, 8, 9], [65534, 65535, 0, 1]])
+def test_e4_empty_or_complete_capture(seqs: list[int]) -> None:
+    got = loss_report(seqs)
+    assert got == {"received": len(seqs), "missing": 0, "loss_pct": 0.0, "longest_gap": 0}
+    assert isinstance(got["loss_pct"], float), "loss percentage must be a float even with no loss"
+    for key in ["received", "missing", "longest_gap"]:
+        assert type(got[key]) is int, f"{key} must be an integer count"
 
 
-def test_e4_uses_requested_pool_and_joins_all_workers() -> None:
-    rendezvous = Barrier(3)
-    seen: set[Thread] = set()
-    guard = Lock()
-
-    def check(channel: int) -> int:
-        with guard:
-            seen.add(current_thread())
-        # A sequential implementation cannot get three checks to this point.
-        rendezvous.wait(timeout=0.2)
-        return channel * 10
-
-    assert run_pipeline(range(6), 3, check) == [0, 10, 20, 30, 40, 50]
-    assert len(seen) == 3, f"expected three worker threads, saw {len(seen)}"
-    assert current_thread() not in seen, "fn belongs in the worker pool"
-    assert all(not thread.is_alive() for thread in seen), "workers must stop before returning"
+@pytest.mark.parametrize(
+    "seqs,missing,longest,percent",
+    [([10, 13, 18], 6, 4, 100.0 * 6 / 9),
+     ([65533, 1, 4], 5, 3, 62.5)],
+)
+def test_e4_gap_summary(seqs: list[int], missing: int, longest: int, percent: float) -> None:
+    got = loss_report(seqs)
+    assert set(got) == {"received", "missing", "loss_pct", "longest_gap"}
+    assert got["received"] == len(seqs)
+    assert got["missing"] == missing
+    assert got["longest_gap"] == longest
+    assert got["loss_pct"] == pytest.approx(percent), "loss counts missing packets in the denominator"
 
 
-def test_e4_returns_input_order_despite_reverse_completion() -> None:
-    second_done = Event()
-    completions: Queue[int] = Queue()
-
-    def check(channel: int) -> str:
-        if channel == 0:
-            assert second_done.wait(timeout=0.2), "two workers must overlap"
-        completions.put_nowait(channel)
-        if channel == 1:
-            second_done.set()
-        return f"CH{channel}:PASS"
-
-    assert run_pipeline([0, 1], 2, check) == ["CH0:PASS", "CH1:PASS"]
-    assert [completions.get_nowait(), completions.get_nowait()] == [1, 0]
+@pytest.mark.parametrize(
+    "seqs,expected",
+    [([10, 13, 11, 13], {"received": 4, "missing": 1, "loss_pct": 25.0, "longest_gap": 2}),
+     ([10, 13, 12, 11, 13], {"received": 5, "missing": 0, "loss_pct": 0.0, "longest_gap": 2}),
+     ([20, 23, 20, 23], {"received": 4, "missing": 2, "loss_pct": 50.0, "longest_gap": 2})],
+)
+def test_e4_repairs_duplicates_and_input_preservation(seqs: list[int], expected: dict[str, int | float]) -> None:
+    original = seqs.copy()
+    assert loss_report(seqs) == expected, "use arrival order, final missing count and historical longest gap"
+    assert seqs == original, "a report must not change its capture"
+    assert loss_report(seqs) == expected, "each report needs a fresh tracker"
 
 
-@pytest.mark.parametrize("workers", [1, 3])
-def test_e4_raises_original_first_error_after_all_checks_stop(workers: int) -> None:
-    first = ValueError("CH0 overvoltage")
-    later = RuntimeError("CH2 instrument fault")
-    attempted: Queue[int] = Queue()
-    finished: Queue[int] = Queue()
-    seen: set[Thread] = set()
-    guard = Lock()
-    hold_check = Event()
-
-    def check(channel: int) -> int:
-        with guard:
-            seen.add(current_thread())
-        attempted.put_nowait(channel)
-        if channel == 0:
-            raise first
-        if channel == 2:
-            raise later
-        # Leave other work in progress when a parallel worker reports failure.
-        hold_check.wait(timeout=0.01)
-        finished.put_nowait(channel)
-        return channel
-
-    with pytest.raises((ValueError, RuntimeError)) as caught:
-        run_pipeline(range(5), workers, check)
-    if isinstance(caught.value, NotImplementedError):
-        raise caught.value
-    if workers == 1:
-        assert caught.value is first, "re-raise the first recorded exception object"
-    else:
-        assert caught.value is first or caught.value is later, "do not replace the original exception"
-    assert all(not thread.is_alive() for thread in seen), "exception escaped with live workers"
-    assert sorted(attempted.get_nowait() for _ in range(5)) == list(range(5)), "attempt every job"
-    assert sorted(finished.get_nowait() for _ in range(3)) == [1, 3, 4], "finish remaining checks before raising"
-    with pytest.raises(Empty):
-        attempted.get_nowait()
+@pytest.mark.parametrize("seqs", [[-1], [65536], [1, 3, -1], [65535, 65536]])
+def test_e4_invalid_capture(seqs: list[int]) -> None:
+    original = seqs.copy()
+    with pytest.raises(ValueError):
+        loss_report(seqs)
+    assert seqs == original, "invalid captures must not be changed either"
 
 
-from starter.workers import gil_answers
-
-
-def test_e5_q1_bytecode_execution() -> None:
-    answers = gil_answers()
-    if not isinstance(answers, dict) or set(answers) != {"Q1", "Q2", "Q3", "Q4"}:
-        pytest.fail("E5: return a dictionary with exactly Q1-Q4; reread E5's return contract", pytrace=False)
-    if answers.get("Q1") != "B":
-        pytest.fail("Q1: reread the Python glossary, 'global interpreter lock', and threading docs, 'GIL and performance considerations'", pytrace=False)
-
-
-def test_e5_q2_instrument_io_waits() -> None:
-    if gil_answers().get("Q2") != "C":
-        pytest.fail("Q2: reread threading docs, 'GIL and performance considerations', on I/O-bound tasks", pytrace=False)
-
-
-def test_e5_q3_cpu_heavy_waveforms() -> None:
-    if gil_answers().get("Q3") != "A":
-        pytest.fail("Q3: reread the Python glossary, 'global interpreter lock', and threading docs, 'GIL and performance considerations'", pytrace=False)
-
-
-def test_e5_q4_shared_measurement_counter() -> None:
-    if gil_answers().get("Q4") != "D":
-        pytest.fail("Q4: reread threading docs, 'Lock objects', and queue docs, 'Queue objects'", pytrace=False)
+def test_e4_fast_enough() -> None:
+    seqs = [number % 65536 for number in range(500_000)]
+    started = perf_counter()
+    got = loss_report(seqs)
+    elapsed = perf_counter() - started
+    assert got == {"received": 500_000, "missing": 0, "loss_pct": 0.0, "longest_gap": 0}, "multiple full wraps must not create loss"
+    assert elapsed <= 2.0, f"500,000 packets took {elapsed:.3f}s; keep recent history bounded and avoid capture rescans"

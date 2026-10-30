@@ -1,390 +1,233 @@
-"""Inspect files only: no containers, remote hosts, or external processes."""
-import json
 from pathlib import Path
-import re
-import shlex
+import sys
 
 import pytest
-import yaml
 
-from starter.deploycheck import idempotent_tasks
-from starter.deploycheck import role_problems
-
-STARTER = Path(__file__).resolve().parents[1] / "starter"
+from starter import opcli
+from starter.opcli import build_parser, confirm, format_table, main
 
 
-def _file(name: str, exercise: int) -> str:
-    text = (STARTER / name).read_text(encoding="utf-8")
-    if not any(line.strip() and not line.lstrip().startswith("#") for line in text.splitlines()):
-        raise NotImplementedError(f"E{exercise}: Fill in starter/{name} using the README contract")
-    return text
+def test_e1_run_arguments() -> None:
+    args = build_parser().parse_args([
+        "run", "--limits", "rail limits.json", "--station", "bench-A", "--dry-run",
+    ])
+    assert (args.command, args.limits, args.station, args.dry_run) == (
+        "run", "rail limits.json", "bench-A", True,
+    ), "run must preserve option values and enable the dry-run flag"
 
 
-def _instructions() -> list[tuple[str, str]]:
-    instructions = []
-    for line in _file("Dockerfile", 1).splitlines():
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#"):
-            parts = stripped.split(maxsplit=1)
-            assert len(parts) == 2, f"Dockerfile instruction needs an argument: {line!r}"
-            instructions.append((parts[0].upper(), parts[1]))
-    return instructions
+def test_e1_defaults_and_other_commands() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["run", "--station", "bench-B", "--limits", "x.json"])
+    assert args.dry_run is False, "measurement is the default when --dry-run is absent"
+    assert parser.parse_args(["list"]).command == "list"
+    shown = parser.parse_args(["show", "--station", "bench-offline"])
+    assert (shown.command, shown.station) == ("show", "bench-offline")
 
 
-def _project_copies(instructions: list[tuple[str, str]]) -> list[int]:
-    workdir = ""
-    copies = []
-    for index, (operation, argument) in enumerate(instructions):
-        if operation == "WORKDIR":
-            workdir = argument
-        elif operation == "COPY":
-            args = shlex.split(argument)
-            if (workdir.startswith("/") and len(args) == 2 and args[0] == "."
-                    and args[1].rstrip("/") in (".", workdir.rstrip("/"))):
-                copies.append(index)
-    return copies
-
-
-def _play() -> dict:
-    plays = yaml.safe_load(_file("playbook.yml", 2))
-    assert isinstance(plays, list) and len(plays) == 1, "Write a YAML list containing exactly one play"
-    play = plays[0]
-    assert isinstance(play, dict), "A play is a mapping of keys to values"
-    assert isinstance(play.get("tasks"), list) and play["tasks"], "The play needs a nonempty tasks list"
-    assert all(isinstance(task, dict) and isinstance(task.get("name"), str) and task["name"].strip()
-               for task in play["tasks"]), "Every task needs a nonempty name"
-    assert all(sum(isinstance(key, str) and key.startswith("ansible.builtin.") for key in task) == 1
-               for task in play["tasks"]), "Use separate tasks with exactly one ansible.builtin.* module each"
-    return play
-
-
-def _groups() -> dict[str, list[str]]:
-    groups: dict[str, list[str]] = {}
-    current = ""
-    for line in _file("inventory.ini", 3).splitlines():
-        line = line.strip()
-        if not line or line.startswith(("#", ";")):
-            continue
-        if line.startswith("[") and line.endswith("]"):
-            current = line[1:-1]
-            groups.setdefault(current, [])
-        else:
-            assert current, "Inventory hosts must follow a [group] header"
-            groups[current].append(line.split()[0])
-    return groups
-
-
-def _write_playbook(tmp_path: Path, text: str) -> Path:
-    path = tmp_path / "station.yml"
-    path.write_text(text, encoding="utf-8")
-    return path
-
-
-def test_e1_base_and_project_copy() -> None:
-    instructions = _instructions()
-    bases = [arg for op, arg in instructions if op == "FROM"]
-    assert instructions[0][0] == "FROM" and len(bases) == 1, "Use one stage starting with FROM"
-    assert re.fullmatch(r"python:3\.12(?:\.\d+)?-slim(?:-[a-z0-9]+)?", bases[0]), "Base must be a Python 3.12 slim image"
-    workdirs = [arg for op, arg in instructions if op == "WORKDIR"]
-    assert workdirs and workdirs[-1].startswith("/"), "Set an absolute WORKDIR"
-    assert _project_copies(instructions), "Set an absolute WORKDIR, then COPY the whole project (.) into it"
-
-
-def test_e1_package_install_and_launch() -> None:
-    instructions = _instructions()
-    installs = []
-    for index, (operation, argument) in enumerate(instructions):
-        if operation == "RUN":
-            args = shlex.split(argument)
-            for prefix in (["pip", "install"], ["python", "-m", "pip", "install"],
-                           ["python3", "-m", "pip", "install"]):
-                if len(args) > len(prefix) and args[:len(prefix)] == prefix:
-                    installs.append((index, args[len(prefix):]))
-                    break
-    assert installs, "Use RUN pip install PACKAGE or RUN python -m pip install PACKAGE"
-    copies = _project_copies(instructions)
-    assert all("." not in packages or any(copy < index for copy in copies)
-               for index, packages in installs), "COPY the project before installing it with pip install ."
-
-    # Docker keeps the last of each instruction; a new ENTRYPOINT clears an earlier CMD.
-    entrypoint = ""
-    command = ""
-    for operation, argument in instructions:
-        if operation == "ENTRYPOINT":
-            entrypoint, command = argument, ""
-        elif operation == "CMD":
-            command = argument
-    assert entrypoint or command, "Provide CMD or ENTRYPOINT"
-    entry_args = json.loads(entrypoint) if entrypoint.startswith("[") else shlex.split(entrypoint)
-    command_args = json.loads(command) if command.startswith("[") else shlex.split(command)
-    if entry_args:
-        # Shell-form ENTRYPOINT ignores CMD; exec form receives CMD as arguments.
-        if entrypoint.startswith("[") and command and not command.startswith("["):
-            command_args = ["/bin/sh", "-c", command]
-        args = entry_args + command_args if entrypoint.startswith("[") else entry_args
-    else:
-        args = command_args
-    assert args[:3] in (["python", "-m", "chassis"], ["python3", "-m", "chassis"]), (
-        "The effective final CMD/ENTRYPOINT must invoke python -m chassis (optional arguments follow)"
-    )
-
-
-def test_e1_nonroot_runtime_user() -> None:
-    users = [arg for op, arg in _instructions() if op == "USER"]
-    assert users, "Set USER for the operator process"
-    user = users[-1].split(":")[0]
-    assert user and user.lower() != "root" and not (user.isdecimal() and int(user) == 0), "The final USER must be non-root"
-
-
-def test_e2_station_target_and_privilege() -> None:
-    play = _play()
-    assert play.get("hosts") == "test_stations", "Target the test_stations inventory group"
-    assert play.get("become") is True, "Use become: true to install the station service"
-
-
-def test_e2_unit_copy_and_package_install() -> None:
-    tasks = _play()["tasks"]
-    units = [task[module] for task in tasks for module in ("ansible.builtin.copy", "ansible.builtin.template") if module in task]
-    assert any(isinstance(args, dict) and args.get("src") and args.get("dest") == "/etc/systemd/system/chassis-telemetry.service"
-               for args in units), "Copy/template the service unit to /etc/systemd/system/chassis-telemetry.service"
-    packages = [task["ansible.builtin.pip"] for task in tasks if "ansible.builtin.pip" in task]
-    commands = [task["ansible.builtin.command"] for task in tasks if "ansible.builtin.command" in task]
-    has_pip = any(isinstance(args, dict) and args.get("name") for args in packages)
-    has_command = any((isinstance(args, str) and args.strip()) or (isinstance(args, dict) and args.get("cmd"))
-                      for args in commands)
-    assert has_pip or has_command, "Install a package with pip.name or a nonempty command/cmd"
-
-
-def test_e2_service_is_started_and_enabled() -> None:
-    services = [task[module] for task in _play()["tasks"] for module in (
-        "ansible.builtin.systemd", "ansible.builtin.systemd_service"
-    ) if module in task]
-    assert any(isinstance(args, dict) and args.get("name") in ("chassis-telemetry", "chassis-telemetry.service")
-               and args.get("enabled") is True and args.get("state") == "started"
-               and args.get("daemon_reload") is True for args in services), "Enable/start chassis-telemetry and reload unit definitions using YAML booleans"
-
-
-def test_e3_inventory_has_station_and_bench_groups() -> None:
-    groups = _groups()
-    assert "test_stations" in groups or "test_stations:children" in groups, "Define test_stations directly or through :children"
-    assert groups.get("bench"), "The [bench] group needs at least one host alias"
-
-
-def test_e3_bench_hosts_are_test_stations() -> None:
-    groups = _groups()
-    stations = set(groups.get("test_stations", []))
-    if "bench" in groups.get("test_stations:children", []):
-        stations.update(groups.get("bench", []))
-    assert stations, "test_stations must resolve to at least one host"
-    assert set(groups.get("bench", [])) <= stations, "Every bench host must also belong to test_stations"
-
-
-def test_e4_reports_both_modules_in_document_order(tmp_path: Path) -> None:
-    path = _write_playbook(tmp_path, """
-- hosts: test_stations
-  tasks:
-    - name: Read station identity
-      ansible.builtin.command: chassis-id
-    - name: Read station revision
-      ansible.builtin.shell:
-        cmd: cat /opt/chassis/revision
-    - name: Copy limits
-      ansible.builtin.copy:
-        src: limits.csv
-        dest: /opt/chassis/limits.csv
-- hosts: bench
-  tasks:
-    - name: Read station identity
-      ansible.builtin.command: chassis-id
-""")
-    got = idempotent_tasks(path)
-    assert got == ["Read station identity", "Read station revision", "Read station identity"], f"Keep play/task order and duplicate names, got {got!r}"
-
-
-@pytest.mark.parametrize("module", ["ansible.builtin.command", "ansible.builtin.shell"])
-@pytest.mark.parametrize("guard", ["creates", "removes"])
-def test_e4_accepts_file_guards_in_args_or_module(tmp_path: Path, module: str, guard: str) -> None:
-    path = _write_playbook(tmp_path, f"""
-- hosts: bench
-  tasks:
-    - name: Guard inside module parameters
-      {module}:
-        cmd: station-init
-        {guard}: /opt/chassis/ready
-    - name: Guard in task args
-      {module}: station-init
-      args:
-        {guard}: /opt/chassis/ready
-""")
-    assert idempotent_tasks(path) == [], "creates/removes may be in module parameters or task args"
-
-
-@pytest.mark.parametrize("value", ["false", "true", "'station_result.rc == 0'", "[]"])
-def test_e4_changed_when_is_checked_by_presence(tmp_path: Path, value: str) -> None:
-    path = _write_playbook(tmp_path, f"""
-- hosts: bench
-  tasks:
-    - name: Read telemetry status
-      ansible.builtin.command: telemetry-status
-      changed_when: {value}
-    - name: Read driver status
-      ansible.builtin.shell: driver-status
-      changed_when: {value}
-""")
-    assert idempotent_tasks(path) == [], "Even changed_when: false is an explicit reporting rule"
-
-
-def test_e4_unrelated_keys_do_not_guard_tasks(tmp_path: Path) -> None:
-    path = _write_playbook(tmp_path, """
-- hosts: bench
-  changed_when: false
-  tasks:
-    - name: Probe supply
-      ansible.builtin.command:
-        cmd: probe-psu
-      args:
-        chdir: /opt/chassis
-      register: supply_result
-    - name: Probe meter
-      ansible.builtin.shell: probe-dmm
-      when: station_online
-    - name: Guarded initialization
-      ansible.builtin.command: station-init
-      args:
-        creates: /opt/chassis/ready
-""")
-    assert idempotent_tasks(path) == ["Probe supply", "Probe meter"], "Only task-local guard keys count; register/when/chdir are not guards"
-
-
-@pytest.mark.parametrize("text", ["", "# station not commissioned yet\n", "[]", "- hosts: bench\n", "- hosts: bench\n  tasks: []\n"])
-def test_e4_empty_inputs_and_string_paths(tmp_path: Path, text: str) -> None:
-    path = _write_playbook(tmp_path, text)
-    assert idempotent_tasks(str(path)) == [], "Empty documents, missing tasks, and empty task lists have no unsafe tasks"
-
-
-def test_e4_file_and_yaml_errors_propagate(tmp_path: Path) -> None:
-    with pytest.raises(OSError):
-        idempotent_tasks(tmp_path / "missing.yml")
-    path = _write_playbook(tmp_path, "- hosts: [bench\n")
-    with pytest.raises(yaml.YAMLError):
-        idempotent_tasks(path)
-
-
-@pytest.mark.parametrize(("folder", "expected"), [
-    ("good", []),
-    ("missing_tasks", ["tasks/main.yml: missing"]),
-    ("bad_shapes", [
-        "defaults/main.yml: expected a mapping",
-        "tasks/main.yml: expected a list",
-    ]),
-    ("notify_mismatch", [
-        "handlers/main.yml: handler 'Restart station' is never notified",
-        "tasks/main.yml: task 1 has no name",
-        "tasks/main.yml: task 2 notifies unknown handler 'Reload driver'",
-    ]),
+@pytest.mark.parametrize("argv", [
+    [], ["missing"], ["run"], ["run", "--station", "bench-A"],
+    ["run", "--limits", "rail.json"], ["show"],
+    ["show", "--station", "unknown"], ["list", "extra"],
+    ["run", "--limits", "x", "--station", "unknown"],
+    ["run", "--limits", "x", "--station", "bench-A", "--bogus"],
+    ["run", "--limits", "x", "--station", "bench-A", "--dry-run", "yes"],
 ])
-def test_e5_supplied_roles(folder: str, expected: list[str]) -> None:
-    role_dir = STARTER.parent / "data/roles" / folder
-    got = role_problems(role_dir)
-    assert got == expected, f"For role {folder}, expected {expected!r}, got {got!r}"
+def test_e1_usage_errors_raise_without_printing(argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(ValueError):
+        build_parser().parse_args(argv)
+    captured = capsys.readouterr()
+    assert captured.out == captured.err == "", "E1 must leave error formatting to main"
 
 
-@pytest.mark.parametrize("with_optional_files", [False, True])
-def test_e5_empty_task_list_and_optional_files(tmp_path: Path, with_optional_files: bool) -> None:
-    (tmp_path / "tasks").mkdir()
-    (tmp_path / "tasks/main.yml").write_text("[]", encoding="utf-8")
-    if with_optional_files:
-        (tmp_path / "defaults").mkdir()
-        (tmp_path / "defaults/main.yml").write_text("{}", encoding="utf-8")
-        (tmp_path / "handlers").mkdir()
-        (tmp_path / "handlers/main.yml").write_text("[]", encoding="utf-8")
-    assert role_problems(tmp_path) == [], "Empty lists/mappings are valid; optional files may be absent"
-    (tmp_path / "tasks/main.yml").unlink()
-    (tmp_path / "tasks/probe.yml").write_text(
-        "- name: Probe station\n  notify: Missing handler\n", encoding="utf-8"
-    )
-    assert role_problems(tmp_path) == [
-        "tasks/main.yml: missing",
-        "tasks/probe.yml: task 1 notifies unknown handler 'Missing handler'",
-    ], "Missing main.yml must not stop checks; without handlers every notification is unknown"
+@pytest.mark.parametrize(("argv", "words"), [
+    (["--help"], ["run", "list", "show"]),
+    (["run", "--help"], ["--limits", "--station", "--dry-run"]),
+    (["list", "-h"], ["list"]), (["show", "-h"], ["--station"]),
+])
+def test_e1_help(argv: list[str], words: list[str], capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as stopped:
+        build_parser().parse_args(argv)
+    assert stopped.value.code == 0
+    captured = capsys.readouterr()
+    assert captured.out.startswith("usage: station"), "help must identify the operator tool"
+    assert all(word in captured.out for word in words), "help must expose the command options"
+    assert captured.err == ""
 
 
-@pytest.mark.parametrize("text", ["", "# not filled in", "null", "[]", "telemetry", "9200", "false"])
-def test_e5_defaults_must_be_mapping(tmp_path: Path, text: str) -> None:
-    (tmp_path / "tasks").mkdir()
-    (tmp_path / "tasks/main.yml").write_text("[]", encoding="utf-8")
-    (tmp_path / "defaults").mkdir()
-    (tmp_path / "defaults/main.yml").write_text(text, encoding="utf-8")
-    assert role_problems(tmp_path) == ["defaults/main.yml: expected a mapping"], (
-        f"Present defaults must load as a dict, even when empty/comment-only: {text!r}"
-    )
+@pytest.mark.parametrize(("station", "bounds", "dry_run", "expected_code", "expected_out", "expected_err"), [
+    ("bench-A", (4.5, 5.5), False, 0, "bench-A: PASS\n", ""),
+    ("bench-A", (5.0, 5.0), False, 0, "bench-A: PASS\n", ""),
+    ("bench-A", (0.0, 10**400), False, 0, "bench-A: PASS\n", ""),
+    ("bench-B", (4.5, 5.5), False, 1, "bench-B: FAIL\n", ""),
+    ("bench-A", (1.0, 4.0), False, 1, "bench-A: FAIL\n", ""),
+    ("bench-offline", (4.5, 5.5), False, 2, "", "error: bench-offline: measurement unavailable\n"),
+    ("bench-B", (4.5, 5.5), True, 0, "bench-B: READY\n", ""),
+    ("bench-offline", (4.5, 5.5), True, 0, "bench-offline: READY\n", ""),
+])
+def test_e2_run_outcomes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], station: str,
+    bounds: tuple[float, float], dry_run: bool, expected_code: int,
+    expected_out: str, expected_err: str,
+) -> None:
+    limits = tmp_path / "rail limits.json"
+    limits.write_text(f'{{"low": {bounds[0]}, "high": {bounds[1]}}}', encoding="utf-8")
+    argv = ["run", "--limits", str(limits), "--station", station]
+    if dry_run:
+        argv.append("--dry-run")
+    result = main(argv)
+    captured = capsys.readouterr()
+    assert type(result) is int and result == expected_code, "return the documented integer exit code"
+    assert captured.out == expected_out
+    assert captured.err == expected_err
 
 
-@pytest.mark.parametrize("text", ["", "# no tasks yet", "null", "{}", "station", "false", "9200"])
-def test_e5_every_direct_yml_task_file_must_be_list(tmp_path: Path, text: str) -> None:
-    (tmp_path / "tasks").mkdir()
-    (tmp_path / "tasks/main.yml").write_text("[]", encoding="utf-8")
-    (tmp_path / "tasks/calibrate.yml").write_text(text, encoding="utf-8")
-    (tmp_path / "tasks/notes.txt").write_text("not YAML: [", encoding="utf-8")
-    (tmp_path / "tasks/nested").mkdir()
-    (tmp_path / "tasks/folder.yml").mkdir()
-    (tmp_path / "tasks/nested/ignored.yml").write_text("{}", encoding="utf-8")
-    assert role_problems(tmp_path) == ["tasks/calibrate.yml: expected a list"], (
-        "Check every direct tasks/*.yml file, and ignore other extensions and nested folders"
-    )
+@pytest.mark.parametrize(("argv", "output"), [
+    (["list"], "bench-A\nbench-B\nbench-offline\n"),
+    (["show", "--station", "bench-A"], "bench-A: 5.0 V\n"),
+    (["show", "--station", "bench-B"], "bench-B: 4.0 V\n"),
+    (["show", "--station", "bench-offline"], "bench-offline: offline\n"),
+])
+def test_e2_list_and_show(argv: list[str], output: str, capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(argv) == 0
+    captured = capsys.readouterr()
+    assert captured.out == output
+    assert captured.err == ""
 
 
-def test_e5_names_notifications_and_sorted_messages(tmp_path: Path) -> None:
-    (tmp_path / "tasks").mkdir()
-    (tmp_path / "tasks/main.yml").write_text("""
-- name: Install settings
-  notify: [Restart telemetry, Restart telemetry]
-- name: null
-  notify: [restart telemetry, Missing driver, Missing driver]
-- name: '   '
-- name: 17
-- ansible.builtin.command: chassis-id
-""", encoding="utf-8")
-    (tmp_path / "tasks/extra.yml").write_text("""
-- name: Calibrate station
-  notify: Reload driver
-- name: Calibrate station
-  notify: Missing driver
-""", encoding="utf-8")
-    (tmp_path / "handlers").mkdir()
-    (tmp_path / "handlers/main.yml").write_text("""
-- name: Reload driver
-- name: Restart telemetry
-- name: Unused handler
-""", encoding="utf-8")
-    expected = [
-        "handlers/main.yml: handler 'Unused handler' is never notified",
-        "tasks/extra.yml: task 2 notifies unknown handler 'Missing driver'",
-        "tasks/main.yml: task 2 has no name",
-        "tasks/main.yml: task 2 notifies unknown handler 'Missing driver'",
-        "tasks/main.yml: task 2 notifies unknown handler 'restart telemetry'",
-        "tasks/main.yml: task 3 has no name",
-        "tasks/main.yml: task 4 has no name",
-        "tasks/main.yml: task 5 has no name",
+@pytest.mark.parametrize(("argv", "clue"), [
+    ([], "command"), (["unknown"], "unknown"),
+    (["run", "--station", "bench-A"], "--limits"),
+    (["run", "--limits", "x"], "--station"),
+    (["show", "--station", "unknown"], "unknown"),
+    (["list", "--bogus"], "--bogus"),
+])
+def test_e2_usage_errors(argv: list[str], clue: str, capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(argv) == 3, "usage mistakes use code 3, not argparse's default code 2"
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("error: ") and len(captured.err.splitlines()) == 1
+    assert clue in captured.err, "keep the diagnostic that helps the operator fix the command"
+    assert "Traceback" not in captured.err and "usage:" not in captured.err
+
+
+@pytest.mark.parametrize("content", [
+    None, "not JSON", '{"low": 8, "high": 2}', '{"low": true, "high": 6}',
+    '{"low": 0}', '{"low": "4", "high": 6}', '{"low": 0, "high": Infinity}',
+    b"\xff",
+])
+def test_e2_input_errors_even_in_dry_run(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], content: str | bytes | None,
+) -> None:
+    limits = tmp_path / "bad limits.json"
+    if isinstance(content, bytes):
+        limits.write_bytes(content)
+    elif content is not None:
+        limits.write_text(content, encoding="utf-8")
+    assert main(["run", "--limits", str(limits), "--station", "bench-A", "--dry-run"]) == 3
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("error: ") and len(captured.err.splitlines()) == 1
+    assert "Traceback" not in captured.err
+    if content is None:
+        assert limits.name in captured.err, "a missing-file message must retain its filename"
+
+
+@pytest.mark.parametrize("argv", [["--help"], ["run", "--help"], ["list", "-h"], ["show", "-h"]])
+def test_e2_help_and_real_argv(
+    argv: list[str], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(argv) == 0, "main must return rather than leak help's SystemExit"
+    captured = capsys.readouterr()
+    assert captured.out.startswith("usage: station") and captured.err == ""
+    monkeypatch.setattr(sys, "argv", ["station", "list"])
+    assert main(None) == 0
+    captured = capsys.readouterr()
+    assert captured.out == "bench-A\nbench-B\nbench-offline\n" and captured.err == ""
+
+
+def test_e2_dispatch_and_multiline_diagnostic(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls: list[tuple[str, str, bool]] = []
+
+    def backend(path: str, station: str, dry_run: bool) -> str:
+        calls.append((path, station, dry_run))
+        raise ValueError("  limits rail.json:\n  expected numeric bounds\t ")
+
+    monkeypatch.setattr(opcli, "_run_station", backend)
+    assert main(["run", "--limits", "rail.json", "--station", "bench-A", "--dry-run"]) == 3
+    assert calls == [("rail.json", "bench-A", True)], "dispatch exactly once with parsed arguments"
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "error: limits rail.json: expected numeric bounds\n"
+
+
+def test_e3_align_and_preserve_inputs(capsys: pytest.CaptureFixture[str]) -> None:
+    rows: list[dict[str, object]] = [
+        {"station": "A", "state": "PASS"}, {"station": "long-bench", "state": "FAIL"},
     ]
-    got = role_problems(tmp_path)
-    assert got == expected, f"Keep per-task diagnostics, match names exactly, and sort: {got!r}"
-    assert role_problems(tmp_path) == expected, "Repeated calls must not retain notifications from earlier roles"
-    (tmp_path / "tasks/main.yml").write_text("[]", encoding="utf-8")
-    (tmp_path / "tasks/extra.yml").write_text("[]", encoding="utf-8")
-    assert role_problems(tmp_path) == [
-        "handlers/main.yml: handler 'Reload driver' is never notified",
-        "handlers/main.yml: handler 'Restart telemetry' is never notified",
-        "handlers/main.yml: handler 'Unused handler' is never notified",
-    ], "Each call must collect notifications again from the current files"
+    original = [row.copy() for row in rows]
+    columns = ["station", "state"]
+    result = format_table(rows, columns)
+    assert result == "station     state\nA           PASS\nlong-bench  FAIL"
+    assert rows == original and columns == ["station", "state"], "formatting must not change source data"
+    assert capsys.readouterr().out == "", "return the table rather than printing it"
 
 
-@pytest.mark.parametrize("relative", ["tasks/main.yml", "defaults/main.yml", "handlers/main.yml"])
-def test_e5_invalid_yaml_propagates(tmp_path: Path, relative: str) -> None:
-    (tmp_path / "tasks").mkdir()
-    (tmp_path / "tasks/main.yml").write_text("[]", encoding="utf-8")
-    path = tmp_path / relative
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("broken: [", encoding="utf-8")
-    with pytest.raises(yaml.YAMLError):
-        role_problems(tmp_path)
+def test_e3_requested_order_and_conversions() -> None:
+    rows: list[dict[str, object]] = [
+        {"station": "A", "value": 5.25, "ignored": "do-not-display"},
+        {"station": "B", "value": None}, {"station": "C", "value": False},
+    ]
+    assert format_table(rows, ["value", "station"]) == (
+        "value  station\n5.25   A\nNone   B\nFalse  C"
+    ), "column order comes from columns, and values use str()"
+
+
+def test_e3_missing_cells_and_no_trailing_spaces() -> None:
+    rows: list[dict[str, object]] = [{"state": "PASS"}, {"station": "A"}, {}]
+    assert format_table(rows, ["station", "state"]) == "station  state\n         PASS\nA\n"
+    assert format_table([{"volts": 5}], ["volts"]) == "volts\n5"
+
+
+@pytest.mark.parametrize(("rows", "columns", "expected"), [
+    ([], ["station", "state"], "station  state"),
+    ([], [], ""), ([{"station": "A"}], [], ""),
+])
+def test_e3_empty_inputs(rows: list[dict[str, object]], columns: list[str], expected: str) -> None:
+    assert format_table(rows, columns) == expected
+
+
+@pytest.mark.parametrize("reply", ["y", "yes", "Y", "YES", "  YeS ", "\ty\n"])
+def test_e4_explicit_yes(reply: str) -> None:
+    assert confirm("Enable output?", lambda prompt: reply) is True
+
+
+@pytest.mark.parametrize("reply", ["", " ", "n", "NO", "sure", "yes please", "yep", "1", "y es"])
+def test_e4_every_other_reply_is_no(reply: str) -> None:
+    assert confirm("Enable output?", lambda prompt: reply) is False
+
+
+def test_e4_prompt_once_and_no_extra_output(capsys: pytest.CaptureFixture[str]) -> None:
+    prompts: list[str] = []
+
+    def input_fn(prompt: str) -> str:
+        prompts.append(prompt)
+        return "no"
+
+    assert confirm("Enable PSU output?", input_fn) is False
+    assert prompts == ["Enable PSU output? [y/N] "], "show the safe default and ask only once"
+    captured = capsys.readouterr()
+    assert captured.out == captured.err == "", "the input function owns displaying the prompt"
+
+
+def test_e4_closed_input_is_safe() -> None:
+    prompts: list[str] = []
+
+    def closed_input(prompt: str) -> str:
+        prompts.append(prompt)
+        raise EOFError
+
+    assert confirm("Enable output?", closed_input) is False, "closed input must never enable output"
+    assert prompts == ["Enable output? [y/N] "]

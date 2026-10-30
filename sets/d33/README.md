@@ -1,93 +1,95 @@
-# d33 — Test sequences as state machines
+# d33 — Processes, exit codes and signals
 
-**Time:** about 45 minutes · **Read first:** [Wikipedia: Finite-state machine (overview)](https://en.wikipedia.org/wiki/Finite-state_machine); *A Common-Sense Guide to Data Structures and Algorithms*, chapter on graphs; [Pro Git 6.2: Contributing to a Project (forks, pull requests, review)](https://git-scm.com/book/en/v2/GitHub-Contributing-to-a-Project) · **You edit:** `starter/sequencer.py`
+**Time:** about 45 minutes (41 coding + 4 review) · **Read first:** [Missing Semester, Command-line Environment](https://missing.csail.mit.edu/2020/command-line/) (job control and signals); Python [subprocess](https://docs.python.org/3/library/subprocess.html) and [signal](https://docs.python.org/3/library/signal.html) docs; **Review for tomorrow's day-34 check: your weakest set so far** — look at your tracker and redo the set you marked partial or stuck most recently. · **You edit:** `starter/procs.py`
 
 ## What you're building
 
-A chassis test station must prepare its instruments before taking measurements and release them even when a measurement fails. Build a sequencer: code that controls the order of a test sequence and records its progress for the operator. These exercises use local functions to stand in for instrument operations; no hardware is needed.
+A chassis test station starts instrument-check tools, records whether they succeeded, and retries tools that fail. It also needs to notice an operator's stop request so the station can finish cleanup before shutting down.
 
 ## How this works
 
-1. Fill in `TRANSITIONS` and replace the `raise NotImplementedError(...)` lines in `starter/sequencer.py`. Don't edit `tests/`.
+1. Replace the `raise NotImplementedError(...)` lines in `starter/procs.py`. Don't edit `tests/`.
 2. Press **Ctrl+Shift+B → Test: d33** (or run `bash tools/run.sh d33` / `tools\run.ps1 d33`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
-3. Report **all pass / partial / stuck** in the tracker.
+3. Report **all pass / partial / stuck** in the tracker. Spend the final four minutes revisiting your most recently partial or stuck set for tomorrow's day-34 check; if you need longer, continue that review after this set.
 
-A **finite-state machine** allows only specified changes between a fixed collection of states. A **state** names the current phase; a **transition** is an allowed change. A **terminal state** ends the sequence and has no outgoing transitions.
+A **process** is a running program; a **child process** is one started by your Python program. An **argument list** contains the executable path followed by its separate arguments. A **shell** interprets command text; passing a list with `shell=False` (the default) avoids that extra interpreter.
 
-A **directed graph** represents states as nodes (points) and transitions as edges (one-way arrows). Here a **transition table** is a dictionary mapping each state to a set of allowed next states. A **set** stores distinct values; `in` checks membership. An empty set is `set()`, whereas `{}` is an empty dictionary.
+An **exit code** is the integer a process returns when it finishes; zero conventionally means success. **Standard output** (`stdout`) carries normal text; **standard error** (`stderr`) carries diagnostic text. **Capture** means returning that text to Python instead of displaying it. A **timeout** is the maximum number of seconds allowed for one run.
+
+A **signal** is a notification delivered to a process. **SIGINT** is the interrupt request normally sent by Ctrl+C; **SIGTERM** is a termination request commonly sent by service managers. A **handler** is a function called when a signal arrives. **Job control** is the shell's ability to stop, resume, and manage running processes.
+
+A **context manager** supplies setup and cleanup for a `with` block through `__enter__` and `__exit__`. A **flag** is a Boolean value recording whether something happened. Here, **graceful stopping** means recording the request now so normal code can perform cleanup later.
 
 ```python
-# A separate example: an operator station's door indicator.
-allowed = {"CLOSED": {"OPEN"}, "OPEN": {"CLOSED"}}
-current = "CLOSED"
-target = "OPEN"
-print(target in allowed.get(current, set()))  # True
+import sys
+
+args = [sys.executable, "-c", "print('Station B7 ready')"]
+# sys.executable is this Python interpreter's path.
+# -c makes Python execute the following argument as code.
 ```
-
-A **callback** is a function passed to other code to call later. `Callable[[], None]` means a function taking no arguments and returning `None`; `Callable[[], bool]` returns `True` or `False`. The supplied `Setup`, `Run`, `Teardown`, and `Step` names are **type aliases**: short names for these types. A step is a tuple `(setup, run, teardown)`; a tuple groups values in a fixed order. **Teardown** means releasing resources or leaving equipment safe. **History** here is a list of visited state names, not a log of callback names.
-
-An **exception** signals a failed operation. `try` runs protected code, `except` handles a specified exception, and `finally` runs cleanup even when the protected code fails. `ValueError` reports an invalid value; ordinary operation failures derive from `Exception`. `KeyboardInterrupt` models an operator pressing Ctrl+C and needs a separate handler because it does not derive from `Exception`. A **stack** keeps the last item added available first: `append()` adds a teardown and `reversed()` visits the saved teardowns from last to first.
 
 ## Exercises
 
-### E1 — Allow only safe station transitions (easy, ~8 min)
+### E1 — Capture an instrument check (easy, ~11 min)
 
-**Goal:** Fill `TRANSITIONS: dict[str, set[str]]` with exactly the seven uppercase states below, then implement `can_move(a: str, b: str) -> bool` using it.
+**Goal:** Run an instrument-check tool with `subprocess.run`. Return `(returncode, stdout, stderr)` as an integer and two strings. Use `capture_output=True`, `text=True`, and the supplied timeout in seconds. Keep output exactly as returned, including trailing newlines. A nonzero exit code is a result, so do not use `check=True` (which would raise an exception for failure).
 
-| Current state | Allowed next states |
+**Signature:** `def run_tool(args: list[str], timeout: float) -> tuple[int, str, str]`
+
+**Example:** `run_tool([sys.executable, "-c", "print('PASS')"], 2.0)` → `(0, "PASS\n", "")`
+
+**Watch out:** `args` is a nonempty argument list; do not modify it or join it into shell text. `timeout` is positive. On `subprocess.TimeoutExpired`, return exactly `(-9, "", "timeout")`, discarding any partial output. `subprocess.run` already kills the child and waits for it before raising that exception; no separate kill call is needed. The `-9` is our station's timeout marker on every platform. Other exceptions, such as `FileNotFoundError` for a missing executable, must propagate to the caller. No input validation beyond these stated cases is needed.
+
+**Reread:** Python `subprocess` docs, “Using the subprocess Module”: `run`, `CompletedProcess`, and `TimeoutExpired`.
+
+### E2 — Explain the tool result (easy, ~6 min)
+
+**Goal:** Convert a recorded code to the exact operator-facing text below. In this exercise a shell-style code greater than 128 encodes a signal as `128 + signal_number`. Python's `Popen` process object uses negative codes for signal termination on POSIX systems (such as Linux); decode those as the positive signal number too. This is a decoding convention, not proof that an arbitrary tool's code came from a signal.
+
+**Signature:** `def exit_code_meaning(code: int) -> str`
+
+| Code | Return text |
 | --- | --- |
-| `IDLE` | `SETUP`, `ERROR`, `ABORTED` |
-| `SETUP` | `RUNNING`, `ERROR`, `ABORTED` |
-| `RUNNING` | `PASS`, `FAIL`, `ERROR`, `ABORTED` |
-| `PASS`, `FAIL`, `ERROR`, `ABORTED` (each has its own dictionary entry) | none |
+| `0` | `"ok"` |
+| `1` | `"fail"` |
+| `2` | `"usage"` (the tool was called incorrectly) |
+| Negative | `"killed by signal N"`, where `N = -code` |
+| Greater than `128` | `"killed by signal N"`, where `N = code - 128` |
+| `3` through `128`, inclusive | `"exit N"`, where `N = code` |
 
-`IDLE` means no sequence has started; `SETUP` prepares instruments; `RUNNING` takes measurements. `PASS` means every measurement passed, `FAIL` means a measurement was outside its required limits, `ERROR` means an operation failed unexpectedly, and `ABORTED` means the operator interrupted it.
+**Example:** `exit_code_meaning(143)` → `"killed by signal 15"`; `exit_code_meaning(-15)` → the same string.
 
-**Example:** `can_move("SETUP", "RUNNING")` → `True`; `can_move("PASS", "ERROR")` → `False`.
+**Watch out:** `128` itself is `"exit 128"`. Use decimal numbers, not signal names. Accept any integer; do not validate whether a decoded signal exists on this machine.
 
-**Watch out:** Unknown names, lowercase names, and moves to the same state return `False`. Do not change the table while answering a query. All four terminal states have empty sets, so even emergency moves are forbidden from them.
+**Reread:** Python `subprocess` docs, `Popen.returncode`; Missing Semester, Command-line Environment → “Job Control” / “Killing a process”.
 
-**Reread:** Wikipedia, opening overview and Concepts and terminology; the DSA book's graphs chapter, directed graphs and storing graph connections.
+### E3 — Record an operator stop request (medium, ~15 min)
 
-### E2 — Record the instrument sequence (easy, ~9 min)
+**Goal:** Implement `GracefulStop`, a context manager with a public Boolean `requested` flag. Construction sets `requested=False`. Each entry resets it to `False`, saves the current SIGINT handler and the SIGTERM handler where available, installs `_handle` for those signals, and returns `self`. `_handle(signum, frame)` sets `requested=True` and returns normally. `signum` is the signal number; `frame` describes the interrupted Python execution and is unused here.
 
-**Goal:** Implement `Sequencer.__init__(self) -> None` and `Sequencer.move(self, to: str) -> None`.
+**Signatures:** `GracefulStop()`, `__enter__(self) -> GracefulStop`, `_handle(self, signum: int, frame: FrameType | None) -> None`, and the supplied `__exit__(...) -> None`.
 
-A new sequencer exposes `state == "IDLE"` and `history == ["IDLE"]`. For a move allowed by E1, update `state`, append the new state once to `history`, and return `None`. For every illegal move, raise `ValueError` and leave both attributes unchanged. No exact exception message is required. Each instance owns its own history list.
+**Example:**
 
-**Example:** After `station = Sequencer(); station.move("SETUP")`, its history is `["IDLE", "SETUP"]`. Asking it to move straight to `PASS` raises `ValueError`.
+```python
+with GracefulStop() as stop:
+    assert stop.requested is False
+    signal.raise_signal(signal.SIGINT)
+    assert stop.requested is True
+```
 
-**Watch out:** A rejected move does not count as a visit. A terminal state cannot be restarted. Reuse `can_move` for the transition rule.
+**Watch out:** `signal.getsignal` reads an existing handler; `signal.signal` replaces it. Restore the exact saved handlers on exit, including when the block raises an exception. Let that exception propagate; `__exit__` returns `None`. Its three arguments describe the exception (or are all `None` on normal exit). Restoring handlers does not reset `requested`; the flag keeps its last value until the next entry. Sequential reuse and nested blocks with *different* `GracefulStop` instances must work. Re-entering the same instance before it exits is outside scope. Calls happen on Python's main thread (the thread where the program started), where installing handlers is allowed. Do not exit, print, or raise in the handler. The tests use `signal.raise_signal`, which delivers a signal to the current process without an external command.
 
-**Reread:** Wikipedia, Concepts and terminology (current state and transitions); Pro Git 6.2, GitHub Flow (review the small change to the transition rule before merging).
+**Reread:** Python `signal` docs, “Execution of Python signal handlers”, “Signals and threads”, `getsignal`, `signal`, and `raise_signal`; Missing Semester, “Job Control”.
 
-### E3 — Run measurements and release instruments (medium, ~17 min)
+### E4 — Restart a failed station tool (medium, ~9 min)
 
-**Goal:** Implement `run_steps(steps: list[Step]) -> tuple[str, list[str]]`. Use a fresh `Sequencer` for each call. Return its final state and history. E4 extends this same function.
+**Goal:** A **supervisor** starts a program and decides whether to restart it. Implement a small version of systemd's `Restart=on-failure` idea; systemd is a Linux service manager that starts and monitors background programs. Call E1's `run_tool(cmd, timeout=5.0)` on each attempt. Collect only the exit codes, in order. Stop immediately on code `0`, or once the retry budget is exhausted.
 
-Follow this order exactly:
+**Signature:** `def supervise(cmd: list[str], restarts: int) -> list[int]`
 
-1. Move to `SETUP`. Call every setup in input order. Save each step's teardown **before** calling its setup, so even a setup that fails partway gets cleanup. Do not register or call later steps after a failure.
-2. Only when every setup succeeds, move to `RUNNING` and call the run callbacks in input order. A run returning `True` passes that step; `False` selects `FAIL` and stops further runs. If all runs return `True`, select `PASS`.
-3. An ordinary `Exception` from setup or run selects `ERROR` and stops further setup/run calls; it does not escape the function. Skip all runs if setup failed. A failed measurement (`False`) is different from an operation exception (`ERROR`).
-4. Always call every registered teardown once in reverse registration order. This includes steps whose setup succeeded but whose run was skipped. E3 assumes teardowns succeed; E4 adds cleanup failure handling.
-5. After cleanup, move once to the selected terminal state and return `(state, history)`. Do not record a terminal state before cleanup.
+**Example:** With `restarts=2`, a tool that fails twice and then succeeds returns `[1, 1, 0]`. A tool that keeps failing returns `[1, 1, 1]`. A tool that succeeds immediately returns `[0]`.
 
-**Example:** Two passing steps call `setup1, setup2, run1, run2, teardown2, teardown1` and return `("PASS", ["IDLE", "SETUP", "RUNNING", "PASS"])`. Empty input follows that same state history and returns `PASS` without callbacks. A setup exception returns `("ERROR", ["IDLE", "SETUP", "ERROR"])`.
+**Watch out:** `restarts` counts additional tries, so zero still permits one attempt. Negative `restarts` raises `ValueError` before launching anything. Any nonzero code, including E1's `-9` timeout marker, consumes an attempt and permits another if budget remains. Use the same `cmd` each time; do not add a delay or change its arguments. Discard the output strings. Other errors from E1 propagate instead of being retried. Finish E1 first; E4 reuses it.
 
-**Watch out:** Setup and teardown return `None`; run returns a Boolean. Inputs obey these types; you do not need to validate callback types or handle `SystemExit` or other exceptions outside `Exception` and `KeyboardInterrupt`. Do not alter the input list. The history contains phase transitions once each, not one entry per step. A cleanup stack and `try`/`except`/`finally` keep the code small.
-
-**Reread:** Wikipedia, opening overview (states and inputs); the DSA book's graphs chapter (following directed edges through the phase graph).
-
-### E4 — Handle operator aborts and cleanup failures (medium, ~11 min)
-
-**Goal:** Extend `run_steps` with these two rules; keep E3 working.
-
-- A `KeyboardInterrupt` from any setup or run selects `ABORTED`, stops further setup/run calls, and still runs all registered teardowns in reverse order.
-- An `Exception` **or** `KeyboardInterrupt` from a teardown selects `ERROR`. Continue attempting the remaining teardowns. Cleanup failure takes priority over `PASS`, `FAIL`, `ERROR`, or `ABORTED` selected earlier. Do not let these exceptions escape.
-
-**Example:** A run interrupted by Ctrl+C, followed by successful cleanup, returns `("ABORTED", ["IDLE", "SETUP", "RUNNING", "ABORTED"])`. If cleanup also fails, return `("ERROR", ["IDLE", "SETUP", "RUNNING", "ERROR"])` instead.
-
-**Watch out:** Hold the selected result until cleanup finishes: moving to `ABORTED` and then to `ERROR` would violate E1. If setup was interrupted, history has no `RUNNING` entry. Teardown interruption is an equipment cleanup failure and therefore ends in `ERROR`.
-
-**Reread:** Wikipedia, Concepts and terminology (terminal states and transitions); Pro Git 6.2, GitHub Flow and Pull Requests (review the abort and cleanup cases as part of the change).
+**Reread:** Python `subprocess` docs, `run` and `CompletedProcess.returncode`; Missing Semester, “Job Control”. For tomorrow's check, revisit your most recently partial or stuck set in the tracker.

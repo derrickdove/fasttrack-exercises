@@ -1,140 +1,124 @@
-# d38 — Docker and Ansible: a test station as files
+# d38 — Operator CLI with argparse
 
-**Time:** about 57 minutes · **Read first:** Docker [Get started](https://docs.docker.com/get-started/) and the [Dockerfile reference](https://docs.docker.com/reference/dockerfile/); Ansible [Getting started](https://docs.ansible.com/ansible/latest/getting_started/index.html), [Intro to playbooks](https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_intro.html), and [Roles](https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_reuse_roles.html) · **You edit:** `starter/Dockerfile`, `starter/playbook.yml`, `starter/inventory.ini`, and `starter/deploycheck.py`
+**Time:** about 45 minutes · **Read first:** [Python Argparse Tutorial](https://docs.python.org/3/howto/argparse.html) (help, errors, and subcommands), [argparse documentation: Sub-commands](https://docs.python.org/3/library/argparse.html#sub-commands), and **Usability for operators: clear errors, safe prompts, no stack traces** — "Reread your CLI's error messages as if you were a technician at 2 a.m. Fix any that would confuse you." · **You edit:** `starter/opcli.py`
 
 ## What you're building
 
-An operator needs the same chassis tester software on every bench computer. You will describe its Python environment and station setup in files, then write a Python check that spots commands which may change the station every time setup runs. These are structural checks: they read files, never build an image, install software, or contact a station. Docker, Ansible, Linux, and a running chassis application are not needed for this set.
+A **test station** is the bench of instruments and software used to check hardware. You will give its technician a **command-line interface (CLI)**: a tool controlled by typed commands. This set uses supplied simulated voltage readings, so no hardware is connected or switched on.
 
 ## How this works
 
-1. E1–E3: replace the placeholder comments in the three deployment files. E4: replace `raise NotImplementedError(...)` in `starter/deploycheck.py`. Don't edit `tests/` or the empty `starter/__init__.py`.
-2. Press **Ctrl+Shift+B → Test: d38** (or run `bash tools/run.sh d38` / `tools\run.ps1 d38`). At first you'll see `Exercises: 0 / 5 passed`. Comment-only deployment files deliberately report `NotImplementedError`; once filled in, they get structural assertions. Rerun after each exercise.
+1. Replace the four `raise NotImplementedError(...)` lines in `starter/opcli.py`. Keep the supplied `STATIONS`, `_OperatorParser`, and `_run_station`; don't edit `tests/`.
+2. Press **Ctrl+Shift+B → Test: d38** (or run `bash tools/run.sh d38` / `tools\run.ps1 d38` from the repository root). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise. E2 uses E1; E3 and E4 can be solved independently.
 3. Report **all pass / partial / stuck** in the tracker.
 
-A **deployment** is putting software and configuration on a computer. A Docker **image** is a packaged filesystem and startup recipe; a **container** is a running instance of that image. A **Dockerfile** lists instructions for constructing an image. A **base image** supplies the starting filesystem; its **tag**, such as `3.12-slim`, selects a version and variant. **Root** is Linux's unrestricted administrator account; the station process should use another account.
+An **argument** is one piece of command-line text; `argv` is a list of those strings without the program name. An **option** is a named argument such as `--station`; a **subcommand** such as `run` selects an action. `argparse` is Python's standard-library argument parser; `parse_args` returns a **Namespace**, an object holding parsed values as attributes. A **flag** such as `--dry-run` becomes a Boolean (True/False) rather than consuming a value.
 
-An Ansible **inventory** lists managed computers, called **hosts**, grouped by purpose. A host **alias** is the inventory name used for a computer. A **playbook** is a YAML document containing **plays**: each play selects hosts and lists **tasks** to run on them. A task calls a **module**, a named Ansible operation such as copying a file. `ansible.builtin.` identifies Ansible's built-in modules. A **role** bundles reusable tasks and related files; roles are reading context today, and you won't create one here.
-
-**YAML** is a text format whose indentation expresses structure. A **mapping** pairs keys with values (a Python `dict` after loading); a **sequence** holds ordered items (a Python `list`). A **boolean** is true or false; write `true` and `false` without quotes in YAML. **PyYAML** is the installed Python library for reading YAML; `yaml.safe_load(text)` loads data without constructing arbitrary Python objects. An empty or comment-only document loads as `None`.
-
-For example, this diagnostic play loads as a list of play dictionaries:
+**stdout** is the normal output stream; **stderr** is the stream for problems (`print(message, file=sys.stderr)`). An **exit code** is an integer telling a caller how the command ended. `SystemExit` is the exception argparse uses after printing help; a **traceback** is Python's internal error listing, which an operator should not have to read.
 
 ```python
-import yaml
-text = "- hosts: diagnostics\n  tasks: []\n"
-plays = yaml.safe_load(text)
-print(plays[0]["hosts"])  # diagnostics
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument("--channel", default="CH1")
+args = parser.parse_args(["--channel", "CH2"])
+print(args.channel)  # CH2
 ```
+
+The supplied station dictionary preserves this order: `bench-A` reads `5.0` volts (V), `bench-B` reads `4.0` V, and `bench-offline` reads `None`, meaning the instrument cannot provide a measurement. A **limit** is an acceptable bound: supplied `_run_station(limits_path, station, dry_run)` reads a **UTF-8** (a text encoding) **JSON** (a format for storing data as text) file such as `{"low": 4.5, "high": 5.5}`. It accepts exactly those two keys with **finite** numbers (neither infinity nor NaN, meaning not-a-number), excluding Booleans, and requires `low <= high`. Bounds are inclusive: equality passes.
+
+The helper returns `PASS` (inside bounds), `FAIL` (outside), or `ERROR` (offline). A **dry run** validates the file but does not measure; the helper returns `READY` even for an offline station. Missing/unreadable files raise `OSError`; invalid encoding, JSON, or limits raise `ValueError`. These helpers are complete; your work is the operator interface.
 
 ## Exercises
 
-### E1 — Package the tester environment (easy, ~10 min)
+### E1 — Give the operator three commands (easy, ~12 min)
 
-**Goal:** Write `starter/Dockerfile` for the chassis tester. A **working directory** is the default folder for later instructions. `COPY` places files in the image, `RUN` executes a build step, `USER` selects the runtime account, and `CMD` or `ENTRYPOINT` sets the startup command.
+**Goal:** Build an argparse parser with these commands.
 
-**File contract** (no Python function):
+**Signature:** `def build_parser() -> argparse.ArgumentParser`
 
-- Use one build stage (one base image and its following instructions): the first instruction is `FROM python:3.12-slim`. Other Python 3.12 slim tags are accepted, including `python:3.12.8-slim-bookworm`.
-- Set an absolute `WORKDIR`, such as `/station`, before copying. Use shell form (space-separated arguments): `COPY . .` or `COPY . /station` to copy the entire project into that directory. Trailing `/` characters on `WORKDIR` or the destination are accepted. The dot means the current project directory.
-- Include `RUN pip install PACKAGE` or `RUN python -m pip install PACKAGE`. Here `PACKAGE` is a package name or path; `.` installs the copied project, so the project `COPY` must come before any installation from `.`. `python3` is also accepted.
-- The effective startup command must invoke `python -m chassis`; optional arguments may follow. Docker uses the last `CMD` and last `ENTRYPOINT`; setting `ENTRYPOINT` clears an earlier `CMD`. An argument-list `ENTRYPOINT` receives `CMD` as arguments, while a shell-form `ENTRYPOINT` ignores `CMD`. Use either a JSON argument list (brackets with quoted strings, like `["tool", "--help"]`) or shell form. `python3` is also accepted. `-m` runs the named Python module.
-- The final `USER` must be a non-root username or nonzero numeric user ID. A `user:group` form is accepted. If you choose a username, include a build step to create that account; account creation isn't executed or checked here.
+Use the supplied `_OperatorParser` instead of `argparse.ArgumentParser`. It changes argparse's `error(message)` behavior to raise `ValueError(message)` without printing or exiting; that lets E2 produce one clear error line. Subparsers created with `add_parser` automatically use this same parser class.
 
-**Example:** `WORKDIR /station` makes `/station` the directory used by following instructions. This is one instruction, not the complete Dockerfile.
+| Command | Required arguments | Optional arguments |
+| --- | --- | --- |
+| `run` | `--limits PATH --station NAME` | `--dry-run` |
+| `list` | none | none |
+| `show` | `--station NAME` | none |
 
-**Watch out:** Use one instruction per line, without continuation lines or inline comments. Full-line `#` comments and blank lines are allowed; instruction names are case insensitive. Use a single stage without build aliases. The hypothetical project supplies the `chassis` module and packaging metadata; this set does not supply a buildable project.
+- Set the program name (`prog`) to `station`. Require a subcommand and store it as `args.command`.
+- Store `limits` and `station` as strings. Accept only station names from `STATIONS` for both `run` and `show`.
+- `args.dry_run` is `False` by default and `True` when the flag appears. Options may appear in either order after the subcommand; paths and names stay as supplied.
+- Keep standard `-h` / `--help` support at the top level and for every subcommand. Top-level help names all three commands; run help explains its three options.
+- Missing required arguments, unknown subcommands/stations/options, and unexpected positional text raise `ValueError` without output. Do not replace standard help: it prints help to stdout and raises `SystemExit(0)`.
 
-**Reread:** Docker Get started, “Docker concepts” (images and containers); Dockerfile reference, `FROM`, `WORKDIR`, `COPY`, `RUN`, `USER`, `CMD`, and `ENTRYPOINT`.
+**Example:** `build_parser().parse_args(["run", "--limits", "rail limits.json", "--station", "bench-A", "--dry-run"])` gives attributes `command="run"`, `limits="rail limits.json"`, `station="bench-A"`, `dry_run=True`.
 
-### E2 — Describe station setup (easy, ~12 min)
+**Watch out:** An option that is required for `run` must not become required for `list`.
 
-**Goal:** Write `starter/playbook.yml`. **Privilege escalation**, selected by `become: true`, lets setup perform administrator operations. A **service unit** is a file describing a background process to Linux's **systemd** service manager.
+**Reread:** Argparse Tutorial, "Introducing Positional Arguments" and "Introducing Optional Arguments"; argparse documentation, "Sub-commands" (`add_subparsers`, `dest`, `required`).
 
-**File contract** (no Python function): write a YAML list with exactly one play. It must have `hosts: test_stations`, `become: true`, and a nonempty `tasks` list. Every task has a nonempty string `name` and exactly one `ansible.builtin.*` module. Use separate tasks for the three operations:
+### E2 — Return useful outcomes, not tracebacks (medium, ~17 min)
 
-- Install the unit using `ansible.builtin.copy` or `ansible.builtin.template`. Its parameter mapping needs a nonempty `src` (source filename) and `dest: /etc/systemd/system/chassis-telemetry.service`. A template is a source file whose variables Ansible fills in.
-- Install the tester package using `ansible.builtin.pip` with a nonempty `name`, or `ansible.builtin.command` with a nonempty command string (or mapping with `cmd`). Prefer `pip` for this exercise. The check only verifies this structure, not what a command installs.
-- Manage the service using `ansible.builtin.systemd` or `ansible.builtin.systemd_service`. Set `name` to `chassis-telemetry` or `chassis-telemetry.service`, `enabled: true`, `state: started`, and `daemon_reload: true`. Enabled means start at boot; started means running now; daemon reload tells systemd to reread unit definitions.
+**Goal:** Dispatch the parsed command and translate outcomes into exit codes. **Dispatch** means choosing the code for the requested subcommand.
 
-**Example:** a task name such as `Install meter driver` describes an operation to the operator; the module key underneath selects the operation.
+**Signature:** `def main(argv: list[str] | None = None) -> int`
 
-**Watch out:** Use spaces for YAML indentation. Quoted `"true"` is a string and fails the boolean checks. Source files and packages represent a future deployment; you don't need to create them. E2 checks structure separately from E4, so a command installation task can pass E2 even when E4 would flag it.
+Call `build_parser().parse_args(argv)`. Passing `None` uses the real command-line arguments. Return an integer; do not exit from inside `main`.
 
-**Reread:** Ansible Getting started, “Creating a playbook”; Intro to playbooks, “Playbook syntax” and “Executing playbooks”; Roles, “Role directory structure” (context for grouping these files later).
+| Request / outcome | Exact output (each ends in a newline) | Return |
+| --- | --- | --- |
+| `list` | One name per line on stdout, in `STATIONS` order | `0` |
+| `show --station NAME` | `NAME: VALUE V`, or `NAME: offline` if its reading is `None`, on stdout | `0` |
+| `run` → helper returns `PASS` | `NAME: PASS` on stdout | `0` |
+| `run` → helper returns `FAIL` | `NAME: FAIL` on stdout | `1` |
+| `run --dry-run` → `READY` | `NAME: READY` on stdout | `0` |
+| `run` → helper returns `ERROR` | `error: NAME: measurement unavailable` on stderr | `2` |
+| Bad usage, or helper raises `ValueError` / `OSError` | `error: MESSAGE` on stderr | `3` |
+| Top-level or subcommand help | argparse's help on stdout | `0` |
 
-### E3 — Group the bench computers (easy, ~5 min)
+For `run`, call `_run_station(args.limits, args.station, args.dry_run)` exactly once. Use the supplied dictionary directly for `list` and `show`; neither reads a file. `show` uses the ordinary string form of the reading (for example `bench-A: 5.0 V`). Neither `main` nor its run helper asks for confirmation; E4 practices that separately.
 
-**Goal:** Write `starter/inventory.ini`, using Ansible's INI inventory format (text divided into named sections): `[group]` headers followed by one host alias per line, optionally followed by variables like `ansible_host=192.0.2.20`. `ansible_host` gives an address when the alias isn't a resolvable network name.
+On errors, stdout must be empty. On success, FAIL, dry run, or help, stderr must be empty. For usage/input errors, MESSAGE is the exception text with whitespace collapsed to single spaces and leading/trailing whitespace removed (for example, `" ".join(str(error).split())`). This keeps every error to exactly one `error:` line, even if the original exception contains newlines. Keep the useful diagnostic, including any filename in the exception. Do not print usage or a traceback with an error. Catch help's `SystemExit(0)` and return `0` after argparse prints its help.
 
-**File contract** (no Python function): define `bench` with at least one host. Define `test_stations` so it includes every bench host. Either repeat the bench host aliases in `[test_stations]`, or define `[test_stations:children]` with `bench` on the next line. A **child group** contributes all its hosts to its parent. No other child-group nesting is needed. Extra direct hosts are allowed.
+**Example:** With `{"low": 4.5, "high": 5.5}` in `rail.json`, `main(["run", "--limits", "rail.json", "--station", "bench-B"])` prints `bench-B: FAIL` and returns `1`.
 
-**Example:** `[diagnostics]` followed by `diag01 ansible_host=192.0.2.20` defines a diagnostics group with one host. Use your required group names for this station set.
+**Watch out:** Code `2` means the test system could not measure; code `3` means fix the command or input file. This follows the capstone's block 5 code meanings. `_OperatorParser` supplies the needed hook because argparse normally exits with code 2 on bad usage.
 
-**Watch out:** Do not write the literal header `[test_stations:children]` followed by a host: it lists group names. Blank lines and full-line `#` or `;` comments are allowed. The tests read aliases and group membership; addresses never get contacted.
+**Reread:** Argparse Tutorial, the missing-argument/error examples and `--help` examples; argparse documentation, "Sub-commands"; **Usability for operators**, reread every error as a technician at 2 a.m.
 
-**Reread:** Ansible Getting started, “Building an inventory,” including host groups and parent/child groups.
+### E3 — Align station results (easy, ~9 min)
 
-### E4 — Find commands needing review (medium, ~18 min)
+**Goal:** Format a terminal table, a text grid whose column starts line up. This helper returns text; it does not print and is independent of E2's fixed outputs.
 
-**Goal:** Implement `idempotent_tasks` in `starter/deploycheck.py`. Despite the supplied function name, its result lists tasks **missing** an idempotence guard.
+**Signature:** `def format_table(rows: list[dict[str, object]], columns: list[str]) -> str`
 
-**Idempotence** means repeating an operation has the same effect as doing it once. Modules such as `copy` usually compare the current and desired state. Raw commands may repeat a change on every run, so station setup needs extra care:
+The `columns` list gives dictionary keys, their display order, and the header labels. For each cell use `str(row.get(column, ""))`: a missing key becomes empty text; an explicit `None` becomes `"None"`. Ignore keys absent from `columns`. Preserve row order and do not change either input.
 
-- `creates: PATH` skips a command when that path already exists.
-- `removes: PATH` skips a command when that path is absent.
-- `changed_when` controls whether Ansible reports a task as changed; `changed_when: false` is useful for a read-only instrument query. This controls reporting and does not itself prevent side effects.
+Each column's width is the longest string length among its header and cells. **Left-align** means add spaces to the right of shorter cells until they reach that width; `str.ljust(width)` does this. Join padded columns with two spaces, strip trailing spaces from each completed line, then join lines with `"\n"`. Include the header first, no separator line, and do not append an extra newline. A fully empty final row is an empty final line, so that special case naturally ends with `"\n"`. Empty rows still produce the header; empty columns produce `""` regardless of rows. Inputs contain printable ASCII (ordinary terminal characters) with no embedded whitespace in headers or cell strings; string length is sufficient here.
 
-**Signature:** `def idempotent_tasks(playbook_path: str | Path) -> list[str]`
+**Example:** `format_table([{"station": "A", "state": "PASS"}, {"station": "long-bench", "state": "FAIL"}], ["station", "state"])` returns:
 
-**Exact contract:**
-
-1. Read the path as UTF-8 (a standard text encoding) and load it with `yaml.safe_load`. An empty/comment-only document, or `[]`, returns `[]`.
-2. Otherwise the input is a list of play mappings. Inspect each play's direct `tasks` list, in document order. A missing `tasks` key means an empty list. Tasks are mappings with string `name` values. Each task has at most one action module.
-3. Consider only `ansible.builtin.command` and `ansible.builtin.shell`. Their value is either a command string or a parameter mapping with `cmd`. Ignore other modules. Only these fully qualified names are in scope.
-4. A considered task is guarded if **any** of these keys is present: `creates` or `removes` in the module's parameter mapping, `creates` or `removes` in the task's `args` mapping, or `changed_when` at task level. Check key presence, not truthiness: `changed_when: false` still counts. Missing `args` means an empty mapping.
-5. Return unguarded task names in play/task order. Preserve duplicate names. Don't inherit guards from another task or the play. `register` stores a result, `when` decides whether a task runs, and `chdir` selects a directory; none counts as a guard here.
-6. Let file-reading errors (`OSError`, including `FileNotFoundError`) and invalid YAML errors (`yaml.YAMLError`) propagate to the caller. You don't need to validate other document shapes or evaluate commands, paths, or conditions.
-
-**Example:** a task named `Read serial number` using `ansible.builtin.command: station-id` with no guard contributes `"Read serial number"`. Add task-level `changed_when: false` and it contributes nothing.
-
-**Watch out:** This is a small review rule, not a proof that a deployment is idempotent. It accepts any present `changed_when` value, even `true`. Inputs use direct tasks only: no roles, nested task blocks, handlers (tasks triggered by changes), task includes, short module aliases, or inline `creates=...`/`removes=...` inside command strings. All guarded paths use explicit YAML keys. Tests use temporary playbooks, so E4 can pass before E2 is finished.
-
-**Reread:** Ansible Intro to playbooks, “Desired state and idempotency”; Getting started, “Creating a playbook.”
-
-### E5 — Check an Ansible role layout (easy–medium, ~12 min)
-
-**Goal:** Implement `role_problems` in `starter/deploycheck.py` by replacing its `raise NotImplementedError(...)` line. The team groups station setup into reusable roles. Check the supplied folders in `data/roles/` before a role reaches a bench computer. You only read files; you never run Ansible.
-
-A role's `tasks/main.yml` is its starting task list. `defaults/main.yml` holds default variable values (settings that callers may replace). `handlers/main.yml` lists named handlers, such as a service restart. A task's **notification**, written as `notify`, names a handler to trigger when that task changes something. This check only matches the names in the files; it does not predict whether a task will change anything.
-
-**Signature:** `def role_problems(role_dir: Path) -> list[str]`
-
-**Exact contract:**
-
-1. `role_dir` is a `pathlib.Path` pointing to an existing role folder. Report `"tasks/main.yml: missing"` when that file is absent, but keep checking the other files. `defaults/main.yml` and `handlers/main.yml` are optional; their absence alone is fine.
-2. Read each inspected file as UTF-8 and load it with `yaml.safe_load`. If `defaults/main.yml` is present but does not load as a mapping (`dict`), report `"defaults/main.yml: expected a mapping"`. An empty mapping (`{}`) is valid; an empty/comment-only file loads as `None` and is invalid.
-3. Inspect every file directly inside `tasks/` whose extension is `.yml`, including `main.yml`. Ignore nested folders, other extensions, and all other role files. Each task file must load as a list; otherwise report `"tasks/<file>.yml: expected a list"` and skip its tasks. An empty list (`[]`) is valid; an empty/comment-only file is invalid.
-4. Items in each task list are mappings. Count tasks starting at 1 separately in each file. A task needs a nonempty string `name`; a missing key, `null`, a non-string, or a string containing only whitespace (spaces, tabs, or newlines) counts as no name. Report `"tasks/<file>.yml: task <number> has no name"`. Continue checking that task's notifications too.
-5. When present, `handlers/main.yml` is a list of mappings with unique, nonempty string `name` values; you may assume that shape. `[]` is allowed. A task's `notify` is either one handler-name string or a list of such strings; a missing `notify` means no notifications. You may assume those shapes too. Match handler names exactly, including case and spaces, across all inspected task files.
-6. For each task, report each distinct missing handler once as `"tasks/<file>.yml: task <number> notifies unknown handler '<name>'"`. If two tasks notify the same missing handler, report it once for each task. For each defined handler that no inspected task notifies, report `"handlers/main.yml: handler '<name>' is never notified"`. Duplicate notifications within one task cause no extra messages. A notification in a task without a name still counts.
-7. Return all messages in ascending string order, using `sorted`. Use `/` in message paths on Windows and Linux, never include `role_dir` itself, and replace the angle-bracket placeholders above with the actual filename, number, or handler name. No problems means `[]`.
-8. Let file-reading errors (`OSError`) and invalid YAML errors (`yaml.YAMLError`) propagate. You do not need to validate other input shapes. There are no nested task blocks, task includes (instructions to load another task file), or handler aliases (`listen`, an alternative notification name). Do not follow references or evaluate modules.
-
-**Example:** with your working directory set to `sets/d38/`, using the supplied role folders:
-
-```python
-from pathlib import Path
-from starter.deploycheck import role_problems
-roles = Path("data/roles")
-role_problems(roles / "good")
-# []
-role_problems(roles / "notify_mismatch")
-# ["handlers/main.yml: handler 'Restart station' is never notified",
-#  'tasks/main.yml: task 1 has no name',
-#  "tasks/main.yml: task 2 notifies unknown handler 'Reload driver'"]
+```text
+station     state
+A           PASS
+long-bench  FAIL
 ```
 
-**Watch out:** Task and handler names serve different purposes: a task's `notify` must match a handler's `name`, not another task's name. Use `isinstance(value, dict)` or `isinstance(value, list)` to check the loaded document shape before iterating. Missing `tasks/main.yml` is a problem even if other task files exist. Use fresh collections on each call.
+**Watch out:** Measure widths using the header too. Remove trailing spaces when the last cell is missing; do not reorder or modify dictionaries.
 
-**Reread:** Ansible Roles, “Role directory structure”; Intro to playbooks, “Handlers: running operations on change” (linked from that guide).
+**Reread:** **Usability for operators**, check whether a technician can scan station names and results without guessing which value belongs to which column.
+
+### E4 — Ask safely before an operator action (easy, ~7 min)
+
+**Goal:** Ask once for permission before a future station action such as enabling a **power supply's** output (an instrument that provides controlled voltage and current).
+
+**Signature:** `def confirm(prompt: str, input_fn: Callable[[str], str] = input) -> bool`
+
+`Callable[[str], str]` means a function taking one string and returning one string. `input_fn` is **dependency injection**: passing in a function lets tests simulate a person without waiting at the keyboard. With no override, Python's `input` is used.
+
+Call `input_fn` exactly once with `prompt + " [y/N] "`. The capital `N` advertises that doing nothing means no. Strip leading/trailing whitespace from its reply and lowercase it. Return `True` only for `"y"` or `"yes"`; return `False` for every other reply, including an empty reply. If the function raises `EOFError` (**end of file**, meaning input was closed), return `False`. Do not print separately, retry, or perform an action; the supplied input function owns displaying the prompt.
+
+**Example:** `confirm("Enable output?", lambda text: " YES ")` returns `True`. With an empty reply it returns `False`.
+
+**Watch out:** Never treat a nonempty reply such as `"sure"` as consent.
+
+**Reread:** **Usability for operators**, "safe prompts": make the default safe and make the accepted confirmation explicit.

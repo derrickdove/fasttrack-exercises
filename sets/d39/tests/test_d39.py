@@ -1,331 +1,224 @@
-from copy import deepcopy
-from pathlib import Path
-import time
-import tomllib
+"""Behavior checks for station transitions, callbacks, and cleanup."""
 
 import pytest
 
-from starter.topology import (
-    UUT_INSTRUMENTS,
-    conflicts,
-    count_fault_clusters,
-    instruments_for,
-    largest_cluster,
-    load,
-    setup_order,
-    validate,
-)
+from starter.sequencer import TRANSITIONS, Sequencer, Step, can_move, run_steps
 
 
-DATA = Path(__file__).resolve().parents[1] / "data" / "station.toml"
+EXPECTED = {
+    "IDLE": {"SETUP", "ERROR", "ABORTED"},
+    "SETUP": {"RUNNING", "ERROR", "ABORTED"},
+    "RUNNING": {"PASS", "FAIL", "ERROR", "ABORTED"},
+    "PASS": set(),
+    "FAIL": set(),
+    "ERROR": set(),
+    "ABORTED": set(),
+}
 
 
 @pytest.fixture
-def cfg():
-    # Parse directly so E2 is independent of the learner's E1 implementation.
-    with DATA.open("rb") as stream:
-        return tomllib.load(stream)
+def events() -> list[str]:
+    return []
 
 
-def test_e1_load_example(cfg):
-    assert load(DATA) == cfg, "load must return the TOML dictionary unchanged"
-    assert load(str(DATA)) == cfg, "string paths and Path objects must both work"
+def station_step(
+    events: list[str],
+    name: str,
+    *,
+    passed: bool = True,
+    failure_phase: str | None = None,
+    error: type[BaseException] = RuntimeError,
+) -> Step:
+    """Create fake instrument callbacks with an optional injected failure."""
+    def record(phase: str) -> None:
+        events.append(f"{name}.{phase}")
+        if phase == failure_phase:
+            raise error(f"{name}: {phase} failed")
+
+    def setup() -> None:
+        record("setup")
+
+    def run() -> bool:
+        record("run")
+        return passed
+
+    def teardown() -> None:
+        record("teardown")
+
+    return setup, run, teardown
 
 
-def test_e1_load_empty_and_errors(tmp_path):
-    empty = tmp_path / "empty station.toml"
-    empty.write_text("", encoding="utf-8")
-    assert load(empty) == {}, "empty TOML is an empty dictionary"
-    with pytest.raises(FileNotFoundError):
-        load(tmp_path / "missing.toml")
-    broken = tmp_path / "broken.toml"
-    broken.write_text("instruments = [", encoding="utf-8")
-    with pytest.raises(tomllib.TOMLDecodeError):
-        load(broken)
+def test_e1_transition_table() -> None:
+    # Exercise the stub first, so unfinished E1 reports NotImplementedError.
+    assert can_move("IDLE", "SETUP"), "a station must be able to begin setup"
+    assert TRANSITIONS == EXPECTED, "supply exactly the seven states and their allowed destinations"
+    assert all(isinstance(targets, set) for targets in TRANSITIONS.values())
 
 
-def test_e1_valid_and_empty(cfg):
-    original = deepcopy(cfg)
-    assert validate(cfg) == [], "separate PSU channels and shared meters are valid"
-    assert cfg == original, "validation must not modify the configuration"
-    assert validate({}) == []
-    assert validate({"uuts": [{"id": "unused", "instruments": []}]}) == []
-    # Id namespaces are separate, and repeated references are harmless.
-    cfg["uuts"][0]["id"] = "psu-a"
-    cfg["uuts"][0]["instruments"].append("psu-a")
-    assert validate(cfg) == []
+def test_e1_every_known_transition() -> None:
+    for source, destinations in EXPECTED.items():
+        for target in EXPECTED:
+            expected = target in destinations
+            assert can_move(source, target) is expected, f"wrong permission for {source} -> {target}"
+    assert TRANSITIONS == EXPECTED, "checking moves must not alter the transition table"
 
 
-def test_e1_duplicate_ids_and_resources(cfg):
-    cfg["instruments"].extend([deepcopy(cfg["instruments"][0])] * 2)
-    cfg["uuts"].extend([deepcopy(cfg["uuts"][0])] * 2)
-    expected = [
-        "duplicate instrument id: psu-a",
-        "duplicate resource: supply-01/channel/1",
-        "duplicate uut id: uut-a",
-    ]
-    assert validate(cfg) == expected, "duplicates must produce one message per value"
-    cfg["instruments"] = [
-        {"id": "one", "kind": "scope", "resource": "same-port"},
-        {"id": "two", "kind": "dmm", "resource": "same-port"},
-    ]
-    cfg["uuts"] = []
-    assert validate(cfg) == ["duplicate resource: same-port"]
-
-
-def test_e1_unknown_references_and_shared_psu(cfg):
-    cfg["uuts"][1]["instruments"].extend(["psu-a", "missing", "missing"])
-    cfg["uuts"][2]["instruments"].append("psu-a")
-    cfg["uuts"][0]["instruments"].append("DMM")
-    expected = [
-        "shared psu channel: psu-a -> uut-a, uut-b, uut-c",
-        "unknown instrument: uut-a -> DMM",
-        "unknown instrument: uut-b -> missing",
-    ]
-    original = deepcopy(cfg)
-    assert validate(cfg) == expected, "report every problem in alphabetical order"
-    assert cfg == original
-    assert validate({"uuts": [{"id": "empty-rack", "instruments": ["x"]}]}) == [
-        "unknown instrument: empty-rack -> x"
-    ]
-
-
-def test_e1_first_instrument_kind_and_all_uut_records(cfg):
-    cfg["instruments"].append(
-        {"id": "psu-a", "kind": "dmm", "resource": "meter-01"}
-    )
-    cfg["uuts"].append({"id": "uut-b", "instruments": ["psu-a", "gone"]})
-    expected = [
-        "duplicate instrument id: psu-a",
-        "duplicate resource: meter-01",
-        "duplicate uut id: uut-b",
-        "shared psu channel: psu-a -> uut-a, uut-b",
-        "unknown instrument: uut-b -> gone",
-    ]
-    assert validate(cfg) == expected, "use the first kind, but inspect every record"
-
-
-@pytest.mark.parametrize("uut, expected", [
-    ("uut-a", ["dmm", "psu-a"]),
-    ("uut-b", ["dmm", "psu-b"]),
-    ("uut-c", ["scope"]),
-    ("uut-d", ["dmm", "scope"]),
+@pytest.mark.parametrize("source,target", [
+    ("UNKNOWN", "ERROR"), ("IDLE", "unknown"), ("idle", "SETUP"),
+    ("", "ABORTED"), ("RUNNING", "pass"), ("ERROR", "IDLE"),
 ])
-def test_e2_instrument_ids(cfg, uut, expected):
-    assert instruments_for(cfg, uut) == expected
+def test_e1_unknown_and_terminal_moves(source: str, target: str) -> None:
+    assert can_move(source, target) is False, f"{source!r} -> {target!r} must be rejected"
 
 
-def test_e2_empty_and_repeated_references(cfg):
-    cfg["uuts"].append({"id": "spare", "instruments": []})
-    cfg["uuts"][0]["instruments"] = ["psu-a", "dmm", "dmm"]
-    assert instruments_for(cfg, "spare") == []
-    assert instruments_for(cfg, "uut-a") == ["dmm", "psu-a"]
+@pytest.mark.parametrize("terminal", ["PASS", "FAIL", "ERROR", "ABORTED"])
+def test_e2_records_legal_path(terminal: str) -> None:
+    station = Sequencer()
+    assert station.state == "IDLE" and station.history == ["IDLE"]
+    for target in ("SETUP", "RUNNING", terminal):
+        assert station.move(target) is None, "move changes the station and returns None"
+    assert station.state == terminal
+    assert station.history == ["IDLE", "SETUP", "RUNNING", terminal]
 
 
-@pytest.mark.parametrize("empty", [False, True])
-def test_e2_missing_uut(cfg, empty):
-    with pytest.raises(KeyError) as caught:
-        instruments_for({} if empty else cfg, "unknown-rack")
-    assert caught.value.args == ("unknown-rack",)
-
-
-def test_e2_returns_fresh_list_without_mutation(cfg):
-    original = deepcopy(cfg)
-    result = instruments_for(cfg, "uut-a")
-    result.append("operator-note")
-    assert cfg == original, "the returned list must not alias configuration data"
-    assert instruments_for(cfg, "uut-a") == ["dmm", "psu-a"]
-
-
-@pytest.mark.parametrize("deps, expected", [
-    ({}, []),
-    ({"scope": ["trigger"], "dmm": []}, ["dmm", "trigger", "scope"]),
-    ({"scope": [], "dmm": [], "psu": []}, ["dmm", "psu", "scope"]),
-    ({"scope": ["psu", "trigger"], "trigger": ["psu"], "psu": []},
-     ["psu", "trigger", "scope"]),
-])
-def test_e3_station_setup_order(deps, expected):
-    assert setup_order(deps) == expected, "prerequisites must be ready first"
-
-
-def test_e3_newly_ready_instrument_wins_alphabetical_tie():
-    deps = {"z-scope": [], "a-dmm": ["b-psu"], "b-psu": []}
-    assert setup_order(deps) == ["b-psu", "a-dmm", "z-scope"], (
-        "choose from all ready instruments after each removal"
-    )
-
-
-def test_e3_value_only_ids_repeated_edges_and_no_mutation():
-    deps = {"scope": ["trigger", "trigger"], "dmm": ["psu"]}
-    original = deepcopy(deps)
-    assert setup_order(deps) == ["psu", "dmm", "trigger", "scope"]
-    assert deps == original, "do not remove edges from the caller's dictionary"
-
-
-@pytest.mark.parametrize("deps", [
-    {"psu": ["psu"]},
-    {"psu": ["relay"], "relay": ["psu"]},
-    {"a-blocked": ["psu"], "psu": ["relay"], "relay": ["psu"], "dmm": []},
-    {"scope": ["trigger"], "trigger": ["relay"], "relay": ["scope"],
-     "a-blocked": ["scope"], "psu": []},
-    {"psu": ["relay"], "relay": ["psu"], "scope": ["trigger"],
-     "trigger": ["scope"]},
-])
-def test_e3_cycle_names_a_real_closed_path(deps):
-    original = deepcopy(deps)
-    with pytest.raises(ValueError) as caught:
-        setup_order(deps)
-    message = str(caught.value)
-    assert message.startswith("cycle: "), "explain that setup contains a cycle"
-    path = message.removeprefix("cycle: ").split(" -> ")
-    assert len(path) >= 2 and path[0] == path[-1], "name a closed path"
-    assert len(set(path[:-1])) == len(path) - 1, "omit any tail before the cycle"
-    for node, prerequisite in zip(path, path[1:]):
-        assert prerequisite in deps.get(node, []), (
-            f"{node} does not depend on {prerequisite}; name actual cycle edges"
-        )
-    with pytest.raises(ValueError) as again:
-        setup_order(deps)
-    assert str(again.value) == message, "cycle reporting must be deterministic"
-    assert deps == original
-
-
-@pytest.mark.parametrize("schedule, expected", [
-    ([], []),
-    ([("uut-a", 0, 4)], []),
-    ([("uut-b", 2, 6), ("uut-a", 0, 3), ("uut-c", 1, 9)],
-     [("uut-a", "uut-b")]),
-    ([("uut-a", 0, 4), ("uut-b", 4, 9)], []),
-    ([("uut-a", -4, 0), ("uut-b", -3, -1)], [("uut-a", "uut-b")]),
-    ([("uut-a", 0, 9), ("uut-c", 0, 9)], []),
-    ([("uut-c", 1, 5), ("uut-d", 1, 5)], [("uut-c", "uut-d")]),
-])
-def test_e4_shared_instruments_and_half_open_windows(schedule, expected):
-    assert conflicts(schedule) == expected, (
-        "only overlapping windows on a shared instrument conflict"
-    )
-
-
-def test_e4_keep_longest_window_and_ignore_same_uut():
-    schedule = [("uut-a", 0, 100), ("uut-a", 1, 2), ("uut-b", 50, 60)]
-    assert conflicts(schedule) == [("uut-a", "uut-b")], (
-        "a shorter later window must not hide an outstanding long window"
-    )
-    assert conflicts([("uut-a", 0, 10), ("uut-a", 1, 9)]) == []
-
-
-def test_e4_unique_sorted_pairs_and_no_mutation():
-    schedule = [("uut-d", 1, 9), ("uut-c", 1, 9), ("uut-b", 1, 9),
-                ("uut-a", 1, 9), ("uut-d", 2, 8), ("uut-b", 3, 7)]
-    original = list(schedule)
-    wiring = deepcopy(UUT_INSTRUMENTS)
-    expected = [("uut-a", "uut-b"), ("uut-a", "uut-d"),
-                ("uut-b", "uut-d"), ("uut-c", "uut-d")]
-    assert conflicts(schedule) == expected, "sort pairs and remove repeated reports"
-    assert schedule == original, "sort a copy rather than the caller's schedule"
-    assert UUT_INSTRUMENTS == wiring, "the supplied station wiring must stay intact"
-
-
-@pytest.mark.parametrize("schedule, error, args", [
-    ([("missing", 0, 1)], KeyError, ("missing",)),
-    ([("uut-a", 3, 3)], ValueError, ("invalid window: uut-a",)),
-    ([("uut-b", 4, 1)], ValueError, ("invalid window: uut-b",)),
-    ([("missing", 4, 1)], KeyError, ("missing",)),
-    ([("uut-b", 5, 5), ("missing", 0, 1)], ValueError,
-     ("invalid window: uut-b",)),
-    ([("missing", 5, 6), ("uut-a", 0, 0)], KeyError, ("missing",)),
-])
-def test_e4_errors_follow_input_order(schedule, error, args):
-    with pytest.raises(error) as caught:
-        conflicts(schedule)
-    assert caught.value.args == args, "identify the first invalid input record"
-
-
-def test_e4_sweep_matches_small_pairwise_check():
-    # A deliberately small, independent all-pairs check verifies mixed windows.
-    uuts = ["uut-a", "uut-b", "uut-c", "uut-d"]
-    schedule = [(uuts[i % 4], (i * 7) % 29 - 14,
-                 (i * 7) % 29 - 14 + i % 9 + 1) for i in range(40)]
-    expected = set()
-    for index, (uut, start, end) in enumerate(schedule):
-        for other, other_start, other_end in schedule[index + 1:]:
-            shared = set(UUT_INSTRUMENTS[uut]) & set(UUT_INSTRUMENTS[other])
-            if uut != other and shared and max(start, other_start) < min(end, other_end):
-                expected.add((min(uut, other), max(uut, other)))
-    assert conflicts(schedule) == sorted(expected)
-
-
-def test_e4_fast_enough():
-    # Many simultaneously active windows make a window-by-window sweep quadratic.
-    uuts = ["uut-a", "uut-b", "uut-c", "uut-d"]
-    schedule = [(uuts[i % 4], i, 100_000) for i in reversed(range(80_000))]
-    started = time.perf_counter()
-    got = conflicts(schedule)
-    elapsed = time.perf_counter() - started
-    assert got == [("uut-a", "uut-b"), ("uut-a", "uut-d"),
-                   ("uut-b", "uut-d"), ("uut-c", "uut-d")]
-    assert elapsed <= 2.0, f"80,000 windows took {elapsed:.3f}s; use sort + sweep"
-
-
-@pytest.mark.parametrize("grid, count, largest", [
-    (["XX..X", ".X..X", "...X."], 3, 3),
-    (["XXX", "X.X", "XXX"], 1, 8),
-    (["X.X", "XXX"], 1, 5),
-    (["XX.XXX.X"], 3, 3),
-    (["X", "X", ".", "X"], 2, 2),
-    (["X"], 1, 1),
-])
-def test_e5_examples(grid, count, largest):
-    assert count_fault_clusters(grid) == count, f"wrong cluster count for {grid}"
-    assert largest_cluster(grid) == largest, f"wrong largest cluster for {grid}"
-
-
-@pytest.mark.parametrize("grid, count", [
-    (["X.", ".X"], 2),
-    (["X.X", ".X.", "X.X"], 5),
-])
-def test_e5_diagonal_only_neighbours(grid, count):
-    assert count_fault_clusters(grid) == count, "diagonal pins must stay separate"
-    assert largest_cluster(grid) == 1, "diagonal contact cannot enlarge a cluster"
-
-
-@pytest.mark.parametrize("grid", [[], [""], ["", ""], ["."], ["....", "...."]])
-def test_e5_empty_and_passed(grid):
-    assert count_fault_clusters(grid) == 0, "a grid without failed pins has no clusters"
-    assert largest_cluster(grid) == 0, "a grid without failed pins has largest size zero"
-
-
-@pytest.mark.parametrize("function", [count_fault_clusters, largest_cluster])
-@pytest.mark.parametrize("grid", [
-    ["XX", "X"], ["X", ""], ["", "X"],
-    ["x"], [" "], ["X\n"], ["X?"], ["..", ".?"], ["X", "\u00d7"],
-])
-def test_e5_invalid_grids(function, grid):
+@pytest.mark.parametrize("target", ["RUNNING", "PASS", "IDLE", "idle", "UNKNOWN", ""])
+def test_e2_rejected_move_preserves_state(target: str) -> None:
+    station = Sequencer()
     with pytest.raises(ValueError):
-        function(grid)
+        station.move(target)
+    assert station.state == "IDLE", "a rejected move must leave state unchanged"
+    assert station.history == ["IDLE"], "a rejected move must not enter history"
+    station.move("SETUP")
+    with pytest.raises(ValueError):
+        station.move("PASS")
+    assert station.state == "SETUP" and station.history == ["IDLE", "SETUP"]
 
 
-def test_e5_repeatable_without_mutation():
-    grid = ["XX..X", ".X..X", "...X."]
-    original = list(grid)
-    for _ in range(2):
-        assert count_fault_clusters(grid) == 3
-        assert grid == original, "count_fault_clusters must leave the grid unchanged"
-        assert largest_cluster(grid) == 3
-        assert grid == original, "largest_cluster must leave the grid unchanged"
-    assert largest_cluster(["."]) == 0, "visited pins must not leak between calls"
-    assert count_fault_clusters(["X"]) == 1, "each grid needs a fresh search"
+@pytest.mark.parametrize("terminal", ["ERROR", "ABORTED"])
+def test_e2_emergency_moves_and_terminal_lock(terminal: str) -> None:
+    station = Sequencer()
+    station.move(terminal)
+    for target in EXPECTED:
+        with pytest.raises(ValueError):
+            station.move(target)
+    assert station.state == terminal
+    assert station.history == ["IDLE", terminal], "terminal states cannot be restarted or changed"
 
 
-@pytest.mark.parametrize("function, expected", [
-    (count_fault_clusters, 1), (largest_cluster, 1_000_000),
-])
-def test_e5_fast_enough(function, expected):
-    grid = ["X" * 1000 for _ in range(1000)]
-    started = time.perf_counter()
-    got = function(grid)
-    elapsed = time.perf_counter() - started
-    assert got == expected, "all one million failed pins belong to one cluster"
-    assert elapsed < 3.0, (
-        f"{function.__name__} took {elapsed:.3f}s; visit each pin once with a queue"
-    )
+def test_e2_instances_have_separate_history() -> None:
+    first, second = Sequencer(), Sequencer()
+    first.move("SETUP")
+    assert second.state == "IDLE" and second.history == ["IDLE"]
+    assert first.history is not second.history, "each station owns its history"
+
+
+def test_e3_all_setups_then_runs_then_reverse_cleanup(events: list[str]) -> None:
+    steps = [station_step(events, name) for name in ("supply", "meter", "load")]
+    result = run_steps(steps)
+    assert result == ("PASS", ["IDLE", "SETUP", "RUNNING", "PASS"])
+    assert events == [
+        "supply.setup", "meter.setup", "load.setup",
+        "supply.run", "meter.run", "load.run",
+        "load.teardown", "meter.teardown", "supply.teardown",
+    ], f"wrong station operation order: {events}"
+
+
+def test_e3_empty_station_sequence() -> None:
+    assert run_steps([]) == ("PASS", ["IDLE", "SETUP", "RUNNING", "PASS"])
+
+
+def test_e3_failed_measurement_stops_runs_but_cleans_all(events: list[str]) -> None:
+    steps = [station_step(events, "supply"), station_step(events, "meter", passed=False),
+             station_step(events, "load")]
+    assert run_steps(steps) == ("FAIL", ["IDLE", "SETUP", "RUNNING", "FAIL"])
+    assert events == [
+        "supply.setup", "meter.setup", "load.setup", "supply.run", "meter.run",
+        "load.teardown", "meter.teardown", "supply.teardown",
+    ], "a failed measurement skips later runs, but not their registered cleanup"
+
+
+@pytest.mark.parametrize("failed_index", [0, 1, 2])
+def test_e3_setup_error_cleans_even_partial_setup(events: list[str], failed_index: int) -> None:
+    steps = [station_step(events, str(index), failure_phase="setup" if index == failed_index else None)
+             for index in range(3)]
+    assert run_steps(steps) == ("ERROR", ["IDLE", "SETUP", "ERROR"])
+    expected = [f"{index}.setup" for index in range(failed_index + 1)]
+    expected += [f"{index}.teardown" for index in reversed(range(failed_index + 1))]
+    assert events == expected, "clean only attempted setups, including the setup that raised"
+
+
+def test_e3_run_error_stops_measurements_and_cleans_all(events: list[str]) -> None:
+    steps = [station_step(events, "supply", failure_phase="run", error=ValueError),
+             station_step(events, "meter")]
+    assert run_steps(steps) == ("ERROR", ["IDLE", "SETUP", "RUNNING", "ERROR"])
+    assert events == ["supply.setup", "meter.setup", "supply.run", "meter.teardown", "supply.teardown"]
+
+
+def test_e3_calls_are_independent_and_input_is_preserved(events: list[str]) -> None:
+    steps = [station_step(events, "meter")]
+    saved = steps.copy()
+    first = run_steps(steps)
+    second = run_steps(steps)
+    assert steps == saved, "run_steps must not consume or reorder the input list"
+    assert first == second == ("PASS", ["IDLE", "SETUP", "RUNNING", "PASS"])
+    assert first[1] is not second[1], "each run needs a fresh history"
+    assert events == ["meter.setup", "meter.run", "meter.teardown"] * 2
+
+
+@pytest.mark.parametrize("failed_index", [0, 1, 2])
+def test_e4_setup_interrupt_still_cleans_partial_setup(events: list[str], failed_index: int) -> None:
+    steps = [station_step(events, str(index), failure_phase="setup" if index == failed_index else None,
+                          error=KeyboardInterrupt) for index in range(3)]
+    assert run_steps(steps) == ("ABORTED", ["IDLE", "SETUP", "ABORTED"])
+    expected = [f"{index}.setup" for index in range(failed_index + 1)]
+    expected += [f"{index}.teardown" for index in reversed(range(failed_index + 1))]
+    assert events == expected, "Ctrl+C during setup must not leave attempted instruments open"
+
+
+def test_e4_run_interrupt_stops_runs_and_cleans_all(events: list[str]) -> None:
+    steps = [station_step(events, "supply"),
+             station_step(events, "meter", failure_phase="run", error=KeyboardInterrupt),
+             station_step(events, "load")]
+    assert run_steps(steps) == ("ABORTED", ["IDLE", "SETUP", "RUNNING", "ABORTED"])
+    assert events == [
+        "supply.setup", "meter.setup", "load.setup", "supply.run", "meter.run",
+        "load.teardown", "meter.teardown", "supply.teardown",
+    ]
+
+
+@pytest.mark.parametrize("prior_result", ["PASS", "FAIL", "ERROR", "ABORTED"])
+@pytest.mark.parametrize("cleanup_error", [RuntimeError, KeyboardInterrupt])
+def test_e4_cleanup_error_wins_over_selected_result(
+    events: list[str], prior_result: str, cleanup_error: type[BaseException],
+) -> None:
+    measurement_error = KeyboardInterrupt if prior_result == "ABORTED" else RuntimeError
+    first = station_step(events, "supply", passed=prior_result != "FAIL",
+                         failure_phase="run" if prior_result in {"ERROR", "ABORTED"} else None,
+                         error=measurement_error)
+    steps = [first, station_step(events, "meter"),
+             station_step(events, "load", failure_phase="teardown", error=cleanup_error)]
+    assert run_steps(steps) == ("ERROR", ["IDLE", "SETUP", "RUNNING", "ERROR"])
+    expected = ["supply.setup", "meter.setup", "load.setup", "supply.run"]
+    if prior_result == "PASS":
+        expected += ["meter.run", "load.run"]
+    expected += ["load.teardown", "meter.teardown", "supply.teardown"]
+    assert events == expected, "cleanup must continue after a teardown raises"
+
+
+def test_e4_multiple_cleanup_failures_do_not_skip_remaining_cleanup(events: list[str]) -> None:
+    steps = [station_step(events, "supply"),
+             station_step(events, "meter", failure_phase="teardown", error=KeyboardInterrupt),
+             station_step(events, "load", failure_phase="teardown", error=ValueError)]
+    assert run_steps(steps) == ("ERROR", ["IDLE", "SETUP", "RUNNING", "ERROR"])
+    assert events == [
+        "supply.setup", "meter.setup", "load.setup", "supply.run", "meter.run", "load.run",
+        "load.teardown", "meter.teardown", "supply.teardown",
+    ]
+
+
+def test_e4_setup_abort_with_cleanup_failure_finishes_error(events: list[str]) -> None:
+    steps = [station_step(events, "supply", failure_phase="teardown"),
+             station_step(events, "meter", failure_phase="setup", error=KeyboardInterrupt),
+             station_step(events, "load")]
+    assert run_steps(steps) == ("ERROR", ["IDLE", "SETUP", "ERROR"])
+    assert events == ["supply.setup", "meter.setup", "meter.teardown", "supply.teardown"]

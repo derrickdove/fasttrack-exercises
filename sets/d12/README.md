@@ -1,81 +1,126 @@
-# d12 — Logging and structured reports
+# d12 — Parametrize and markers: one test, many cases
 
-**Time:** about 45 minutes · **Read first:** [Python Logging HOWTO, Basic Logging Tutorial](https://docs.python.org/3/howto/logging.html#basic-logging-tutorial); Pro Git [3.5 Remote Branches](https://git-scm.com/book/en/v2/Git-Branching-Remote-Branches) and [3.6 Rebasing](https://git-scm.com/book/en/v2/Git-Branching-Rebasing); Python [`collections`: Counter and defaultdict](https://docs.python.org/3/library/collections.html) · **You edit:** `starter/reporting.py`
+**Time:** about 45 minutes · **Read first:** pytest [How to parametrize fixtures and test functions](https://docs.pytest.org/en/stable/how-to/parametrize.html), pytest [How to mark test functions](https://docs.pytest.org/en/stable/how-to/mark.html), and Missing Semester [Data Wrangling](https://missing.csail.mit.edu/2020/data-wrangling/) · **You edit:** `starter/test_scpi_learner.py`
 
 ## What you're building
 
-A test station runs checks on instrument channels (named measurement inputs, such as `CH1`). Operators need a readable event log and a machine-readable report to find failed checks and decide whether a run passed. You will build both from recorded check results; no instrument or network connection is needed.
+A chassis test station needs to read voltages and instrument error messages in several formats. You will write tests for a supplied SCPI driver, the small module that translates station requests and instrument replies. A module is a Python file. SCPI means *Standard Commands for Programmable Instruments*, a text command language used by lab equipment. pytest is the Python tool that discovers and runs your tests.
 
 ## How this works
 
-1. Replace the `raise NotImplementedError(...)` lines in `starter/reporting.py`. Don't edit `tests/`.
-2. Press Ctrl+Shift+B → **Test: d12** (or run `bash tools/run.sh d12` / `tools\run.ps1 d12` from the repo root). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+1. Replace the `raise NotImplementedError(...)` lines in `starter/test_scpi_learner.py` and add the decorators requested below. Keep the four function names, parameter names, and type hints (the annotations after ?:? and ?->? that describe input and output types). Don't edit `scpi.py`, `pytest.ini`, or `tests/`.
+2. Press **Ctrl+Shift+B → Test: d12** (or run `bash tools/run.sh d12` / `tools\run.ps1 d12`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
-**UTF-8** is a text encoding that supports non-English characters. In type hints, `Any` means a value of any Python type; `Path` is a filesystem path object from `pathlib`.
-
-A **logger** receives named events; a **handler** sends them somewhere, such as a file; a **formatter** controls their text. A **level** describes importance: DEBUG < INFO < WARNING < ERROR < CRITICAL. A logger's **propagation** setting controls whether parent loggers also receive its events.
-
-A **status** is a check's outcome: `PASS` means within requirements, `FAIL` means outside requirements, and `ERROR` means the check could not finish. A **Counter** counts repeated values. A **defaultdict** supplies a new default value for a missing key, such as an empty list for a channel. Convert either to an ordinary `dict` when returning results.
+A **parameter** is a named function input. **Parametrization** makes pytest run one test function for each row of inputs. A **decorator** is an `@...` line above a function that adds instructions to it. This station-status example is separate from your voltage tests:
 
 ```python
-from collections import Counter, defaultdict
-visits = Counter(["CH2", "CH2", "CH4"])
-notes = defaultdict(list)
-notes["CH4"].append("connector reseated")
-print(visits["CH2"], notes["CH4"])  # 2 ['connector reseated']
+@pytest.mark.parametrize("status", ["READY", "BUSY"])
+def test_station_status(status: str) -> None:
+    assert status in {"READY", "BUSY"}
 ```
 
-**JSON** is a text format for dictionaries, lists, strings, numbers, booleans and null. **Metadata** describes the run, such as station and operator names. **UTC** is the shared world time reference. An **aware datetime** includes a time-zone offset; ISO 8601 is a standard timestamp spelling, such as `2026-10-28T12:30:00+00:00`. An **injectable time** lets tests supply a fixed datetime instead of reading the clock.
+An **assertion** checks a condition and fails a test when it is false. `pytest.approx(expected)` compares numbers while allowing small rounding differences. An **exception** is Python's way of reporting an error; `with pytest.raises(ValueError):` passes only if the indented operation raises that exception.
 
-For E2–E4, every input result is a dictionary containing string keys `channel`, `status`, and `message`; all three values are strings. Status is always exactly `PASS`, `FAIL`, or `ERROR`. Other JSON-compatible fields may be present and must be preserved in reports. Inputs are valid; you do not need to validate malformed results. Do not change input dictionaries or lists. File paths accept `str` or `pathlib.Path`; parent directories already exist. Let file errors reach the caller.
+A **marker** is a label attached to a test, such as `@pytest.mark.slow`. **Registering** a marker means listing its name in `pytest.ini`, pytest's settings file; `slow` is already registered here. **Deselection** means leaving a test out of a run; `-m "not slow"` selects tests without the `slow` label. A marker does not add a delay.
+
+An **id** is a readable label for one parametrized row, visible in pytest's output. **Data wrangling** means turning raw text into useful information. On a Linux station, `grep` selects matching log lines, `sed` transforms text, and `awk` extracts fields or computes values. Descriptive case ids make those log searches easier. No shell commands are required in this set.
+
+A **mutant** is a deliberately faulty driver copy. Our outer checks start a **subprocess**, a separate Python process, to run your tests with the supplied driver and these copies. Good tests pass on the supplied driver and fail on the relevant mutants. Write assertions against the imported driver functions; do not inspect files or detect which driver is loaded. The supplied `conftest.py` keeps your tests out of the outer collection so the score still has four exercises.
+
+## Supplied driver: `scpi.py`
+
+An import makes another module's functions available in your file. The imports are already in your starter. You do not implement this driver.
+
+| Function | Contract |
+| --- | --- |
+| `parse_number(reply: str) -> float` | Convert a decimal or scientific-notation string to a number. Ignore spaces and line endings at its edges. Nonnumeric text raises `ValueError`. Scientific notation uses `E` for a power of ten: `6.02E+2` means `6.02 × 100`. |
+| `parse_error(reply: str) -> tuple[int, str]` | Split a reply at its first comma into a signed integer code and a quoted message. Ignore outer whitespace and spaces before the opening quote; remove the message's surrounding quotes. Preserve its capitalization, internal spaces, and internal commas. A tuple is a fixed sequence, here `(code, message)`. Invalid integer codes, missing commas, and missing surrounding message quotes raise `ValueError`. Embedded quote escapes are outside this exercise. |
+| `build_query(channel: int) -> str` | For a positive integer channel, return exactly `MEAS:VOLT? (@<channel>)\n`. A channel is a numbered instrument input; a query is a command asking for a reading. Zero or negative channels raise `ValueError`. |
+| `read_voltage(reply: str) -> float` | Normally call `parse_number`. The special reply `"OVLD"` means overload: the input exceeds the instrument's measurement range. Known firmware defect **FW-17** incorrectly returns `0.0` for `"OVLD"`. The desired behavior is to raise `ValueError("overload")`. Firmware is the software running inside an instrument. |
+
+In Python string literals, `\r` means carriage return and `\n` means newline; together they are a common instrument line ending. Type these escapes inside strings rather than entering a physical line break.
 
 ## Exercises
 
-### E1 — Station event log (easy, ~12 min)
+### E1 — Voltage formats (easy, ~11 min)
 
-**Goal:** Return the named `logging.Logger`, configured to append UTF-8 text to the supplied file. Set both logger and file handler to INFO, and set `propagate = False`. Use this exact formatter string: `"%(asctime)s %(levelname)s %(name)s: %(message)s"`, with logging's default timestamp format. Each accepted event occupies one line for the single-line messages used here.
+**Goal:** Parametrize one station voltage test over at least these six cases.
 
-**Signature:** `def get_station_logger(name: str, path: str | Path) -> logging.Logger`
+**Signature:** `def test_e1_number_reply(reply: str, expected: float) -> None`
 
-**Example:** After `log = get_station_logger("station.chassis", "run.log")`, `log.info("power enabled")` adds a line ending `INFO station.chassis: power enabled`.
+Add `@pytest.mark.parametrize` with the parameter names `"reply, expected"` and the following rows. Extra valid rows are welcome.
 
-**Watch out:** DEBUG events must be omitted; INFO through CRITICAL must be recorded. Repeating a call with the same name and same path returns the same logger with exactly one file handler, so each event appears once. Existing file text stays intact. Different names use independent files. Names are fresh on first call; reconfiguring a name for a different path or handling externally installed handlers is outside this exercise. The caller owns closing the returned logger's handlers when finished; do not close them inside the function. No root logger configuration is needed.
+| `reply` as a Python string literal | `expected` |
+| --- | --- |
+| `"0"` | `0.0` |
+| `"-12"` | `-12.0` |
+| `"+3.5"` | `3.5` |
+| `"6.02E+2"` | `602.0` |
+| `" 7.25 "` | `7.25` |
+| `"8.5\r\n"` | `8.5` |
 
-**Reread:** Logging HOWTO → “Logging to a file”, “Logging from multiple modules”, “Changing the format of displayed messages”, and “Displaying the date/time in messages”. The supplied `logging` module exposes `FileHandler` and `Formatter` for the named-logger setup.
+The body must call `parse_number(reply)` and assert that it equals `expected`; direct equality or `pytest.approx` is fine.
 
-### E2 — Overall run outcome (easy, ~10 min)
+**Example:** `parse_number("6.02E+2")` → `602.0`.
 
-**Goal:** Use `Counter` to count result statuses. Return exactly `{"counts": <ordinary dict of observed statuses and counts>, "overall": <worst status>}`. Worst means `ERROR` before `FAIL` before `PASS`, regardless of input order. Include only observed statuses in `counts`. Empty input returns `{"counts": {}, "overall": "PASS"}`: this helper treats a run with no failed checks as passing.
+**Watch out:** A loop inside an undecorated test does not create six pytest cases. Check the returned value, not just whether a call completes. Your test must catch lost minus signs, ignored exponents, and rejection of surrounding whitespace.
 
-**Signature:** `def summarize(results: list[dict[str, Any]]) -> dict[str, Any]`
+**Reread:** pytest How to parametrize, section “@pytest.mark.parametrize: parametrizing test functions.”
 
-**Example:** Two PASS results and one FAIL result → `{"counts": {"PASS": 2, "FAIL": 1}, "overall": "FAIL"}`. Dictionary key order does not matter.
+### E2 — Searchable instrument errors (easy, ~12 min)
 
-**Watch out:** Count checks, not distinct channels: repeated checks on one channel count separately. Status severity is a stated rule, not alphabetical order or the most frequent status.
+**Goal:** Parametrize one error-queue test so an operator can find the failing reply format by its id. An error queue is the instrument's stored list of problems; code zero means it has no error to report.
 
-**Reread:** `collections` → “Counter objects”; Logging HOWTO → “When to use logging” for the related idea of event importance. Result statuses here are separate from logging levels.
+**Signature:** `def test_e2_error_reply(reply: str, expected: tuple[int, str]) -> None`
 
-### E3 — Operator failure list (easy, ~9 min)
+Use `@pytest.mark.parametrize` with `"reply, expected"` and these four rows. Each `expected` value is one tuple.
 
-**Goal:** Use `defaultdict(list)` to collect messages from FAIL and ERROR results under their channel names. Return an ordinary dictionary mapping each affected channel to its list of messages. Omit PASS results and channels without failures. Within each channel, keep input order and repeated or empty messages. Empty input returns `{}`.
+| `reply` as a Python string literal | `expected` |
+| --- | --- |
+| `'0,"No error"'` | `(0, "No error")` |
+| `'-100,"Command error"'` | `(-100, "Command error")` |
+| `' -222, "Data out of range"\r\n'` | `(-222, "Data out of range")` |
+| `'-300,"Relay, stuck"'` | `(-300, "Relay, stuck")` |
 
-**Signature:** `def failures_by_channel(results: list[dict[str, Any]]) -> dict[str, list[str]]`
+Assign each row a distinct explicit id, either through `ids=[...]` on the decorator or `pytest.param(..., id="...")`. Use nonempty ASCII letters, digits, and hyphens only, with at least one letter; for example, `queue-clear`. ASCII here means ordinary English letters and digits. You choose the names. Extra valid rows need ids too.
 
-**Example:** FAIL `CH1: voltage low`, PASS `CH2: ready`, ERROR `CH1: timeout` → `{"CH1": ["voltage low", "timeout"]}`.
+The body must call `parse_error(reply)` and assert equality with the entire `expected` tuple.
 
-**Watch out:** Each channel needs its own list. A message reports what happened; it need not be unique. Dictionary key order does not matter.
+**Example:** `parse_error('-300,"Relay, stuck"')` → `(-300, "Relay, stuck")`.
 
-**Reread:** `collections` → “defaultdict objects” and its examples of grouping values into lists; Logging HOWTO → “Logging variable data”.
+**Watch out:** A message can contain a comma. Check signed codes and the exact full message, including capitalization. Generated default ids are not a substitute for the explicit readable ids requested here.
 
-### E4 — Save the run report (medium, ~14 min)
+**Reread:** pytest How to parametrize, examples using `ids` and `pytest.param`; Missing Semester Data Wrangling, the `grep`, `sed`, and `awk` examples for finding and extracting useful log text.
 
-**Goal:** Write a UTF-8 JSON file containing exactly the top-level keys `meta`, `summary`, and `results`. `summary` is E2's output, and `results` is the original list with its order and all fields preserved. `meta` is a copy of the supplied metadata with `generated_utc` added (or replaced). Return `None` and overwrite any existing report file.
+### E3 — Select the quick station run (medium, ~10 min)
 
-**Signature:** `def write_report(results: list[dict[str, Any]], path: str | Path, meta: dict[str, Any], *, now: datetime | None = None) -> None`
+**Goal:** Label the station sweep so an operator can omit it during a quick run. A sweep checks several instrument channels in sequence.
 
-**Example:** With `results=[]`, `meta={"station": "A1"}`, and `now=datetime(2026, 10, 28, 12, 30, tzinfo=timezone.utc)`, the decoded file is `{"meta": {"station": "A1", "generated_utc": "2026-10-28T12:30:00+00:00"}, "summary": {"counts": {}, "overall": "PASS"}, "results": []}`.
+**Signature:** `def test_e3_station_sweep() -> None`
 
-**Watch out:** When `now` is supplied, it is always an aware datetime. Convert it to UTC and use `.isoformat()` (retain fractional seconds if present; use `+00:00`, not `Z`). When omitted, obtain the current aware UTC datetime with `datetime.now(timezone.utc)`. `generated_utc` belongs inside `meta`, not beside it. Never add it to the caller's metadata. JSON indentation and escaping are up to you; tests decode the file. Reuse `summarize` instead of repeating E2's logic.
+Add `@pytest.mark.slow`. Inside this single test, call `build_query` for channels `1`, `2`, and `3` and assert each complete command equals its expected string. A loop is appropriate here. Include the space before `(@...)` and the final newline.
 
-**Reread:** Logging HOWTO → “Displaying the date/time in messages” for why timestamps help investigations; `collections` → “Counter objects” for the embedded summary. The supplied `json`, `datetime`, and `timezone` imports support the report. Pro Git 3.5 → “Tracking Branches” and 3.6 → “The Basic Rebase” are today's workflow reading; this set does not run Git commands.
+**Example:** `build_query(2)` → `"MEAS:VOLT? (@2)\n"`.
+
+The set's `pytest.ini` already registers `slow`. Our checks run pytest with `-m "not slow"` and verify that only your sweep is deselected, while other tests remain selected. You do not need to launch subprocesses yourself.
+
+**Watch out:** Put the marker only on this function, not on the whole module. Do not sleep or connect to hardware: this model stands in for a slow physical sweep and finishes immediately. The assertions must catch a driver that always queries channel 1.
+
+**Reread:** pytest How to mark test functions, “Registering marks” and “Marking test functions and selecting them for a run.”
+
+### E4 — Keep the firmware defect visible (medium, ~12 min)
+
+**Goal:** Record the desired overload behavior while acknowledging the known FW-17 defect.
+
+**Signature:** `def test_e4_overload_quirk() -> None`
+
+Use `@pytest.mark.xfail(reason=..., strict=True)`. An **xfail** marks a test whose failure is expected because of a known defect. Supply a nonempty reason that names `FW-17` and explains the overload problem.
+
+Inside the test, use `with pytest.raises(ValueError, match="overload"):` around `read_voltage("OVLD")`. The `match` argument checks the exception's message. Test the desired exception, even though the supplied driver currently returns zero.
+
+**Example:** Current firmware returns `0.0`, so the desired-behavior test is reported as **XFAIL**, an expected failure. Our repaired driver raises `ValueError("overload")`, so that same test becomes **XPASS**, an unexpected pass.
+
+**Watch out:** `strict=True` makes XPASS fail the run, reminding the team to remove the obsolete xfail once firmware is repaired. Do not assert the buggy zero result, skip the test, call `pytest.xfail()` yourself, or set `run=False`; the test body must execute. An ordinary **skip** omits a test without checking the known defect.
+
+**Reread:** pytest How to mark test functions, the built-in `xfail` marker and linked “How to use skip and xfail”; pytest How to parametrize, the `pytest.param` example with an xfail mark.

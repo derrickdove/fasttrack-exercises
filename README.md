@@ -49,7 +49,7 @@ Gates run every earlier block too and finish with `Checks: N / M passed`.
 sets/d00-hello/       setup check (already correct)
 sets/d01/ …          one folder per daily set
 sets/r1/ …           review sets
-sets/check30/ …      longer checkpoints
+sets/check34/ …      longer checkpoints
   README.md          what to do, exact contracts, readings to reread
   starter/           your code
   tests/             the tests (don't edit)

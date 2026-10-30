@@ -1,95 +1,84 @@
-# d29 — Processes, exit codes and signals
+# d29 — TCP command channel: framing and partial reads
 
-**Time:** about 45 minutes (41 coding + 4 review) · **Read first:** [Missing Semester, Command-line Environment](https://missing.csail.mit.edu/2020/command-line/) (job control and signals); Python [subprocess](https://docs.python.org/3/library/subprocess.html) and [signal](https://docs.python.org/3/library/signal.html) docs; **Review for tomorrow's day-30 check: your weakest set so far** — look at your tracker and redo the set you marked partial or stuck most recently. · **You edit:** `starter/procs.py`
+**Time:** about 45 minutes · **Read first:** Python [Socket Programming HOWTO — Using a Socket and message framing](https://docs.python.org/3/howto/sockets.html#using-a-socket), the [`socket.sendall` reference](https://docs.python.org/3/library/socket.html#socket.socket.sendall), and Missing Semester [Metaprogramming — build systems, dependencies, and continuous integration](https://missing.csail.mit.edu/2020/metaprogramming/) · **You edit:** `starter/framing.py`
 
 ## What you're building
 
-A chassis test station starts instrument-check tools, records whether they succeeded, and retries tools that fail. It also needs to notice an operator's stop request so the station can finish cleanup before shutting down.
+A chassis test station sends commands to an instrument over TCP (Transmission Control Protocol), an ordered stream of bytes delivered over a network connection. The instrument must distinguish one command from the next even when a read returns only part of a command, or several replies arrive together. You will encode messages, collect partial reads, and complete a command/reply exchange.
 
 ## How this works
 
-1. Replace the `raise NotImplementedError(...)` lines in `starter/procs.py`. Don't edit `tests/`.
-2. Press **Ctrl+Shift+B → Test: d29** (or run `bash tools/run.sh d29` / `tools\run.ps1 d29`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
-3. Report **all pass / partial / stuck** in the tracker. Spend the final four minutes revisiting your most recently partial or stuck set for tomorrow's day-30 check; if you need longer, continue that review after this set.
+1. Replace the `raise NotImplementedError(...)` lines in `starter/framing.py`. Don't edit `tests/`.
+2. Press Ctrl+Shift+B → **Test: d29** (or run `bash tools/run.sh d29` / `tools\run.ps1 d29` from the repository root). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+3. Report **all pass / partial / stuck** in the tracker.
 
-A **process** is a running program; a **child process** is one started by your Python program. An **argument list** contains the executable path followed by its separate arguments. A **shell** interprets command text; passing a list with `shell=False` (the default) avoids that extra interpreter.
+A **byte** is an integer from 0 to 255; a `bytes` object is an immutable sequence of bytes, written for example as `b"CH1?"`.
+A **payload** is the message's content; a **frame** adds boundary information to that content.
+A **header** contains information about a message; a **length prefix** is a header before the payload that states its size; **big-endian** puts the most significant byte first.
+A **buffer** holds bytes until enough have arrived to process them; `bytearray` is a mutable byte sequence.
+A **socket** is the connection endpoint; its **peer** is the instrument at the other end.
+A **partial read** returns fewer bytes than requested; `recv(n)` returns at most `n` bytes, and `b""` means **EOF** (end of stream: the peer closed its sending side).
+`sendall(data)` keeps sending until all data has been sent, or raises an error; `send(data)` may send only part.
+A **timeout** limits how long a socket operation may wait; the caller configures it, and your functions let socket errors propagate.
 
-An **exit code** is the integer a process returns when it finishes; zero conventionally means success. **Standard output** (`stdout`) carries normal text; **standard error** (`stderr`) carries diagnostic text. **Capture** means returning that text to Python instead of displaying it. A **timeout** is the maximum number of seconds allowed for one run.
-
-A **signal** is a notification delivered to a process. **SIGINT** is the interrupt request normally sent by Ctrl+C; **SIGTERM** is a termination request commonly sent by service managers. A **handler** is a function called when a signal arrives. **Job control** is the shell's ability to stop, resume, and manage running processes.
-
-A **context manager** supplies setup and cleanup for a `with` block through `__enter__` and `__exit__`. A **flag** is a Boolean value recording whether something happened. Here, **graceful stopping** means recording the request now so normal code can perform cleanup later.
+For example, these are integer/byte conversions, using a two-byte field unrelated to our four-byte frame header:
 
 ```python
-import sys
-
-args = [sys.executable, "-c", "print('Station B7 ready')"]
-# sys.executable is this Python interpreter's path.
-# -c makes Python execute the following argument as code.
+field = (513).to_bytes(2, "big")
+assert field == b"\x02\x01"
+assert int.from_bytes(field, "big") == 513
+pending = bytearray(b"CH")
+pending.extend(b"1?")
 ```
+
+A **dependency** is a prerequisite: E4 uses E1 and E3, so finish those first. **Continuous integration (CI)** runs checks automatically after code changes; rerunning this set locally is the same habit on your own machine. The supplied tests use only a local connection and need no instrument or internet.
 
 ## Exercises
 
-### E1 — Capture an instrument check (easy, ~11 min)
+### E1 — Encode an instrument command (easy, ~7 min)
 
-**Goal:** Run an instrument-check tool with `subprocess.run`. Return `(returncode, stdout, stderr)` as an integer and two strings. Use `capture_output=True`, `text=True`, and the supplied timeout in seconds. Keep output exactly as returned, including trailing newlines. A nonzero exit code is a result, so do not use `check=True` (which would raise an exception for failure).
+**Goal:** Package a command as a four-byte unsigned length (no negative values), followed immediately by the unchanged payload. The length counts payload bytes only. There is no text decoding, newline, or terminator (extra end marker).
 
-**Signature:** `def run_tool(args: list[str], timeout: float) -> tuple[int, str, str]`
+**Signature:** `def frame(payload: bytes) -> bytes`
 
-**Example:** `run_tool([sys.executable, "-c", "print('PASS')"], 2.0)` → `(0, "PASS\n", "")`
+**Example:** `frame(b"ID?")` → `b"\x00\x00\x00\x03ID?"`; `frame(b"")` → four zero bytes.
 
-**Watch out:** `args` is a nonempty argument list; do not modify it or join it into shell text. `timeout` is positive. On `subprocess.TimeoutExpired`, return exactly `(-9, "", "timeout")`, discarding any partial output. `subprocess.run` already kills the child and waits for it before raising that exception; no separate kill call is needed. The `-9` is our station's timeout marker on every platform. Other exceptions, such as `FileNotFoundError` for a missing executable, must propagate to the caller. No input validation beyond these stated cases is needed.
+**Watch out:** Binary content (raw bytes rather than decoded text), including zero bytes, is valid. Inputs fit in the four-byte length field (at most `2**32 - 1` bytes). E1 does not impose E2's incoming-message limit.
 
-**Reread:** Python `subprocess` docs, “Using the subprocess Module”: `run`, `CompletedProcess`, and `TimeoutExpired`.
+**Reread:** Socket HOWTO, Using a Socket: fixed-length, delimited, and length-prefixed messages.
 
-### E2 — Explain the tool result (easy, ~6 min)
+### E2 — Collect instrument replies across reads (medium, ~16 min)
 
-**Goal:** Convert a recorded code to the exact operator-facing text below. In this exercise a shell-style code greater than 128 encodes a signal as `128 + signal_number`. Python's `Popen` process object uses negative codes for signal termination on POSIX systems (such as Linux); decode those as the positive signal number too. This is a decoding convention, not proof that an arbitrary tool's code came from a signal.
+**Goal:** Implement `FrameReader()` and `feed`. Each instance starts empty. Each call appends its **chunk** (bytes supplied in one call) to the saved bytes and returns a `list[bytes]` of every complete payload now available, in order, without headers. Save an incomplete header or payload for the next call; never return a payload twice. Different reader instances must keep separate buffers.
 
-**Signature:** `def exit_code_meaning(code: int) -> str`
+**Signatures:** `def __init__(self) -> None`; `def feed(self, chunk: bytes) -> list[bytes]`
 
-| Code | Return text |
-| --- | --- |
-| `0` | `"ok"` |
-| `1` | `"fail"` |
-| `2` | `"usage"` (the tool was called incorrectly) |
-| Negative | `"killed by signal N"`, where `N = -code` |
-| Greater than `128` | `"killed by signal N"`, where `N = code - 128` |
-| `3` through `128`, inclusive | `"exit N"`, where `N = code` |
+**Example:** For a fresh reader, `feed(b"\x00\x00")` → `[]`, then `feed(b"\x00\x02OK\x00\x00\x00\x00")` → `[b"OK", b""]`.
 
-**Example:** `exit_code_meaning(143)` → `"killed by signal 15"`; `exit_code_meaning(-15)` → the same string.
+**Watch out:** A chunk may contain zero, one, or many frames. Every split position must work, including inside the four-byte header. `feed(b"")` adds nothing; it does not signal EOF. Here **1 MB means exactly 1,000,000 payload bytes**. Accept that size; raise `ValueError` as soon as an available complete header declares more, even if its payload has not arrived. After that error, discard the reader; recovery behavior is not specified.
 
-**Watch out:** `128` itself is `"exit 128"`. Use decimal numbers, not signal names. Accept any integer; do not validate whether a decoded signal exists on this machine.
+**Reread:** Socket HOWTO, Using a Socket: the length itself may need multiple reads, and a read may include the next message's start.
 
-**Reread:** Python `subprocess` docs, `Popen.returncode`; Missing Semester, Command-line Environment → “Job Control” / “Killing a process”.
+### E3 — Read exactly the requested bytes (easy–medium, ~9 min)
 
-### E3 — Record an operator stop request (medium, ~15 min)
+**Goal:** Read exactly `n` bytes from an already connected socket. Keep calling `recv` with the number still missing. Return `bytes`; do not consume bytes belonging to the next message.
 
-**Goal:** Implement `GracefulStop`, a context manager with a public Boolean `requested` flag. Construction sets `requested=False`. Each entry resets it to `False`, saves the current SIGINT handler and the SIGTERM handler where available, installs `_handle` for those signals, and returns `self`. `_handle(signum, frame)` sets `requested=True` and returns normally. `signum` is the signal number; `frame` describes the interrupted Python execution and is unused here.
+**Signature:** `def recv_exact(sock: socket.socket, n: int) -> bytes`
 
-**Signatures:** `GracefulStop()`, `__enter__(self) -> GracefulStop`, `_handle(self, signum: int, frame: FrameType | None) -> None`, and the supplied `__exit__(...) -> None`.
+**Example:** If successive reads supply `b"O"` and `b"K"`, `recv_exact(sock, 2)` → `b"OK"`.
 
-**Example:**
+**Watch out:** `n == 0` returns `b""` without reading. Negative `n` raises `ValueError` without reading. If `recv` returns `b""` before you have `n` bytes, raise `ConnectionError`, including when no bytes arrived. Do not close the socket or change its timeout. Other socket errors propagate to the caller.
 
-```python
-with GracefulStop() as stop:
-    assert stop.requested is False
-    signal.raise_signal(signal.SIGINT)
-    assert stop.requested is True
-```
+**Reread:** Socket HOWTO, Using a Socket: `recv` can return fewer bytes than expected, and zero bytes means the connection is broken.
 
-**Watch out:** `signal.getsignal` reads an existing handler; `signal.signal` replaces it. Restore the exact saved handlers on exit, including when the block raises an exception. Let that exception propagate; `__exit__` returns `None`. Its three arguments describe the exception (or are all `None` on normal exit). Restoring handlers does not reset `requested`; the flag keeps its last value until the next entry. Sequential reuse and nested blocks with *different* `GracefulStop` instances must work. Re-entering the same instance before it exits is outside scope. Calls happen on Python's main thread (the thread where the program started), where installing handlers is allowed. Do not exit, print, or raise in the handler. The tests use `signal.raise_signal`, which delivers a signal to the current process without an external command.
+### E4 — Exchange one test-station command (medium, ~13 min)
 
-**Reread:** Python `signal` docs, “Execution of Python signal handlers”, “Signals and threads”, `getsignal`, `signal`, and `raise_signal`; Missing Semester, “Job Control”.
+**Goal:** On an already connected socket, call `sendall` with the E1 frame, then read one reply's four-byte header and its payload using E3. Return the payload alone. There is one outstanding command at a time (send it, then wait for its reply).
 
-### E4 — Restart a failed station tool (medium, ~9 min)
+**Signature:** `def request(sock: socket.socket, payload: bytes) -> bytes`
 
-**Goal:** A **supervisor** starts a program and decides whether to restart it. Implement a small version of systemd's `Restart=on-failure` idea; systemd is a Linux service manager that starts and monitors background programs. Call E1's `run_tool(cmd, timeout=5.0)` on each attempt. Collect only the exit codes, in order. Stop immediately on code `0`, or once the retry budget is exhausted.
+**Example:** Sending `b"STATUS?"` and receiving `b"\x00\x00\x00\x02OK"` returns `b"OK"`.
 
-**Signature:** `def supervise(cmd: list[str], restarts: int) -> list[int]`
+**Watch out:** Empty commands and empty replies are valid. Apply E2's 1,000,000-byte limit to the reply; reject an oversized length immediately with `ValueError`. An incomplete reply header or payload raises `ConnectionError`. Read only this reply, leaving any following bytes for later; leave the socket open and its timeout unchanged. Socket errors propagate. Tests include a **threaded server** (a local instrument simulator running concurrently in another thread) that calls `sendall` once per byte. TCP may still combine those writes; separate scripted tests guarantee partial reads.
 
-**Example:** With `restarts=2`, a tool that fails twice and then succeeds returns `[1, 1, 0]`. A tool that keeps failing returns `[1, 1, 1]`. A tool that succeeds immediately returns `[0]`.
-
-**Watch out:** `restarts` counts additional tries, so zero still permits one attempt. Negative `restarts` raises `ValueError` before launching anything. Any nonzero code, including E1's `-9` timeout marker, consumes an attempt and permits another if budget remains. Use the same `cmd` each time; do not add a delay or change its arguments. Discard the output strings. Other errors from E1 propagate instead of being retried. Finish E1 first; E4 reuses it.
-
-**Reread:** Python `subprocess` docs, `run` and `CompletedProcess.returncode`; Missing Semester, “Job Control”. For tomorrow's check, revisit your most recently partial or stuck set in the tracker.
+**Reread:** Socket HOWTO, Using a Socket, and `socket.sendall`; Missing Semester Metaprogramming, build dependencies and continuous integration: rerun all four exercises after combining E1 and E3 here.

@@ -1,136 +1,97 @@
-# d36 — systemd services and config files
+# d36 — Shell scripting for test stations
 
-**Time:** about 45 minutes · **Read first:** [systemd.service: what a unit file says](https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html), [systemd.unit](https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html), [journalctl](https://www.freedesktop.org/software/systemd/man/latest/journalctl.html), [tomllib](https://docs.python.org/3/library/tomllib.html) and [configparser](https://docs.python.org/3/library/configparser.html) · **You edit:** `starter/chassis-demo.service` and `starter/units.py`
+**Time:** about 45 minutes · **Read first:** [The Linux Command Line](https://linuxcommand.org/tlcl.php), ch. 24, 27, 32 (scripts, flow control, positional parameters); [Missing Semester: Security and Cryptography](https://missing.csail.mit.edu/2020/security/), SSH keys; also [Missing Semester: Shell Tools and Scripting](https://missing.csail.mit.edu/2020/shell-tools/), scripting · **You edit:** `starter/collect_logs.sh`, `starter/check_station.sh`
 
 ## What you're building
 
-A chassis test station needs a predictable way to start its Python process and load its instrument settings. You will describe that process in a service file, preserve repeated settings while reading files, and give the operator useful configuration errors. These checks read local files on Windows or Linux; they never install or start a service.
+A test station is the computer that controls instruments and records chassis test results. Give its operator a log collector and a configuration checker to run before a shift. These exercises work on local files; SSH (a secure connection to another computer) and SSH keys (credentials used to authenticate that connection) are reading context only.
 
 ## How this works
 
-1. For E1, replace the entire placeholder in `starter/chassis-demo.service`. For E2–E4, replace the `raise NotImplementedError(...)` lines in `starter/units.py`. Don't edit `tests/`.
-2. Press Ctrl+Shift+B → **Test: d36** (or run `bash tools/run.sh d36` / `tools\run.ps1 d36`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise. The E1 placeholder marker makes its file-only exercise report `NotImplementedError` until you replace it.
-3. Report all pass / partial / stuck in the tracker.
+1. Replace the unfinished `printf` / `exit 99` bodies in the two Bash files. Keep the first `#!/usr/bin/env bash` line, which identifies the interpreter (the program that runs the script). No Python edits are needed; don't edit `tests/` or the supplied `starter/scripts.py` helper.
+2. Press **Ctrl+Shift+B → Test: d36** (or run `bash tools/run.sh d36` / `tools\run.ps1 d36`). Initially expect `Exercises: 0 / 4 passed` with `NotImplementedError`: the tests translate the shell placeholders into that Python exception. Rerun after each exercise.
+3. Report **all pass / partial / stuck** in the tracker.
 
-**systemd** is a Linux manager that starts and supervises processes. A **service** is a process it manages. A **unit file** describes something systemd manages; a `.service` file describes a service. A **section** is a group headed by `[Name]`; a **directive** is a `Key=value` setting within it. A **target** groups units into a startup milestone. The **root** user (numeric user ID `0`) has unrestricted system privileges; a station process should use a separate account.
+Install Bash, a command interpreter, or use the repo's Codespaces option. Git Bash counts on Windows. Tests skip with a clear message if `bash` is missing; skipped exercises are unfinished. Save `.sh` files with LF (Unix-style line endings).
 
-**Parsing** turns file text into Python values. **Validation** checks those values against a contract. Python's `configparser` reads section/key files, but by default changes key names to lowercase and cannot preserve all repeated assignments. E1 uses `ConfigParser(strict=False)` with case preserved, interpolation disabled, and `=` as the delimiter (the character separating key and value); repeated keys then keep only their last value. E2 writes a small parser to keep every value. **Interpolation** means replacing special placeholders inside values; our parser treats values as literal text instead.
+A **positional parameter** such as `$1` is an argument passed to the script; `$#` is the argument count. An **exit status** is a number returned to the caller: zero means success. **stdout** is ordinary output; **stderr** is diagnostic output. A **glob**, such as `*.log`, matches filenames. Quote variable expansions so a path containing spaces remains one argument. A **pipeline** joins commands with `|`. A **key=value** line associates a setting name with text. A Bash **array** stores several values, for example missing setting names.
 
-A **nested dictionary** is a dictionary containing other dictionaries. A `list[str]` is a list of strings; repeated directives become lists. `setdefault(key, default)` inserts the default only when the key is absent, then returns the stored value:
-
-```python
-commands = {}
-commands.setdefault("Query", []).append("MEAS:VOLT?")
-commands.setdefault("Query", []).append("SYST:ERR?")
-# {"Query": ["MEAS:VOLT?", "SYST:ERR?"]}
+```bash
+# A small example, independent of the exercises:
+if [[ $# -ne 1 ]]; then
+    printf '%s\n' 'Give one instrument name' >&2
+    exit 2
+fi
+printf 'Selected: %s\n' "$1"
 ```
-
-**TOML** is a configuration text format with explicit strings, numbers, lists, and tables. A **table** is a group of named values, written `[station]`; `[[instruments]]` starts another table in a list of instruments. `tomllib.load` reads a file opened in binary mode (`"rb"`) and returns a dictionary. A **key path** locates a nested value: `instruments[1].resource` means the second instrument's resource. `dict[str, Any]` means string keys whose values may have different types; `Any` comes from `typing`.
 
 ## Exercises
 
-### E1 — Describe the station service (easy, ~8 min)
+### E1 — Collect a station's logs (easy, ~12 min)
 
-**Goal:** Replace `starter/chassis-demo.service` with a unit that follows the deployment checklist below. This is a text-file exercise with no Python function to write.
+**Goal:** Copy station logs into a dated folder without losing files whose names contain spaces.
 
-| Section | Directive | Required value |
-| --- | --- | --- |
-| `Unit` | `Description` | Any nonempty description of the station |
-| `Unit` | `After` | Whitespace-separated target names including `network-online.target` |
-| `Unit` | `Wants` | Whitespace-separated target names including `network-online.target` |
-| `Service` | `Type` | `simple` |
-| `Service` | `ExecStart` | Absolute Linux path to `python` or `python3`, then `-m chassis`, then optional arguments |
-| `Service` | `Restart` | `on-failure` |
-| `Service` | `RestartSec` | A positive integer number of seconds, such as `3` |
-| `Service` | `User` | Any nonempty account name other than `root` or `0` |
-| `Install` | `WantedBy` | Whitespace-separated target names including `multi-user.target` |
+**Signature:** `bash starter/collect_logs.sh SRC DEST`
 
-**Example:** `Description=Rack 7 measurement worker` gives the service an operator-readable label. Choose the remaining lines from the checklist.
+`SRC` must be an existing directory. Accept exactly two arguments. On a wrong argument count or invalid `SRC`, print `Usage: bash collect_logs.sh SRC DEST` followed by a newline to stderr, leave stdout empty, and exit 2 before creating output.
 
-`After` orders this service after the named unit; `Wants` asks systemd to start that unit too. `network-online.target` marks network readiness according to the station's network setup. `Type=simple` means systemd starts the process directly. `ExecStart` gives the command, and `-m chassis` runs the Python module named `chassis`. `Restart=on-failure` retries after a process failure; `RestartSec` delays that retry. `WantedBy=multi-user.target` connects an enabled service to the usual non-graphical operating state. **Enabling** a service means arranging for its startup at boot.
+On success, obtain the current local date with `date +%Y%m%d`. Here `YYYYMMDD` means four-digit year, two-digit month, two-digit day. Create `DEST/YYYYMMDD/`, including missing parents, even if there are no logs. Copy every regular file (an ordinary file, not a directory) that is non-hidden (its name does not start with `.`) directly inside `SRC` whose name ends in lowercase `.log`. Do not search child directories. All modification times qualify: the date labels collection time, with no age cutoff. Leave source files intact, replace destination files of the same name, and leave unrelated destination files intact. Copy each selected file with `cp` (the file-copy command) so operating-system errors can be detected in E2. Print nothing on success and exit 0.
 
-**Watch out:** Use exact section/key capitalization. Write each required directive once. Use an unquoted absolute Linux path with no spaces, such as `/opt/station/bin/python3`; it need not exist on this computer. Extra arguments are split on whitespace; quoted commands and shell wrappers are outside this exercise. Extra settings are allowed. The tests inspect the file structurally, without requiring the account or chassis package to exist. On a real station, `journalctl -u chassis-demo.service` displays the service's **journal**, its collected log messages; you do not need to run this command here.
+**Example:** On 2031-04-05, `collect_logs.sh "bench logs" archive` copies `bench logs/power check.log` into `archive/20310405/power check.log`.
 
-**Reread:** systemd.service, `Type=`, `ExecStart=`, `Restart=`, `RestartSec=`; systemd.unit, `Description=`, `Wants=`, `After=`, and `[Install]`; journalctl, `-u` / `--unit=`. `User=` is an execution setting linked from systemd.service.
+**Watch out:** A directory named `old.log` is not a log file. An unmatched glob must not become a literal filename to copy. Source and destination are separate directory trees; symlinks are outside this exercise's inputs.
 
-### E2 — Preserve repeated directives (medium, ~12 min)
+**Reread:** The Linux Command Line ch. 24, "Writing Your First Script," and ch. 32, "Positional Parameters"; Missing Semester "Shell Tools and Scripting," shell scripting and quoting.
 
-**Goal:** Read a UTF-8 unit file (UTF-8 is the text-to-bytes encoding) into section names, then keys, then lists of values.
+### E2 — Stop after a collection failure (medium, ~8 min)
 
-**Signature:** `def parse_unit(path: str | Path) -> dict[str, dict[str, list[str]]]`
+**Goal:** Prevent an incomplete archive from being reported as successful.
 
-**Example:** File text `[Service]\nEnvironment=MODE=demo\nEnvironment=RACK=7\n` → `{"Service": {"Environment": ["MODE=demo", "RACK=7"]}}`. Here `\n` represents a newline.
+**Signature:** Extend `collect_logs.sh` with `set -euo pipefail`, before its work begins.
 
-Contract:
+`-e` stops on a failed command, `-u` rejects an unset variable, and `pipefail` makes a pipeline fail if any component fails. Keep E1's usage behavior: check `$#` before reading `$1` or `$2`. A failure of `date`, `mkdir` (the directory-creation command), or `cp` must stop the script with a nonzero status. After the first failed copy, do not attempt another copy. No rollback is required: files already copied may remain. The tests supply a failing `cp` command; do not hide its failure in a conditional or overwrite its status.
 
-- Accept a string path or `pathlib.Path`. Strip surrounding whitespace on every line. Skip blank lines and whole-line comments starting with `#` or `;` after stripping.
-- A stripped line beginning with `[` and ending with `]` is a section heading. Strip the name inside the brackets; it must not be empty. Preserve capitalization. Repeated section headings reuse the same dictionary. Keep empty sections.
-- Every other non-comment line must have a current section and contain `=`. Split at the first `=` only; strip surrounding whitespace from key and value. The key must not be empty. Append the value to that key's list, preserving assignment order. An empty value is still an entry: `[""]`.
-- Keep all characters inside values, including additional `=`, `%`, `#`, and `;`. There are no inline comments, placeholder substitutions, or special reset behavior for empty values.
-- A comment-only or empty file returns `{}`. An invalid line raises `ValueError` whose message contains `line N`, with the physical line number starting at 1 (including comments and blanks). A missing file propagates `FileNotFoundError`.
+**Example:** If copying the first log fails, the second log is never attempted and the station operator receives a nonzero status.
 
-**Watch out:** This is a single-line subset of unit syntax. It does not join continued lines or interpret commands and systemd placeholders. `configparser(strict=False)` loses earlier repeated values, so use line iteration and dictionaries for E2. No dependency on E1 is needed.
+**Watch out:** Adding strict options is only useful when the control flow lets them take effect. An `if` condition handles failures differently from an ordinary command.
 
-**Reread:** configparser, "Supported INI File Structure", "Customizing Parser Behaviour" (`strict`, `optionxform`, `interpolation`); systemd.unit, the unit-file syntax introduction. **INI** means the section/key text format described by configparser.
+**Reread:** The Linux Command Line ch. 27, "Flow Control: Branching with if"; Missing Semester "Shell Tools and Scripting," exit codes and shell scripting.
 
-### E3 — Give the operator a deployment checklist (medium, ~12 min)
+### E3 — Check station settings (medium, ~15 min)
 
-**Goal:** Check the parsed dictionary without starting the service or changing the dictionary. Return every problem in the order below, at most one problem per row. Tests supply dictionaries directly, so E3 does not depend on E2.
+**Goal:** Tell the operator which settings must be supplied before instrument testing begins.
 
-**Signature:** `def validate_unit(parsed: dict[str, dict[str, list[str]]]) -> list[str]`
+**Signature:** `bash starter/check_station.sh CONFIG`
 
-**Example:** An otherwise valid unit with `User=["root"]` and no `Restart` → `["Restart missing", "User is root"]`.
+`CONFIG` is a readable regular text file. Read it as data; never execute or `source` it (`source` runs a file as shell commands). Required keys, in report order, are `station_id`, `instrument_host`, and `log_dir`. `instrument_host` is the instrument's network name or address; `log_dir` is the directory used for logs. Check presence only; do not connect to the host or check that the directory exists.
 
-Input has E2's dictionary/list/string shape. Missing sections and keys are allowed. For `After`, `Wants`, and `WantedBy`, combine tokens (words separated by whitespace) from **all** values and check for an exact target token. For every other required key use only its final value, stripped; an absent key, empty list, or blank final value counts as missing. Ignore extra sections and keys.
+Each non-comment line has `key=value`, with no spaces around `=`. Ignore blank lines, lines starting with `#`, and unknown keys. Split at the first `=`; the rest is the literal value, including spaces, additional `=` signs, or shell punctuation. A required key is missing if absent or its final value is empty. Later occurrences replace earlier ones. Whitespace inside a value is preserved and counts as nonempty. Support LF and CRLF (Windows-style line endings), and a final line without a newline. Other malformed input is outside the contract.
 
-| Check, in this order | Problem string |
-| --- | --- |
-| Final `Unit.Description` is missing | `Description missing` |
-| `Unit.After` lacks the network target | `After must include network-online.target` |
-| `Unit.Wants` lacks the network target | `Wants must include network-online.target` |
-| Final `Service.Type` is not `simple`, including missing | `Type must be simple` |
-| Final `Service.ExecStart` fails E1's command rule, including missing | `ExecStart must run an absolute python -m chassis command` |
-| Final `Service.Restart` is missing | `Restart missing` |
-| Otherwise, `Service.Restart` is not `on-failure` | `Restart must be on-failure` |
-| Final `Service.RestartSec` is missing | `RestartSec missing` |
-| Otherwise, `int(value)` fails or is at most zero | `RestartSec must be positive whole seconds` |
-| Final `Service.User` is missing | `User missing` |
-| Otherwise, `Service.User` is `root` or `0` | `User is root` |
-| `Install.WantedBy` lacks the boot target | `WantedBy must include multi-user.target` |
+When keys are missing, print one `Missing: KEY` line per key in the order above and exit 1. When none are missing, print `Station OK` and a newline, and exit 0. Leave stderr empty for these valid calls.
 
-**Watch out:** Return `[]` when all checks pass. Whole seconds here use Python's `int` conversion: reject `0.5` and `3s`. This checklist deliberately covers fewer choices than systemd supports. It does not interpret empty assignments as dependency resets, verify accounts, or check paths on disk. Do not mutate (change) the input dictionary or its lists.
+For a wrong argument count, an unknown option, or a missing/unreadable/non-file `CONFIG`, print `Usage: bash check_station.sh [--json] CONFIG` and a newline to stderr, leave stdout empty, and exit 2. Configuration filenames in this exercise do not start with `-`.
 
-**Reread:** systemd.service, `Type=`, `ExecStart=`, `Restart=`, and `RestartSec=`; systemd.unit, `Wants=`, `After=`, `[Install]`.
+**Example:** A file containing only `station_id=bench-7` prints:
 
-### E4 — Load instrument settings with useful errors (medium, ~13 min)
-
-**Goal:** Load TOML with `tomllib` and check a small station schema. A **schema** describes required keys and the types of their values. This exercise uses the station/instrument portion of the deployment configuration.
-
-**Signature:** `def load_station_toml(path: str | Path) -> dict[str, Any]`
-
-**Example file:**
-
-```toml
-[station]
-name = "Rack 7"
-
-[[instruments]]
-id = "psu1"
-kind = "psu"
-resource = "TCPIP::10.0.0.5::5025::SOCKET"
+```text
+Missing: instrument_host
+Missing: log_dir
 ```
 
-This returns `{"station": {"name": "Rack 7"}, "instruments": [{"id": "psu1", "kind": "psu", "resource": "TCPIP::10.0.0.5::5025::SOCKET"}]}`. A **resource** is the instrument address string; this loader stores it without connecting. `psu` identifies a power supply; `dmm` commonly identifies a digital multimeter.
+**Watch out:** Use `read -r` to preserve backslashes. An empty value is different from a key that merely appears in a comment. Shell-looking values must stay harmless text.
 
-Validate in this order, stopping at the first problem:
+**Reread:** The Linux Command Line ch. 27, conditional tests, and ch. 32, processing positional parameters; Missing Semester Security and Cryptography, SSH keys (configuration identifies a station; it does not prove its identity).
 
-1. `station` must exist and be a dictionary (a TOML table). On failure raise `ValueError` containing `station`.
-2. `station.name` must exist and be a string. On failure name `station.name`.
-3. `instruments` must exist and be a list. On failure name `instruments`.
-4. Visit instruments in list order, with indexes starting at 0. Each item must be a dictionary; otherwise name `instruments[i]`. In each item check `id`, then `kind`, then `resource`: each must exist and be a string. Name the full path on failure, for example `instruments[1].resource`.
+### E4 — Produce a machine-readable check (medium, ~10 min)
 
-Return the complete parsed dictionary, preserving unknown keys, values, and instrument order. Empty strings and an empty instrument list are valid. Only key presence and Python types are checked: no uniqueness, allowed-kind, address, or cross-reference checks. Accept strings and `Path` objects as paths. Open in binary mode for `tomllib.load`. Propagate `tomllib.TOMLDecodeError` for invalid TOML text and `FileNotFoundError` for a missing file; only schema errors need a key path. `TOMLDecodeError` is itself a subclass of `ValueError`.
+**Goal:** Let an operator tool consume the same result without parsing human messages.
 
-**Watch out:** Missing keys must produce your useful `ValueError`, rather than an accidental `KeyError`. If several settings are wrong, follow the validation order above. A TOML boolean like `true` is not a string.
+**Signature:** `bash starter/check_station.sh --json CONFIG`
 
-**Reread:** tomllib, `load`, the example, and the conversion table (TOML table → `dict`, array → `list`, string → `str`).
+JSON is a text format for structured data. Produce exactly one JSON object on one stdout line, followed by a newline, with exactly two fields: `ok` (a JSON Boolean, a true-or-false value written `true` or `false`) and `missing` (an array of missing key names in E3's order). Spaces between JSON tokens are optional. Apply the same parsing, usage rules, and exit statuses as E3; print no human messages in JSON mode. The option must come before the single config path. Bare `--json` is a usage error.
+
+**Example:** The same incomplete configuration yields `{"ok":false,"missing":["instrument_host","log_dir"]}` with exit 1. A complete file yields `{"ok":true,"missing":[]}` with exit 0.
+
+**Watch out:** JSON strings use double quotes and JSON Booleans are lowercase. Only the three fixed required key names appear in the output, so you do not need a general JSON string escaper.
+
+**Reread:** The Linux Command Line ch. 32, processing options; Missing Semester "Shell Tools and Scripting," composing command-line tools.

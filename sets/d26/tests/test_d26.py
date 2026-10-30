@@ -1,258 +1,330 @@
-"""Offline station captures: all fixtures are deterministic and local."""
-from io import BytesIO
-from pathlib import Path
+﻿"""Station packet checks use independent wire bytes, not learner encoders."""
+
+import math
 import struct
 import zlib
 
 import pytest
 
-from starter.pcap import (
-    iter_records, read_global_header, telemetry_from_capture, udp_payloads,
+from starter.packets import (
+    PacketError,
+    build_packet,
+    find_packets,
+    pack_header,
+    parse_block,
+    parse_packet,
+    unpack_header,
 )
 
-DATA = Path(__file__).resolve().parents[1] / "data/telemetry.pcap"
+
+def _with_crc(body: bytes) -> bytes:
+    return body + zlib.crc32(body).to_bytes(4, "big")
 
 
-def global_header(order: str = "<", *, snaplen: int = 65535,
-                  linktype: int = 1, version: tuple[int, int] = (2, 4)) -> bytes:
-    return struct.pack(order + "IHHiiII", 0xA1B2C3D4, *version, -3600, 99,
-                       snaplen, linktype)
+def _wire(seq: int, ts_us: int, readings: list[tuple[int, float]]) -> bytes:
+    # Keep channel order and duplicates: malformed input must reach the parser.
+    header = (
+        b"\xeb\x90" + seq.to_bytes(2, "big") + ts_us.to_bytes(8, "big")
+        + len(readings).to_bytes(1, "big")
+    )
+    payload = b"".join(bytes([channel]) + struct.pack(">f", value) for channel, value in readings)
+    return _with_crc(header + payload)
 
 
-def save_capture(tmp_path: Path, frames: list[bytes], order: str = "<") -> Path:
-    raw = global_header(order)
-    for index, frame in enumerate(frames):
-        raw += struct.pack(order + "IIII", 10 + index, 250000, len(frame), len(frame))
-        raw += frame
-    path = tmp_path / "station capture.pcap"
-    path.write_bytes(raw)
-    return path
+@pytest.fixture
+def station_packet() -> bytes:
+    # seq=1, timestamp=2, channel=3, value=1.5; literal header and payload.
+    return _with_crc(bytes.fromhex("eb900001000000000000000201033fc00000"))
 
 
-def network_frame(payload: bytes, *, port: int = 5005, source: int = 1234,
-                  ihl: int = 5, flags: int = 0x4000, protocol: int = 17) -> bytes:
-    udp = struct.pack(">HHHH", source, port, 8 + len(payload), 0) + payload
-    ip = bytearray(ihl * 4)
-    ip[0] = 0x40 | ihl
-    ip[2:4] = struct.pack(">H", len(ip) + len(udp))
-    ip[6:8] = struct.pack(">H", flags)
-    ip[9] = protocol
-    if ihl > 5:
-        ip[20:] = b"\x01" * (len(ip) - 20)
-    return b"\x02" * 12 + b"\x08\x00" + bytes(ip) + udp
+@pytest.mark.parametrize(
+    "seq,ts_us,count,expected",
+    [
+        (0, 0, 0, b"\xeb\x90" + b"\x00" * 11),
+        (65535, 2**64 - 1, 255, b"\xeb\x90" + b"\xff" * 11),
+        (0x1234, 0x0102030405060708, 3, bytes.fromhex("eb901234010203040506070803")),
+    ],
+)
+def test_e1_header_wire_bytes(seq: int, ts_us: int, count: int, expected: bytes) -> None:
+    got = pack_header(seq, ts_us, count)
+    assert isinstance(got, bytes), "pack_header must return bytes"
+    assert got == expected, f"header must have exact big-endian bytes: {got.hex()}"
 
 
-def packet(seq: int, channels: list[int], *, sync: int = 0xEB90) -> bytes:
-    body = struct.pack(">HHQB", sync, seq, 987654321, len(channels))
-    body += b"".join(struct.pack(">Bf", channel, 2.5) for channel in channels)
-    return body + struct.pack(">I", zlib.crc32(body))
+@pytest.mark.parametrize(
+    "wire,expected",
+    [
+        (b"\xeb\x90" + b"\x00" * 11, (0, 0, 0)),
+        (b"\xeb\x90" + b"\xff" * 11, (65535, 2**64 - 1, 255)),
+        (bytes.fromhex("eb901234010203040506070803"), (0x1234, 0x0102030405060708, 3)),
+    ],
+)
+def test_e1_unpack_independent_header(wire: bytes, expected: tuple[int, int, int]) -> None:
+    got = unpack_header(wire)
+    assert isinstance(got, tuple), "unpack_header must return a tuple"
+    assert got == expected, f"unpacked header expected {expected}, got {got}"
 
 
-def with_crc(body: bytes) -> bytes:
-    return body + struct.pack(">I", zlib.crc32(body))
-
-
-def replace_bytes(raw: bytes, offset: int, value: bytes) -> bytes:
-    return raw[:offset] + value + raw[offset + len(value):]
-
-
-@pytest.mark.parametrize("order", ["<", ">"])
-@pytest.mark.parametrize("snaplen,linktype", [(65535, 1), (96, 101)])
-def test_e1_header_fields(order: str, snaplen: int, linktype: int) -> None:
-    got = read_global_header(BytesIO(global_header(order, snaplen=snaplen,
-                                                  linktype=linktype)))
-    expected = {"byteorder": order, "version_major": 2, "version_minor": 4,
-                "snaplen": snaplen, "linktype": linktype}
-    assert got == expected, f"capture header should decode to {expected}, got {got}"
-
-
-def test_e1_reads_current_position_without_closing() -> None:
-    stream = BytesIO(b"prefix" + global_header() + b"next record")
-    stream.seek(6)
-    read_global_header(stream)
-    assert not stream.closed, "the caller owns the open capture file"
-    assert stream.tell() == 30, "consume only the 24-byte global header"
-    assert stream.read() == b"next record"
-
-
-@pytest.mark.parametrize("magic", [b"BAD!", bytes.fromhex("4d3cb2a1"),
-                                    bytes.fromhex("a1b23c4d"), bytes.fromhex("0a0d0d0a")])
-def test_e1_rejects_unsupported_magic(magic: bytes) -> None:
+@pytest.mark.parametrize(
+    "seq,ts_us,count",
+    [(-1, 0, 0), (65536, 0, 0), (0, -1, 0), (0, 2**64, 0), (0, 0, -1), (0, 0, 256)],
+)
+def test_e1_reject_header_range(seq: int, ts_us: int, count: int) -> None:
     with pytest.raises(ValueError):
-        read_global_header(BytesIO(magic + global_header()[4:]))
+        pack_header(seq, ts_us, count)
 
 
-@pytest.mark.parametrize("raw", [b"", global_header()[:23],
-                                  global_header(version=(2, 3)),
-                                  global_header(version=(3, 4)),
-                                  global_header(snaplen=0)])
-def test_e1_rejects_incomplete_or_invalid_header(raw: bytes) -> None:
+@pytest.mark.parametrize("size", [*range(13), 14, 17, 40])
+def test_e1_reject_header_length(size: int) -> None:
+    with pytest.raises(PacketError):
+        unpack_header((b"\xeb\x90" + b"\x00" * 40)[:size])
+
+
+@pytest.mark.parametrize("sync", [b"\x90\xeb", b"\x00\x00", b"\xeb\x91"])
+def test_e1_reject_header_sync(sync: bytes) -> None:
+    with pytest.raises(PacketError):
+        unpack_header(sync + b"\x00" * 11)
+
+
+def test_e2_exact_packet_and_crc(station_packet: bytes) -> None:
+    got = build_packet(1, 2, {3: 1.5})
+    assert isinstance(got, bytes), "the transmitter needs a bytes packet"
+    assert got == station_packet, "header, reading, or big-endian CRC bytes disagree"
+
+
+def test_e2_sorted_channels_and_input_unchanged() -> None:
+    readings = {255: -2.25, 7: 1.5, 0: 0.1}
+    before = list(readings.items())
+    expected = _wire(12, 0x0102030405060708, [(0, 0.1), (7, 1.5), (255, -2.25)])
+    got = build_packet(12, 0x0102030405060708, readings)
+    assert got == expected, "emit ascending channels and preserve f32 precision"
+    assert list(readings.items()) == before, "building must not modify the input dictionary"
+
+
+@pytest.mark.parametrize("count", [0, 255])
+def test_e2_reading_count_boundaries(count: int) -> None:
+    pairs = [(channel, channel / 2.0) for channel in range(count)]
+    got = build_packet(65535, 2**64 - 1, dict(pairs))
+    assert got == _wire(65535, 2**64 - 1, pairs), f"failed at {count} readings"
+    assert len(got) == 17 + 5 * count, "unexpected packet size or padding"
+
+
+@pytest.mark.parametrize("seq,ts_us", [(-1, 0), (65536, 0), (0, -1), (0, 2**64)])
+def test_e2_reject_header_range(seq: int, ts_us: int) -> None:
     with pytest.raises(ValueError):
-        read_global_header(BytesIO(raw))
+        build_packet(seq, ts_us, {})
 
 
-@pytest.mark.parametrize("order", ["<", ">"])
-def test_e2_record_bytes_timestamps_and_original_length(tmp_path: Path, order: str) -> None:
-    path = tmp_path / "trimmed.pcap"
-    path.write_bytes(global_header(order, linktype=101)
-                     + struct.pack(order + "IIII", 10, 250000, 3, 200) + b"abc"
-                     + struct.pack(order + "IIII", 11, 1, 0, 0)
-                     + struct.pack(order + "IIII", 12, 999999, 2, 2) + b"\x00\xff")
-    got = list(iter_records(str(path)))
-    assert got == [(10.25, b"abc"), (11.000001, b""), (12.999999, b"\x00\xff")], (
-        "read captured length, retain empty frames, and scale microseconds")
-
-
-def test_e2_empty_and_supplied_capture(tmp_path: Path) -> None:
-    empty = save_capture(tmp_path, [])
-    assert list(iter_records(empty)) == [], "a header-only capture has no records"
-    records = list(iter_records(DATA))
-    assert len(records) == 7, "the station fixture contains seven frames"
-    assert [timestamp for timestamp, _ in records] == [1700000000.25 + i for i in range(7)]
-    assert all(isinstance(frame, bytes) and len(frame) >= 60 for _, frame in records)
-
-
-@pytest.mark.parametrize("tail", [b"\x00", b"\x00" * 15,
-    struct.pack("<IIII", 1, 0, 5, 5) + b"short"[:4],
-    struct.pack("<IIII", 1, 1000000, 0, 0),
-    struct.pack("<IIII", 1, 0, 65536, 65536),
-    struct.pack("<IIII", 1, 0, 3, 2) + b"abc"])
-def test_e2_rejects_broken_records(tmp_path: Path, tail: bytes) -> None:
-    path = tmp_path / "broken.pcap"
-    path.write_bytes(global_header() + tail)
+@pytest.mark.parametrize("channel", [-1, 256])
+def test_e2_reject_channel_range(channel: int) -> None:
     with pytest.raises(ValueError):
-        list(iter_records(path))
+        build_packet(1, 2, {channel: 1.0})
 
 
-def test_e2_yields_before_later_truncation(tmp_path: Path) -> None:
-    path = save_capture(tmp_path, [b"first"])
-    path.write_bytes(path.read_bytes() + b"broken")
-    records = iter_records(path)
-    assert iter(records) is records, "return an iterator of records"
-    assert next(records) == (10.25, b"first"), "do not read later records before yielding"
+def test_e2_reject_too_many_readings() -> None:
     with pytest.raises(ValueError):
-        next(records)
+        build_packet(1, 2, {channel: 1.0 for channel in range(256)})
+
+@pytest.mark.parametrize(
+    "seq,ts_us,pairs",
+    [
+        (0, 0, []),
+        (65535, 2**64 - 1, [(255, -2.25), (0, 0.1), (7, 1.5)]),
+        (3, 1000, [(channel, channel / 2.0) for channel in range(255)]),
+        (4, 2000, [(0, float("nan")), (1, float("inf")), (2, float("-inf"))]),
+    ],
+)
+def test_e3_decode_independent_packets(seq: int, ts_us: int, pairs: list[tuple[int, float]]) -> None:
+    got = parse_packet(_wire(seq, ts_us, pairs))
+    assert isinstance(got, tuple), "parse_packet must return a tuple"
+    got_seq, got_ts, readings = got
+    assert (got_seq, got_ts) == (seq, ts_us), "sequence or timestamp changed"
+    assert isinstance(readings, dict), "readings must be a channel-to-value dictionary"
+    assert set(readings) == {channel for channel, _ in pairs}, "channel identifiers changed"
+    for channel, value in pairs:
+        (expected,) = struct.unpack(">f", struct.pack(">f", value))
+        if math.isnan(expected):
+            assert math.isnan(readings[channel]), "preserve a decoded NaN value"
+        else:
+            assert readings[channel] == expected, f"wrong decoded f32 for channel {channel}"
 
 
-def test_e2_propagates_header_errors(tmp_path: Path) -> None:
-    path = tmp_path / "not pcap"
-    path.write_bytes(b"garbage")
-    with pytest.raises(ValueError):
-        list(iter_records(path))
-
-@pytest.mark.parametrize("order", ["<", ">"])
-@pytest.mark.parametrize("ihl", [5, 6, 15])
-def test_e3_options_padding_filter_and_order(tmp_path: Path, order: str, ihl: int) -> None:
-    wanted = network_frame(b"measurement", ihl=ihl)
-    path = save_capture(tmp_path, [wanted + b"Ethernet padding",
-        network_frame(b"wrong destination", port=6006, source=5005),
-        network_frame(b"second"), wanted], order)
-    assert udp_payloads(path, 5005) == [b"measurement", b"second", b"measurement"], (
-        "follow IHL, select destination port, omit padding, retain duplicates")
+def test_e3_decode_literal_packet(station_packet: bytes) -> None:
+    got = parse_packet(station_packet)
+    assert got == (1, 2, {3: 1.5}), f"literal station packet decoded as {got}"
 
 
-@pytest.mark.parametrize("port", [0, 65535])
-def test_e3_empty_payload_and_ip_tail(tmp_path: Path, port: int) -> None:
-    frame = network_frame(b"tail", port=port)
-    # IP contains four bytes after an empty UDP datagram; they are not payload.
-    frame = replace_bytes(frame, 14 + 20 + 4, struct.pack(">H", 8))
-    path = save_capture(tmp_path, [frame])
-    assert udp_payloads(str(path), port) == [b""], "respect UDP's declared end"
+@pytest.mark.parametrize("size", range(17))
+def test_e3_reject_short_data(station_packet: bytes, size: int) -> None:
+    with pytest.raises(PacketError):
+        parse_packet(station_packet[:size])
 
 
-BASE = network_frame(b"sample")
-BAD_FRAMES = [
-    pytest.param(b"", id="empty-frame"),
-    pytest.param(BASE[:13], id="short-ethernet"),
-    pytest.param(BASE[:33], id="short-ip"),
-    pytest.param(BASE[:41], id="short-udp"),
-    pytest.param(replace_bytes(BASE, 12, b"\x08\x06"), id="arp"),
-    pytest.param(replace_bytes(BASE, 12, b"\x86\xdd"), id="ipv6"),
-    pytest.param(replace_bytes(BASE, 12, b"\x81\x00"), id="vlan"),
-    pytest.param(replace_bytes(BASE, 14, b"\x65"), id="wrong-ip-version"),
-    pytest.param(replace_bytes(BASE, 14, b"\x44"), id="ihl-too-small"),
-    pytest.param(replace_bytes(BASE, 14, b"\x4f"), id="truncated-options"),
-    pytest.param(replace_bytes(BASE, 16, struct.pack(">H", 27)), id="ip-too-short"),
-    pytest.param(replace_bytes(BASE, 16, struct.pack(">H", 100)), id="ip-truncated"),
-    pytest.param(replace_bytes(BASE, 23, b"\x06"), id="tcp"),
-    pytest.param(replace_bytes(BASE, 20, b"\x20\x00"), id="more-fragments"),
-    pytest.param(replace_bytes(BASE, 20, b"\x00\x01"), id="fragment-offset"),
-    pytest.param(replace_bytes(BASE, 38, struct.pack(">H", 7)), id="udp-too-short"),
-    pytest.param(replace_bytes(BASE, 38, struct.pack(">H", 99)), id="udp-truncated"),
-]
+@pytest.mark.parametrize("damage", ["sync", "count_low", "count_high", "truncated", "extra", "little_crc"])
+def test_e3_reject_sync_length_and_crc_order(station_packet: bytes, damage: str) -> None:
+    body = bytearray(station_packet[:-4])
+    if damage == "sync":
+        body[:2] = b"\x90\xeb"
+        bad = _with_crc(bytes(body))
+    elif damage == "count_low":
+        body[12] = 0
+        bad = _with_crc(bytes(body))
+    elif damage == "count_high":
+        body[12] = 2
+        bad = _with_crc(bytes(body))
+    elif damage == "truncated":
+        bad = station_packet[:-1]
+    elif damage == "extra":
+        bad = station_packet + b"\x00"
+    else:
+        bad = station_packet[:-4] + station_packet[-4:][::-1]
+    with pytest.raises(PacketError):
+        parse_packet(bad)
 
 
-@pytest.mark.parametrize("bad", BAD_FRAMES)
-def test_e3_skips_bad_or_unrelated_frames(tmp_path: Path, bad: bytes) -> None:
-    path = save_capture(tmp_path, [bad, network_frame(b"still usable")])
-    assert udp_payloads(path, 5005) == [b"still usable"], (
-        "skip an unusable frame and continue to the next instrument message")
+@pytest.mark.parametrize("offset", [2, 4, 11, 13, 14, 17, 18, 21])
+def test_e3_reject_crc_damage(station_packet: bytes, offset: int) -> None:
+    damaged = bytearray(station_packet)
+    damaged[offset] ^= 1
+    with pytest.raises(PacketError):
+        parse_packet(bytes(damaged))
 
 
-def test_e3_supplied_capture_and_no_matches() -> None:
-    payloads = udp_payloads(DATA, 5005)
-    assert len(payloads) == 4, "UDP extraction retains bad application CRCs for E4"
-    assert [int.from_bytes(raw[2:4], "big") for raw in payloads] == [40, 41, 42, 43]
-    assert udp_payloads(DATA, 54321) == [], "no destination matches returns an empty list"
+@pytest.mark.parametrize("pairs", [[(1, 1.5), (1, 2.5)], [(255, 1.0), (0, 2.0), (255, 3.0)]])
+def test_e3_reject_duplicate_channels(pairs: list[tuple[int, float]]) -> None:
+    with pytest.raises(PacketError):
+        parse_packet(_wire(1, 2, pairs))
 
 
-@pytest.mark.parametrize("port", [-1, 65536])
-def test_e3_rejects_invalid_port(port: int) -> None:
-    with pytest.raises(ValueError):
-        udp_payloads(DATA, port)
+def test_e4_recover_junk_adjacent_and_repeated_packets(station_packet: bytes) -> None:
+    empty = _wire(0, 0, [])
+    large = _wire(65535, 2**64 - 1, [(channel, float(channel)) for channel in range(255)])
+    stream = b"operator log\x00" + station_packet + empty + b"junk" + large + station_packet + b"tail\xeb"
+    got = find_packets(stream)
+    assert got == [station_packet, empty, large, station_packet], "preserve complete packets and stream order"
+    assert all(isinstance(packet, bytes) for packet in got), "return original packet bytes"
 
 
-def test_e3_propagates_pcap_error(tmp_path: Path) -> None:
-    path = tmp_path / "incomplete.pcap"
-    path.write_bytes(global_header() + b"partial")
-    with pytest.raises(ValueError):
-        udp_payloads(path, 5005)
+@pytest.mark.parametrize("stream", [b"", b"junk", b"\xeb", b"\xeb\x90", b"\x90\xeb" * 6, b"\xeb\x90" + b"\x00" * 11])
+def test_e4_no_complete_valid_packet(stream: bytes) -> None:
+    assert find_packets(stream) == [], "junk and incomplete packets must be ignored"
 
 
-def test_e4_supplied_capture() -> None:
-    assert telemetry_from_capture(DATA, 5005) == [(40, 2), (42, 0), (43, 1)], (
-        "exclude damaged sequence 41, retain zero-channel and IP-options packets")
-    assert telemetry_from_capture(DATA, 54321) == [], "no packets means no summaries"
+def test_e4_skip_crc_damage_and_duplicate_channels(station_packet: bytes) -> None:
+    damaged = bytearray(station_packet)
+    damaged[-1] ^= 1
+    duplicate = _wire(8, 9, [(2, 1.0), (2, 1.0)])
+    stream = bytes(damaged) + duplicate + station_packet + bytes(damaged)
+    assert find_packets(stream) == [station_packet], "reject both CRC damage and CRC-valid duplicate channels"
 
 
-@pytest.mark.parametrize("order", ["<", ">"])
-def test_e4_counts_order_duplicates_and_port(tmp_path: Path, order: str) -> None:
-    entries = [(65535, [8, 2]), (0, []), (9, list(range(255))), (65535, [8, 2])]
-    frames = [network_frame(packet(seq, channels)) for seq, channels in entries]
-    frames.insert(1, network_frame(packet(123, [4]), port=6006))
-    path = save_capture(tmp_path, frames, order)
-    assert telemetry_from_capture(str(path), 5005) == [(65535, 2), (0, 0), (9, 255), (65535, 2)], (
-        "report channel counts, accept unsorted unique channels, preserve capture order")
+def test_e4_resync_inside_rejected_complete_candidate(station_packet: bytes) -> None:
+    # count=4 claims 37 bytes. The real packet begins within that bad candidate.
+    false_header = b"\xeb\x90" + b"\x00" * 10 + b"\x04"
+    stream = false_header + station_packet + b"\x00" * 8
+    assert find_packets(stream) == [station_packet], "advance one byte after rejection, not the claimed length"
 
 
-GOOD = packet(10, [1, 3])
-BAD_PACKETS = [
-    pytest.param(b"", id="empty"),
-    pytest.param(GOOD[:12], id="short-header"),
-    pytest.param(GOOD[:16], id="short-minimum"),
-    pytest.param(packet(10, [1], sync=0), id="bad-sync-valid-crc"),
-    pytest.param(with_crc(replace_bytes(GOOD[:-4], 12, b"\x03")), id="count-too-large"),
-    pytest.param(with_crc(replace_bytes(GOOD[:-4], 12, b"\x01")), id="count-too-small"),
-    pytest.param(GOOD[:-1], id="truncated-crc"),
-    pytest.param(with_crc(GOOD[:-4] + b"extra"), id="trailing-data"),
-    pytest.param(replace_bytes(GOOD, 14, bytes([GOOD[14] ^ 1])), id="corrupt-reading"),
-    pytest.param(replace_bytes(GOOD, 2, b"\x00\x0b"), id="corrupt-sequence"),
-    pytest.param(GOOD[:-4] + b"\x00" * 4, id="bad-crc"),
-    pytest.param(packet(10, [7, 7]), id="duplicate-channel-valid-crc"),
-]
+def test_e4_resync_after_incomplete_candidate_and_overlapping_sync(station_packet: bytes) -> None:
+    false_header = b"\xeb\x90" + b"\x00" * 10 + b"\xff"
+    stream = false_header + b"junk\xeb" + station_packet + station_packet[:15]
+    assert find_packets(stream) == [station_packet], "a damaged large count must not hide later packets"
 
 
-@pytest.mark.parametrize("bad", BAD_PACKETS)
-def test_e4_skips_invalid_telemetry_and_continues(tmp_path: Path, bad: bytes) -> None:
-    path = save_capture(tmp_path, [network_frame(bad), network_frame(packet(11, [5]))])
-    assert telemetry_from_capture(path, 5005) == [(11, 1)], (
-        "bad application packets must not hide subsequent valid measurements")
+def test_e4_keep_accepted_packet_with_sync_in_payload() -> None:
+    (value_with_sync,) = struct.unpack(">f", b"\xeb\x90\x00\x00")
+    packet = _wire(10, 20, [(1, value_with_sync), (2, 1.0)])
+    assert find_packets(packet + packet) == [packet, packet], "sync may occur inside a valid reading"
 
 
-def test_e4_propagates_file_and_port_errors(tmp_path: Path) -> None:
-    path = tmp_path / "broken.pcap"
-    path.write_bytes(global_header() + b"broken")
-    with pytest.raises(ValueError):
-        telemetry_from_capture(path, 5005)
-    with pytest.raises(ValueError):
-        telemetry_from_capture(DATA, -1)
+def test_e5_default_waveform_and_little_endian() -> None:
+    assert parse_block(b"#14\x00\x01\xff\xfe\n") == [1, -2], "decode the documented big-endian waveform"
+    assert parse_block(b"#14\x01\x00\xfe\xff", big_endian=False) == [1, -2], "honor little-endian samples"
+
+
+@pytest.mark.parametrize("big_endian", [True, False])
+@pytest.mark.parametrize(
+    "fmt,values",
+    [
+        ("b", [-128, -1, 0, 127]),
+        ("B", [0, 10, 128, 255]),
+        ("h", [-32768, -2, 1, 32767]),
+        ("H", [0, 1, 32768, 65535]),
+        ("f", [-2.25, -0.0, 0.1, 123.125]),
+    ],
+)
+def test_e5_formats_and_byte_orders(fmt: str, values: list[int | float], big_endian: bool) -> None:
+    byte_order = ">" if big_endian else "<"
+    data = struct.pack(f"{byte_order}{len(values)}{fmt}", *values)
+    count = str(len(data)).encode("ascii")
+    reply = b"#" + str(len(count)).encode("ascii") + count + data
+    expected = [struct.unpack(byte_order + fmt, struct.pack(byte_order + fmt, value))[0] for value in values]
+    got = parse_block(reply, fmt, big_endian)
+    assert isinstance(got, list), "return a list of samples"
+    assert got == expected, f"wrong decoded values for fmt={fmt!r}, big_endian={big_endian}"
+    expected_type = float if fmt == "f" else int
+    assert all(type(value) is expected_type for value in got), "preserve integer versus float sample types"
+
+
+@pytest.mark.parametrize(
+    "reply,fmt,expected",
+    [
+        (b"#10", "b", []),
+        (b"#10\n", "B", []),
+        (b"#10", "h", []),
+        (b"#10\n", "H", []),
+        (b"#10", "f", []),
+        (b"#200\n", "h", []),
+        (b"#9000000004\x00\x01\xff\xfe", "h", [1, -2]),
+        (b"#11\n", "B", [10]),
+        (b"#11\n\n", "B", [10]),
+        (b"#11\r", "B", [13]),
+        (b"#14#1\n\x00", "B", [35, 49, 10, 0]),
+    ],
+)
+def test_e5_valid_framing(reply: bytes, fmt: str, expected: list[int | float]) -> None:
+    got = parse_block(reply, fmt)
+    assert got == expected, f"use the declared byte boundary for {reply!r}, got {got}"
+
+
+def test_e5_ten_thousand_point_waveform() -> None:
+    values = list(range(-5000, 5000))
+    data = struct.pack(">10000h", *values)
+    got = parse_block(b"#520000" + data + b"\n")
+    assert got == values, "decode all 10,000 samples from a five-digit byte count"
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        b"", b"14ab", b"x#10",                          # Missing initial #.
+        b"#", b"#a", b"#:", b"#/", b"#\xb2", b"#\xff",  # Missing/non-ASCII count width.
+        b"#0", b"#00\n",                                # Indefinite blocks.
+        b"#1", b"#2", b"#21", b"#3\n",                 # Incomplete count digits.
+        b"#1x", b"#2-1", b"#2+1", b"#2 1", b"#21 ", b"#2\x001", b"#1\xb2",
+        b"#14", b"#14\x00\x01", b"#14\x00\x01\n",  # Truncated data.
+        b"#12\x00\x01x", b"#12\x00\x01 ", b"#12\x00\x01\r\n",
+        b"#12\x00\x01\n\n", b"#12\x00\x01\nx", b"#12\x00\x01#10",
+        b"#10x", b"#10\n\n",                           # Extra bytes, even after empty data.
+    ],
+)
+def test_e5_reject_malformed_blocks(reply: bytes) -> None:
+    with pytest.raises(ValueError) as error:
+        parse_block(reply)
+    assert str(error.value).strip(), f"explain why block {reply!r} is malformed"
+
+
+@pytest.mark.parametrize(
+    "reply,fmt",
+    [(b"#10", fmt) for fmt in ("", "i", "d", "2h", ">h", "hh", " h", "s", "x", "c")]
+    + [
+        (b"#11\x00", "h"), (b"#13\x00\x01\x02", "h"),
+        (b"#11\x00", "H"), (b"#13\x00\x01\x02", "H"),
+        (b"#11\x00", "f"), (b"#12\x00\x01", "f"),
+        (b"#13\x00\x01\x02", "f"), (b"#15\x00\x01\x02\x03\x04", "f"),
+    ],
+)
+def test_e5_reject_formats_and_partial_samples(reply: bytes, fmt: str) -> None:
+    with pytest.raises(ValueError) as error:
+        parse_block(reply, fmt)
+    assert str(error.value).strip(), f"explain invalid fmt={fmt!r} or a partial sample"

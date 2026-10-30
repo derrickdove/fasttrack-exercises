@@ -1,172 +1,104 @@
-# d40 — Reading C: registers, bits and structs
+# d40 — Git branches, code review and CI
 
-**Time:** about 53 minutes (5 minutes to orient, then 48 minutes of exercises) · **Read first:** learncpp O.2, [Bitwise operators](https://www.learncpp.com/cpp-tutorial/bitwise-operators/), and O.3, [Bit manipulation with bitwise operators and bit masks](https://www.learncpp.com/cpp-tutorial/bit-manipulation-with-bitwise-operators-and-bit-masks/); learncpp 13.7, Introduction to structs; *C++ Primer*, chapter 4, the section on bitwise operators (your book; read for understanding, you won't write C++ until tomorrow); Wikipedia, [Endianness](https://en.wikipedia.org/wiki/Endianness) · **You edit:** `starter/registers.py`
+**Time:** about 45 minutes · **Read first:** GitHub Actions: [Building and testing Python](https://docs.github.com/en/actions/tutorials/build-and-test-code/python); *The Pragmatic Programmer*, topic “Test to Code” (your book); *Pro Git*, “Basic Branching and Merging” and “Contributing to a Project” · **You edit:** `starter/review_fix.py` and `starter/ci.yml`
 
 ## What you're building
 
-A chassis test station needs to interpret a power supply unit (PSU) driver's status and configuration. A driver is software that communicates with an instrument. You will read the supplied C header, `data/psu_regs.h`, and implement its behavior in Python so an operator can see flags, configure bits, and inspect a received status frame (one message with a fixed byte layout). You will also translate five lines from driver code into plain English; no C compiler or hardware is needed.
+A chassis test station compares measured bus voltages (voltages on shared electrical supply lines) with allowed limits. You will address two review comments, describe automated checks for the change, and validate the team's branch names. A **code review** is another developer checking a proposed change before it becomes shared station software.
 
 ## How this works
 
-1. Replace the `raise NotImplementedError(...)` lines in `starter/registers.py`. Don't edit `tests/`, `data/psu_regs.h`, or the supplied answer choices.
-2. Press **Ctrl+Shift+B → Test: d40** (or run `bash tools/run.sh d40` / `tools\run.ps1 d40`). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
+1. Replace the `raise NotImplementedError(...)` lines in `starter/review_fix.py`. E1 and E2 include the proposed buggy bodies in their docstrings (text attached to a function); copy each body out and fix it. For E3, replace the entire placeholder in `starter/ci.yml`. Don't edit `tests/`.
+2. Press **Ctrl+Shift+B → Test: d40** (or run `bash tools/run.sh d40` / `tools\run.ps1 d40`). At first you'll see `Exercises: 0 / 4 passed`, all reported as `NotImplementedError`; this includes the untouched YAML placeholder. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
-A **header** (`.h`) describes C names and data layouts; `#define` gives a name to a value or expression. A **register** is a small hardware storage location represented here by an integer. A **bit** is a binary digit, 0 or 1; a **byte** has eight bits, numbered 0 through 7 from right to left. **Hexadecimal** (prefix `0x`) writes numbers in base 16; **binary** (prefix `0b`) writes them in base 2.
+**Git** tracks versions of files. A **branch** is a named line of Git development. A **commit** records a snapshot of changes. A **pull request (PR)** asks reviewers to merge a branch into the shared branch. **Continuous integration (CI)** runs automated checks when code is pushed or a PR changes. A **regression** is previously working behavior broken by a change.
 
-A **mask** selects bit positions with 1s. A **flag** is a bit used as a yes/no condition. Bitwise operators act on individual bits: `&` selects shared 1s, `|` combines 1s, `~` flips bits, and `<<` / `>>` shift bits left / right. Python integers have no fixed bit width, so `~` can produce a negative number. A **field** is a group of adjacent bits used as one number; its **shift** counts lower bits and its **width** counts its bits.
+A GitHub Actions **workflow** is a YAML file describing automated work. **YAML** is a text format where indentation groups settings: a **mapping** holds `key: value` entries, and a **list** uses `-` entries. A **job** runs on a **runner**, the computer GitHub provides; its **steps** run in order. A step's `uses` selects a reusable action, while `run` gives a shell command. For example, this unrelated workflow fragment gives an operator label to later steps:
 
-```python
-sample = 0b00101000
-print(sample >> 3)          # 5: move the bits three places right
-print(bool(sample & 0x08))  # True: bool turns a nonzero value into True
-print(hex(0b10000000))      # '0x80': another way to write the same integer
+```yaml
+name: Operator label
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo bench-a
 ```
 
-A **struct** groups named values called **members**. **Packed** means members have no unused padding bytes between them. **Endianness** is the order of bytes in a multi-byte number; little-endian puts the lowest-value byte first. **Unsigned** integers cannot be negative; **signed** integers can. The header defines the frame's signed encoding and units. Python's `struct.unpack` decodes binary layouts (`<` selects little-endian without padding; `B` is an unsigned byte, `H` an unsigned two-byte integer, `h` a signed two-byte integer). Alternatively, `int.from_bytes` decodes a byte slice with an explicit byte order and `signed` setting.
-
-A **pointer** holds the location of another value. **Dereferencing** reads or writes the value at that location (`*ptr`). The `->` operator selects a struct member through a pointer. A **cast** such as `(uint8_t)` converts a value to a named type; `uint8_t` is an unsigned eight-bit integer. **Volatile** marks a value that can change independently, such as a hardware register, so the compiler must perform the specified reads.
-
-All numeric arguments in E1/E2 are Python integers; other types are outside this set's contract. Invalid numeric ranges must raise `ValueError`; the message is your choice. Do not silently clamp values or wrap them around.
+`pytest` runs behavioral tests; `mypy` checks Python type hints without operating hardware. `pip` installs Python packages. `python -m <tool>` runs an installed Python tool. An **inclusive** limit accepts its endpoints. A **finite** number is neither infinity nor NaN (**not a number**, an invalid numeric reading).
 
 ## Exercises
 
-### E1 — Show the PSU status flags (easy, ~8 min)
+### E1 — Review the voltage boundary (easy, ~8 min)
 
-**Goal:** Turn the station's status byte into four operator-visible flags, using the `PSU_...` masks in `data/psu_regs.h`.
+**Goal:** Fix the boundary comparison in `within_limits`.
 
-**Signature:** `def decode_status(byte: int) -> dict[str, bool]`
+**Signature:** `def within_limits(value: float, low: float, high: float) -> bool`
 
-Return exactly the four keys written beside the header's status masks. Each value must be a Python `bool`: `True` if that mask's bit is 1, otherwise `False`. Include inactive flags too. Ignore reserved bits (bits with no assigned meaning); dictionary order does not matter. A byte outside `0..255` raises `ValueError`.
+**Review comment:** “The approved station limits include both endpoints. Your strict comparisons reject a bus reading exactly on the low or high limit. Keep those readings passing, and reject readings outside the limits.” The supplied buggy body is `return low < value < high`.
 
-**Example:** `decode_status(0)` → `{"ready": False, "output_on": False, "overcurrent": False, "overtemp": False}`
+Return `True` exactly when `value` is finite and `low <= value <= high`; otherwise return `False`. The caller guarantees finite bounds with `low <= high`; you do not need to validate the bounds. Equal bounds are allowed. Values and bounds use the same unit, volts.
 
-**Watch out:** A mask value such as `16` is an integer, not the boolean `True` required for the operator view. Use the header for bit positions; the four flags are not adjacent.
+**Example:** `within_limits(22.0, 22.0, 26.0)` → `True`; `within_limits(26.1, 22.0, 26.0)` → `False`.
 
-**Reread:** learncpp O.2, bitwise AND; O.3, checking whether a bit is on. Then read the status-mask comments in `data/psu_regs.h`.
+**Watch out:** NaN and positive or negative infinity must return `False`. Negative voltages are allowed when the supplied bounds allow them.
 
-### E2 — Change configuration bits and read a field (easy/medium, ~10 min)
+**Reread:** *The Pragmatic Programmer*, “Test to Code”: connect the endpoint requirement to a test before changing the comparison.
 
-**Goal:** Update a PSU configuration register without disturbing unrelated settings, then extract its selected range field.
+### E2 — Review all station channels (easy, ~9 min)
 
-**Signatures:**
+**Goal:** Fix the premature return in `failed_channels`. A **channel** here is one named voltage measurement.
 
-```python
-def set_bits(reg: int, mask: int) -> int
-def clear_bits(reg: int, mask: int) -> int
-def field(reg: int, shift: int, width: int) -> int
-```
+**Signature:** `def failed_channels(readings: dict[str, float], low: float, high: float) -> list[str]`
 
-`set_bits` returns a register with every bit selected by `mask` set to 1. `clear_bits` returns a register with every selected bit set to 0. All other bits stay unchanged. Both operands must be in `0..255`, or raise `ValueError`. A zero mask changes nothing; all eight bits may be selected.
+**Review comment:** “The return inside the loop stops after the first channel. An operator needs every failing channel, even when the first channel passes. Finish the loop before returning.” The full buggy body is supplied in the function's docstring.
 
-`field` returns the unsigned number in `width` adjacent bits starting at bit `shift`, moved down so its lowest bit becomes bit 0. Require `0 <= reg <= 255`, `0 <= shift <= 7`, `1 <= width <= 8`, and `shift + width <= 8`; otherwise raise `ValueError`. It must work for every valid field, including the range field named in the header.
+`readings` maps unique channel names to voltage values. Apply E1's rule to every value, using the same bounds for all channels. Return a new list containing exactly the failing channel names, in Python's normal string sort order. Return `[]` for empty or all-passing input. Do not change the input dictionary, its values, or its insertion order (the order its entries were added). Bounds have E1's guarantees. You may call `within_limits`.
 
-**Examples:** `set_bits(0x20, 0x03)` → `0x23`; `clear_bits(0x23, 0x03)` → `0x20`; `field(0b10101100, 2, 3)` → `3`.
+**Example:** `failed_channels({"bus_b": 28.0, "bus_a": 24.0}, 22.0, 26.0)` → `["bus_b"]`.
 
-**Watch out:** Clearing bits must still return an integer in `0..255`. Extract only the chosen field, excluding higher bits. These functions return new integers and do not access real hardware.
+**Watch out:** Include non-finite readings as failures. Complete E1 first if you reuse it. Each call returns its own list.
 
-**Reread:** learncpp O.2, bitwise NOT and shifts; O.3, setting and clearing bits; *C++ Primer*, chapter 4, bitwise operators. Read the configuration-field comments in the header.
+**Reread:** *The Pragmatic Programmer*, “Test to Code”: test the case that exposes the defect, including a passing first channel and failing later channel.
 
-### E3 — Decode the packed station frame (medium, ~15 min)
+### E3 — Describe the station's CI checks (medium, ~16 min)
 
-**Goal:** Turn the PSU's received bytes into the measurements and counter described by `struct status_frame` in the header.
+**Goal:** Replace `starter/ci.yml` with a GitHub Actions workflow that catches future station regressions.
 
-**Signature:** `def unpack_status_frame(b: bytes) -> dict[str, int]`
+**File contract:** Use a YAML mapping with these settings:
 
-Accept a `bytes` object of exactly seven bytes. Return exactly the member names shown in the header as dictionary keys, with integer values using the documented offsets, widths, signedness, and byte order. Preserve the raw status integer and the original units. All possible field values are valid, including reserved status bits and the counter's maximum value. If the length is shorter or longer than seven, raise `ValueError` (do not expose `struct.error`). Dictionary order does not matter; other input types are outside the contract.
+- `on` includes both `push` and `pull_request`, without event filters. Use a list of those names, or a mapping with empty values. Quoting the key as `"on"` avoids older YAML parsers treating it as a boolean.
+- `jobs` contains a job named `checks`, with `runs-on: ubuntu-latest` (GitHub's hosted Linux runner).
+- Its `steps` use `actions/checkout@<version>` to download the repository, then `actions/setup-python@<version>` with `python-version: '3.12'` under `with`. An action version identifies a release, such as `@v4`; any nonempty version is accepted. Quote `'3.12'` so YAML reads text rather than a decimal number.
+- After setup, use separate `run` steps in this order: `python -m pip install -r requirements.txt`, `python -m pytest sets/d40`, then `python -m mypy --strict sets/d40/starter`. Bare `pip`, `pytest`, and `mypy` commands are also accepted. Here `-r` reads the package list, and `--strict` enables mypy's strict checks. Each required run step contains just its listed command, with no additional arguments or commands. Use these exact paths; commands run from the exercise repository root. Do not set working-directory overrides on jobs or steps, or in workflow/job defaults.
+- Run the job and its steps unconditionally: no `if` conditions or enabled `continue-on-error` settings. A failed check must fail the workflow. Use direct commands, without shell wrappers, pipes, or ignored errors.
 
-**Example:** `unpack_status_frame(b"\x01\xe0\x2e\xfa\x00\x02\x00")` → `{"status": 1, "voltage_mv": 12000, "current_ma": 250, "sequence": 2}`.
+**Example:** A Python setup step has a `uses` entry and a sibling `with` mapping; `python-version` belongs inside that mapping. The GitHub reading shows this structure.
 
-**Watch out:** The current can be negative. Do not assume your computer's native layout matches the frame. The header's `#pragma pack` directives request no padding; each member begins immediately after the previous one.
+**Watch out:** This exercise only parses and inspects the file using **PyYAML**, the installed YAML reader. It never runs the workflow, downloads actions, or installs packages. `starter/ci.yml` is a practice location; GitHub discovers real workflows under `.github/workflows/`. Keep the exercise file in `starter/` for these tests.
 
-**Reread:** learncpp 13.7, Introduction to structs, especially members; *C++ Primer*, chapter 4, shifts and masks if decoding byte slices manually. Read the entire packed-frame comment in `data/psu_regs.h`.
+**Reread:** GitHub Actions, “Building and testing Python”: “Specifying a Python version”, “Installing dependencies”, and “Testing your code”.
 
-### E4 — Explain five driver lines (easy, ~7 min)
+### E4 — Validate a station-work branch (easy, ~7 min)
 
-**Goal:** Help the next station maintainer read C driver code. Match each supplied C line to its meaning without executing it.
+**Goal:** Implement the team's branch naming convention for reviewed station changes.
 
-**Signature:** `def explain(line: str) -> str`
+**Signature:** `def branch_name_ok(name: str) -> bool`
 
-The five valid inputs are in the supplied `C_LINES` tuple (an ordered, unchangeable collection) in `starter/registers.py` and are repeated on the header's reading cards. The header supplies the types and meaning of each variable. Return the matching string from `MEANINGS`, copied exactly, including punctuation. Every choice is used by exactly one valid input. Do not change these supplied collections. A lookup dictionary is sufficient; you do not need to parse C.
+Return `True` only for the complete form `feature/<ticket>-<slug>` or `fix/<ticket>-<slug>`. A **ticket** is a work-item identifier: exactly uppercase `CTS-` followed by one or more ASCII digits `0`–`9`; leading zeros are allowed. A **slug** is a short description made of one or more lowercase ASCII letters or digits, optionally separated into groups by single hyphens. No leading, trailing, or consecutive hyphens in the slug. **ASCII** here means the English letters `a`–`z` and digits `0`–`9`, rather than other alphabets or digit forms.
 
-Only exact input strings are accepted: any other string, including an empty string or a valid line with extra whitespace, must raise `ValueError`. These are independent snippets; the assignment to `value` stores the result, while the assignment through a pointer writes to the pointed-to location.
+**Example:** `branch_name_ok("feature/CTS-34-bus-limits")` → `True`; `branch_name_ok("fix/CTS-34-Bus")` → `False`.
 
-**Example:** `explain("value = *status_ptr;")` → `"Read the byte that status_ptr points to into value."`
+**Watch out:** Match the whole string, including its end. Do not trim spaces or newlines. Reject empty text, extra slashes, underscores, and any other prefix. `re.fullmatch` from Python's `re` module can match a **regular expression**, a pattern describing allowed text; ordinary string checks are also fine.
 
-**Watch out:** One card writes a byte; the others read or convert values. On the cast card, conversion keeps the lowest eight bits of `raw`. On the hardware card, `status_reg` points to a volatile byte even though the word `volatile` is in the supplied context rather than on the line itself.
+**Reread:** *The Pragmatic Programmer*, “Test to Code”, for testing both accepted and rejected names; *Pro Git*, “Basic Branching and Merging” for branch creation and “Contributing to a Project” for a focused contribution and review.
 
-**Reread:** learncpp 13.7, member selection; *C++ Primer*, chapter 4, bitwise operators, for the cast's lowest-eight-bits effect. Use the pointer, cast, and volatile definitions above and the header's E4 context; no additional pointer chapter is required today.
+## Hands-on git checklist (~5 min; not scored)
 
-### E5 — Byte order on the wire (QUIZ, easy, ~8 min)
+Do this in your own capstone repository (the longer chassis-tester project), where you can push a branch. These actions are practice for you; the exercise runner does not run Git or check a PR.
 
-**Goal:** Choose the right byte order when the station receives telemetry (measurements sent from a device).
-
-**Signature:** `def endian_answers() -> dict[str, str]`
-
-Return a dictionary with exactly the keys `"Q1"`, `"Q2"`, `"Q3"`, and `"Q4"`. Each value is the uppercase letter of your chosen option, such as `"A"`; return one answer per question. Dictionary order does not matter.
-
-A 16-bit integer occupies two bytes. **Big-endian** puts the highest-value byte first; **little-endian** puts the lowest-value byte first. In memory, "first" means the lower memory address (the numbered location of a byte); on the wire, it means the byte sent first. Byte pairs below are written in hexadecimal. Byte order changes the order of whole bytes, not the bits inside each byte.
-
-**Q1.** A PSU driver stores the 16-bit value `0x1234` in big-endian memory. Which bytes appear from the lower address to the higher address?
-
-- A. `34 12`
-- B. `12 34`
-- C. `00 12 00 34`
-- D. `21 43`
-
-<details>
-<summary>Why it matters on the job (Q1)</summary>
-
-Reading a memory dump (a list of stored bytes) helps you compare the driver's value with the device's specification.
-</details>
-
-**Q2.** A network protocol (agreed rules for exchanging data) says a telemetry field uses "network byte order." Which byte order does that mean?
-
-- A. The sending computer's native byte order (its default order for storing numbers).
-- B. The receiving computer's native byte order.
-- C. Little-endian.
-- D. Big-endian.
-
-<details>
-<summary>Why it matters on the job (Q2)</summary>
-
-A shared format lets test stations exchange measurements across different kinds of computers.
-</details>
-
-**Q3.** You are inspecting native memory on an x86 test PC or most ARM test PCs; x86 and ARM are processor families, and PC means personal computer. Which byte order do these machines normally use?
-
-- A. Little-endian.
-- B. Big-endian.
-- C. Whichever byte order the connected instrument uses.
-
-<details>
-<summary>Why it matters on the job (Q3)</summary>
-
-Knowing the station's memory layout helps you investigate differences between stored and received data.
-</details>
-
-**Q4.** A big-endian unsigned telemetry field containing `0x0102` arrives as `b"\x01\x02"`. On a little-endian PC, what does `struct.unpack("<H", b"\x01\x02")[0]` produce?
-
-- A. `0x0102` = 258, because Python detects the sender's byte order.
-- B. It raises `struct.error` (a binary-format error) because the sender and PC use different byte orders.
-- C. `0x0201` = 513, because the bytes are interpreted in the opposite order.
-
-<details>
-<summary>Why it matters on the job (Q4)</summary>
-
-A decoding mistake can turn a valid measurement into a misleading limit failure.
-</details>
-
-**Example (worked):** This different telemetry value shows the same two bytes decoded in two ways. `>` selects big-endian; `<` selects little-endian; `H` is an unsigned two-byte integer. `unpack` returns a tuple, so `[0]` selects its first (and here only) value.
-
-```python
-import struct
-
-wire = b"\x03\x04"  # the big-endian encoding of 0x0304
-print(struct.unpack(">H", wire)[0])  # 772
-print(struct.unpack("<H", wire)[0])  # 1027
-```
-
-**Watch out:** An explicit `<` or `>` tells `struct` how to interpret the bytes regardless of the PC's native byte order. Follow the device's field specification; the E3 frame and another device's telemetry can use different orders.
-
-**Reread:** Wikipedia, *Endianness*, the opening definition and the "Overview", "Hardware", and "Networking" sections; use the day's bitwise and struct readings to review how two bytes form one number.
+- Start from your shared branch with a clean working tree (no uncommitted changes). Create your work branch with `git switch -c fix/CTS-34-limit-review`.
+- Make a small limit-checker change and a regression test in that project. Run its tests locally. Use `git diff` to inspect the changed lines before recording them.
+- Stage only those files with `git add <file-paths>`, then commit with `git commit -m "Fix inclusive voltage limit review"`.
+- Publish the branch with `git push -u origin fix/CTS-34-limit-review`. `origin` is the usual name for your GitHub repository connection; `-u` remembers that branch's destination.
+- Open a PR in your own repository. Describe the defect, resulting behavior, and test command/result. Read the PR's diff (the changed lines) as a reviewer and check its CI result. If the repository has no workflow yet, CI will not appear automatically; record that in the PR instead of claiming checks ran.

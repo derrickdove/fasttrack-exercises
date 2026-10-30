@@ -1,261 +1,322 @@
-from copy import deepcopy
-from datetime import datetime, timedelta, timezone
+"""Grade learner-authored pytest tests against supplied and faulty station drivers."""
+from __future__ import annotations
+
 import json
-import logging
-import re
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+from collections.abc import Callable, Iterator
+from typing import Any
 
 import pytest
 
-from starter.reporting import (
-    failures_by_channel,
-    get_station_logger,
-    summarize,
-    write_report,
+from starter.test_scpi_learner import (
+    test_e1_number_reply as number_test,
+    test_e2_error_reply as error_test,
+    test_e3_station_sweep as sweep_test,
+    test_e4_overload_quirk as quirk_test,
 )
 
+SET = Path(__file__).resolve().parents[1]
+NUMBERS = [
+    ("0", 0.0), ("-12", -12.0), ("+3.5", 3.5),
+    ("6.02E+2", 602.0), (" 7.25 ", 7.25), ("8.5\r\n", 8.5),
+]
+ERRORS = [
+    ('0,"No error"', (0, "No error")),
+    ('-100,"Command error"', (-100, "Command error")),
+    (' -222, "Data out of range"\r\n', (-222, "Data out of range")),
+    ('-300,"Relay, stuck"', (-300, "Relay, stuck")),
+]
 
-@pytest.fixture
-def logger_names(tmp_path):
-    names = [f"d12.{tmp_path.name}.station", f"d12.{tmp_path.name}.backup"]
-    yield names
-    for name in names:
-        logger = logging.getLogger(name)
-        for handler in logger.handlers[:]:
-            logger.removeHandler(handler)
-            handler.close()
+# Each replacement isolates one realistic driver mistake.
+MUTANTS = {
+    "number-sign": r"""
+def parse_number(reply: str) -> float:
+    return abs(float(reply.strip()))
+""",
+    "number-exponent": r"""
+def parse_number(reply: str) -> float:
+    return float(reply.strip().upper().split("E")[0])
+""",
+    "number-padding": r"""
+def parse_number(reply: str) -> float:
+    if reply != reply.strip():
+        raise ValueError("unexpected padding")
+    return float(reply)
+""",
+    "error-sign": r"""
+_original_error = parse_error
+
+def parse_error(reply: str) -> tuple[int, str]:
+    code, message = _original_error(reply)
+    return abs(code), message
+""",
+    "error-message": r"""
+_original_error = parse_error
+
+def parse_error(reply: str) -> tuple[int, str]:
+    code, message = _original_error(reply)
+    return code, message.upper()
+""",
+    "error-comma": r"""
+_original_error = parse_error
+
+def parse_error(reply: str) -> tuple[int, str]:
+    code, message = _original_error(reply)
+    return code, message.split(",")[0]
+""",
+    "sweep-channel": r"""
+def build_query(channel: int) -> str:
+    return "MEAS:VOLT? (@1)\n"
+""",
+    "fixed-firmware": r"""
+def read_voltage(reply: str) -> float:
+    if reply == "OVLD":
+        raise ValueError("overload")
+    return parse_number(reply)
+""",
+}
+
+# This subprocess-only reporter records pytest's own collection and outcomes.
+REPORTER = r"""
+import json
+from pathlib import Path
+
+state = {"items": [], "deselected": [], "results": [], "errors": []}
 
 
-def flush(logger):
-    for handler in logger.handlers:
-        handler.flush()
+def pytest_collection_finish(session):
+    for item in session.items:
+        marks = [
+            {"name": mark.name, "kwargs": mark.kwargs}
+            for mark in item.iter_markers()
+            if mark.name in ("slow", "xfail", "skip", "skipif")
+        ]
+        callspec = getattr(item, "callspec", None)
+        state["items"].append({
+            "name": getattr(item, "originalname", item.name),
+            "nodeid": item.nodeid,
+            "params": callspec.params if callspec is not None else None,
+            "id": callspec.id if callspec is not None else None,
+            "marks": marks,
+        })
 
 
-def test_e1_levels_and_line_format(tmp_path, logger_names):
-    path = tmp_path / "station.log"
-    name = logger_names[0]
-    logger = get_station_logger(name, path)
-    assert isinstance(logger, logging.Logger), "return the configured logging.Logger"
-    for level in (logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR, logging.CRITICAL):
-        logger.log(level, "CH1 reading %s", "µV")
-    flush(logger)
-    lines = path.read_text(encoding="utf-8").splitlines()
-    assert len(lines) == 4, "record INFO through CRITICAL, omitting DEBUG"
-    for line, level in zip(lines, ("INFO", "WARNING", "ERROR", "CRITICAL")):
-        pattern = (
-            r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3} "
-            + re.escape(f"{level} {name}: CH1 reading µV")
+def pytest_deselected(items):
+    state["deselected"].extend(getattr(item, "originalname", item.name) for item in items)
+
+
+def pytest_collectreport(report):
+    if report.failed:
+        state["errors"].append(str(report.longrepr))
+
+
+def pytest_runtest_logreport(report):
+    if report.when == "call" or report.failed:
+        state["results"].append({
+            "nodeid": report.nodeid,
+            "outcome": report.outcome,
+            "xfail": getattr(report, "wasxfail", None),
+            "detail": str(report.longrepr or ""),
+        })
+
+
+def pytest_sessionfinish(session):
+    Path("events.json").write_text(json.dumps(state), encoding="utf-8")
+"""
+
+Run = Callable[..., dict[str, Any]]
+
+
+@pytest.fixture(scope="module")
+def run_driver() -> Iterator[Run]:
+    temporary = tempfile.TemporaryDirectory(prefix="fasttrack-d12-")
+    cache: dict[tuple[str, str, str], dict[str, Any]] = {}
+
+    def run(variant: str = "good", target: str = "", marker: str = "") -> dict[str, Any]:
+        key = variant, target, marker
+        if key in cache:
+            return cache[key]
+        directory = Path(temporary.name) / f"driver-{len(cache)}"
+        directory.mkdir()
+        shutil.copyfile(SET / "starter" / "test_scpi_learner.py", directory / "test_scpi_learner.py")
+        shutil.copyfile(SET / "pytest.ini", directory / "pytest.ini")
+        driver = (SET / "scpi.py").read_text(encoding="utf-8")
+        (directory / "scpi.py").write_text(driver + MUTANTS.get(variant, ""), encoding="utf-8")
+        (directory / "conftest.py").write_text(REPORTER, encoding="utf-8")
+        selection = "test_scpi_learner.py" + (f"::{target}" if target else "")
+        command = [sys.executable, "-m", "pytest", selection, "-q", "--tb=short",
+                   "-c", "pytest.ini", "--strict-markers", "-p", "no:cacheprovider"]
+        if marker:
+            command += ["-m", marker]
+        environment = os.environ.copy()
+        environment.update(PYTEST_DISABLE_PLUGIN_AUTOLOAD="1", PYTEST_ADDOPTS="",
+                           PYTHONDONTWRITEBYTECODE="1")
+        environment.pop("PYTHONPATH", None)
+        environment.pop("PYTEST_PLUGINS", None)
+        completed = subprocess.run(command, cwd=directory, env=environment, capture_output=True,
+                                   text=True, encoding="utf-8", errors="replace", timeout=5)
+        output = completed.stdout + completed.stderr
+        report = directory / "events.json"
+        assert report.exists(), f"Nested pytest could not report its results:\n{output}"
+        result = json.loads(report.read_text(encoding="utf-8"))
+        result.update(returncode=completed.returncode, output=output)
+        cache[key] = result
+        return result
+
+    try:
+        yield run
+    finally:
+        temporary.cleanup()
+
+
+# Probe bodies first so unfinished exercises fail with NotImplementedError.
+@pytest.fixture(scope="module")
+def number_ready() -> None:
+    number_test("0", 0.0)
+
+
+@pytest.fixture(scope="module")
+def error_ready() -> None:
+    error_test('0,"No error"', (0, "No error"))
+
+
+@pytest.fixture(scope="module")
+def sweep_ready() -> None:
+    sweep_test()
+
+
+@pytest.fixture(scope="module")
+def quirk_ready() -> None:
+    try:
+        quirk_test()
+    except (AssertionError, pytest.fail.Exception):
+        # Desired overload behavior deliberately fails on the supplied firmware.
+        pass
+
+
+def items_for(report: dict[str, Any], name: str) -> list[dict[str, Any]]:
+    assert not report["errors"], f"Learner tests could not be collected: {report['output']}"
+    return [item for item in report["items"] if item["name"] == name]
+
+
+def results_for(report: dict[str, Any], name: str) -> list[dict[str, Any]]:
+    nodes = {item["nodeid"] for item in items_for(report, name)}
+    return [result for result in report["results"] if result["nodeid"] in nodes]
+
+
+def assert_passed(report: dict[str, Any], name: str) -> None:
+    results = results_for(report, name)
+    assert results and all(result["outcome"] == "passed" and result["xfail"] is None
+                           for result in results), f"{name} must pass on the good driver:\n{report['output']}"
+
+
+def test_e1_number_formats_pass(number_ready: None, run_driver: Run) -> None:
+    report = run_driver()
+    name = "test_e1_number_reply"
+    assert_passed(report, name)
+    items = items_for(report, name)
+    assert len(items) >= 6, "Use @pytest.mark.parametrize with at least six rows."
+    for reply, expected in NUMBERS:
+        assert any(item["params"] == {"reply": reply, "expected": expected} for item in items), (
+            f"Missing required number row: {reply!r} -> {expected}"
         )
-        assert re.fullmatch(pattern, line), f"unexpected log format: {line!r}"
-    assert logger.level == logging.INFO, "set the named logger's level to INFO"
-    assert logger.propagate is False, "station events must not propagate to parent loggers"
-    assert len(logger.handlers) == 1, "install one file handler"
-    assert isinstance(logger.handlers[0], logging.FileHandler)
-    assert logger.handlers[0].level == logging.INFO, "set the file handler's level to INFO"
 
 
-def test_e1_repeated_setup_does_not_duplicate_events(tmp_path, logger_names):
-    path = tmp_path / "run.log"
-    first = get_station_logger(logger_names[0], path)
-    first.info("before setup again")
-    second = get_station_logger(logger_names[0], path)
-    third = get_station_logger(logger_names[0], path)
-    third.info("after setup again")
-    flush(third)
-    assert first is second is third, "reuse the logger associated with this name"
-    assert len(third.handlers) == 1, "repeated setup must not accumulate handlers"
-    lines = path.read_text(encoding="utf-8").splitlines()
-    assert len(lines) == 2, "each event must appear once, including after repeated setup"
-    assert lines[0].endswith(": before setup again")
-    assert lines[1].endswith(": after setup again")
+@pytest.mark.parametrize("variant", ["number-sign", "number-exponent", "number-padding"])
+def test_e1_number_tests_catch_mutants(number_ready: None, run_driver: Run, variant: str) -> None:
+    report = run_driver(variant, "test_e1_number_reply")
+    results = results_for(report, "test_e1_number_reply")
+    assert report["returncode"] == 1 and any(result["outcome"] == "failed" for result in results), (
+        f"Your number test accepted the {variant} bug; assert the actual parsed value.\n{report['output']}"
+    )
 
 
-def test_e1_appends_to_existing_file_with_string_path(tmp_path, logger_names):
-    path = tmp_path / "operator log.log"
-    path.write_text("previous run retained\n", encoding="utf-8")
-    logger = get_station_logger(logger_names[0], str(path))
-    logger.info("new run")
-    flush(logger)
-    lines = path.read_text(encoding="utf-8").splitlines()
-    assert len(lines) == 2, "append the event without deleting the previous run"
-    assert lines[0] == "previous run retained"
-    assert lines[1].endswith(": new run")
+def test_e2_error_cases_have_ids(error_ready: None, run_driver: Run) -> None:
+    report = run_driver()
+    name = "test_e2_error_reply"
+    assert_passed(report, name)
+    items = items_for(report, name)
+    for reply, expected in ERRORS:
+        assert any(item["params"] == {"reply": reply, "expected": list(expected)} for item in items), (
+            f"Missing required error row: {reply!r} -> {expected!r}"
+        )
+    ids = [item["id"] for item in items]
+    assert all(isinstance(case_id, str) and case_id and case_id.isascii()
+               and all(character.isalnum() or character == "-" for character in case_id)
+               and any(character.isalpha() for character in case_id) for case_id in ids), (
+        "Give each row an explicit readable ASCII id, such as 'queue-clear' (letters, digits, hyphens)."
+    )
+    assert len(ids) == len(set(ids)), "Give error cases distinct ids."
 
 
-def test_e1_station_names_have_independent_files(tmp_path, logger_names):
-    first_path = tmp_path / "primary.log"
-    second_path = tmp_path / "backup.log"
-    first = get_station_logger(logger_names[0], first_path)
-    second = get_station_logger(logger_names[1], second_path)
-    first.info("primary connected")
-    second.warning("backup disconnected")
-    flush(first)
-    flush(second)
-    first_lines = first_path.read_text(encoding="utf-8").splitlines()
-    second_lines = second_path.read_text(encoding="utf-8").splitlines()
-    assert len(first_lines) == len(second_lines) == 1, "keep station files independent"
-    assert first_lines[0].endswith(f"INFO {logger_names[0]}: primary connected")
-    assert second_lines[0].endswith(f"WARNING {logger_names[1]}: backup disconnected")
+@pytest.mark.parametrize("variant", ["error-sign", "error-message", "error-comma"])
+def test_e2_error_tests_catch_mutants(error_ready: None, run_driver: Run, variant: str) -> None:
+    report = run_driver(variant, "test_e2_error_reply")
+    results = results_for(report, "test_e2_error_reply")
+    assert report["returncode"] == 1 and any(result["outcome"] == "failed" for result in results), (
+        f"Your error test accepted the {variant} bug; check both code and full message.\n{report['output']}"
+    )
 
 
-def test_e2_counts_every_check_on_repeated_channels():
-    results = [
-        {"channel": "CH1", "status": status, "message": "voltage check"}
-        for status in ("PASS", "FAIL", "PASS", "ERROR", "FAIL")
-    ]
-    got = summarize(results)
-    assert got == {"counts": {"PASS": 2, "FAIL": 2, "ERROR": 1}, "overall": "ERROR"}
-    assert type(got) is dict and type(got["counts"]) is dict, "return ordinary dictionaries"
+def test_e3_sweep_is_slow_and_checks_channels(sweep_ready: None, run_driver: Run) -> None:
+    report = run_driver()
+    name = "test_e3_station_sweep"
+    assert_passed(report, name)
+    items = items_for(report, name)
+    assert len(items) == 1 and any(mark["name"] == "slow" for mark in items[0]["marks"]), (
+        "Decorate the single sweep test with @pytest.mark.slow."
+    )
+    broken = run_driver("sweep-channel", name)
+    assert broken["returncode"] == 1 and any(result["outcome"] == "failed"
+                                             for result in results_for(broken, name)), (
+        f"Your sweep must catch a driver that always queries channel 1:\n{broken['output']}"
+    )
 
 
-@pytest.mark.parametrize(
-    "statuses, expected",
-    [
-        (["PASS"], "PASS"),
-        (["FAIL"], "FAIL"),
-        (["ERROR"], "ERROR"),
-        (["FAIL", "PASS", "PASS"], "FAIL"),
-        (["PASS", "PASS", "FAIL"], "FAIL"),
-        (["ERROR", "FAIL", "PASS"], "ERROR"),
-        (["PASS", "FAIL", "ERROR"], "ERROR"),
-    ],
-)
-def test_e2_worst_status_is_severity_not_order_or_frequency(statuses, expected):
-    results = [{"channel": "CH4", "status": status, "message": "check"} for status in statuses]
-    got = summarize(results)
-    assert got["overall"] == expected, f"for {statuses}, worst status must be {expected}"
-    assert set(got["counts"]) == set(statuses), "include only statuses actually observed"
+def test_e3_not_slow_deselects_sweep(sweep_ready: None, run_driver: Run) -> None:
+    report = run_driver(marker="not slow")
+    assert report["returncode"] in (0, 1), f"The quick run could not execute:\n{report['output']}"
+    assert report["deselected"] == ["test_e3_station_sweep"], (
+        "-m 'not slow' must deselect only the station sweep."
+    )
+    assert not items_for(report, "test_e3_station_sweep"), "The slow sweep still ran."
+    ordinary = run_driver()
+    expected = {item["nodeid"] for item in ordinary["items"]
+                if item["name"] != "test_e3_station_sweep"}
+    assert {item["nodeid"] for item in report["items"]} == expected, (
+        "All nonslow cases must remain selected."
+    )
 
 
-def test_e2_empty_run():
-    assert summarize([]) == {"counts": {}, "overall": "PASS"}, "empty runs use the documented default"
+def test_e4_quirk_is_reasoned_xfail(quirk_ready: None, run_driver: Run) -> None:
+    report = run_driver()
+    name = "test_e4_overload_quirk"
+    items = items_for(report, name)
+    assert len(items) == 1, "Keep a single overload-quirk test."
+    marks = [mark for mark in items[0]["marks"] if mark["name"] == "xfail"]
+    assert len(marks) == 1 and marks[0]["kwargs"].get("strict") is True, (
+        "Use @pytest.mark.xfail(..., strict=True)."
+    )
+    reason = marks[0]["kwargs"].get("reason", "")
+    assert isinstance(reason, str) and "FW-17" in reason and len(reason) > len("FW-17"), (
+        "The xfail reason must name FW-17 and explain its overload bug."
+    )
+    results = results_for(report, name)
+    assert len(results) == 1 and results[0]["outcome"] == "skipped" and results[0]["xfail"], (
+        f"The supplied firmware should produce XFAIL, not a pass or ordinary skip:\n{report['output']}"
+    )
 
 
-def test_e2_preserves_input_and_does_not_share_counts():
-    results = [{"channel": "CH2", "status": "PASS", "message": "ready", "reading": 4.2}]
-    before = deepcopy(results)
-    first = summarize(results)
-    assert results == before, "summary must not modify the check records"
-    first["counts"]["PASS"] = 99
-    assert summarize(results) == {"counts": {"PASS": 1}, "overall": "PASS"}, "each call gets fresh counts"
-
-
-def test_e3_groups_fail_and_error_messages_in_channel_order():
-    results = [
-        {"channel": "CH1", "status": "FAIL", "message": "voltage low"},
-        {"channel": "CH2", "status": "PASS", "message": "ready"},
-        {"channel": "CH3", "status": "ERROR", "message": "no reply"},
-        {"channel": "CH1", "status": "PASS", "message": "recovered"},
-        {"channel": "CH1", "status": "ERROR", "message": "timeout"},
-        {"channel": "CH3", "status": "FAIL", "message": "current high"},
-    ]
-    got = failures_by_channel(results)
-    assert got == {"CH1": ["voltage low", "timeout"], "CH3": ["no reply", "current high"]}
-    assert type(got) is dict, "return a plain dict rather than a defaultdict"
-
-
-@pytest.mark.parametrize("results", [[], [{"channel": "CH2", "status": "PASS", "message": "ready"}]])
-def test_e3_omits_channels_without_failures(results):
-    assert failures_by_channel(results) == {}, "empty and all-PASS runs have no failure channels"
-
-
-def test_e3_keeps_duplicate_and_empty_messages():
-    results = [
-        {"channel": "CH1", "status": status, "message": message}
-        for status, message in (("FAIL", "low"), ("ERROR", ""), ("FAIL", "low"))
-    ]
-    assert failures_by_channel(results) == {"CH1": ["low", "", "low"]}, "retain every failure message"
-
-
-def test_e3_preserves_input_and_uses_separate_lists():
-    results = [
-        {"channel": "CH1", "status": "FAIL", "message": "low"},
-        {"channel": "CH2", "status": "ERROR", "message": "offline"},
-    ]
-    before = deepcopy(results)
-    got = failures_by_channel(results)
-    assert results == before, "grouping must not modify check records"
-    got["CH1"].append("operator note")
-    assert got["CH2"] == ["offline"], "each channel needs its own list"
-    assert failures_by_channel(results) == {"CH1": ["low"], "CH2": ["offline"]}, "calls must be independent"
-
-
-@pytest.mark.parametrize("string_path", [False, True])
-def test_e4_report_shape_summary_and_full_results(tmp_path, string_path):
-    results = [
-        {"channel": "CH2", "status": "PASS", "message": "ready", "reading": 2.5},
-        {"channel": "CH1", "status": "ERROR", "message": "capteur débranché", "details": [1, None]},
-        {"channel": "CH1", "status": "FAIL", "message": "voltage low"},
-    ]
-    meta = {"station": "A1", "operator": "Zoë", "attempt": 2}
-    now = datetime(2026, 10, 28, 12, 30, tzinfo=timezone.utc)
-    path = tmp_path / "run report.json"
-    returned = write_report(results, str(path) if string_path else path, meta, now=now)
-    got = json.loads(path.read_text(encoding="utf-8"))
-    assert returned is None, "write_report writes a file and returns None"
-    assert got == {
-        "meta": {**meta, "generated_utc": "2026-10-28T12:30:00+00:00"},
-        "summary": {"counts": {"PASS": 1, "ERROR": 1, "FAIL": 1}, "overall": "ERROR"},
-        "results": results,
-    }, "preserve run metadata and full result records, using the documented report shape"
-
-
-@pytest.mark.parametrize(
-    "now, expected",
-    [
-        (datetime(2026, 10, 28, 1, 30, 2, 123456, tzinfo=timezone(timedelta(hours=2))),
-         "2026-10-27T23:30:02.123456+00:00"),
-        (datetime(2026, 10, 28, 23, 45, tzinfo=timezone(timedelta(hours=-3, minutes=-30))),
-         "2026-10-29T03:15:00+00:00"),
-    ],
-)
-def test_e4_injected_time_is_converted_to_utc(tmp_path, now, expected):
-    path = tmp_path / "report.json"
-    write_report([], path, {}, now=now)
-    got = json.loads(path.read_text(encoding="utf-8"))
-    assert got["meta"]["generated_utc"] == expected, "convert the instant to UTC, preserving fractional seconds"
-
-
-def test_e4_metadata_copy_overwrites_old_timestamp_without_mutating_inputs(tmp_path):
-    results = [{"channel": "CH1", "status": "FAIL", "message": "low", "details": {"v": 1.0}}]
-    meta = {"station": "A1", "generated_utc": "old timestamp", "tags": ["acceptance"]}
-    before_results, before_meta = deepcopy(results), deepcopy(meta)
-    now = datetime(2026, 10, 28, tzinfo=timezone.utc)
-    path = tmp_path / "report.json"
-    write_report(results, path, meta, now=now)
-    got = json.loads(path.read_text(encoding="utf-8"))
-    assert results == before_results and meta == before_meta, "do not change caller-owned inputs"
-    assert got["meta"] == {**meta, "generated_utc": now.isoformat()}, "replace a stale timestamp in the file copy"
-
-
-def test_e4_overwrites_existing_report_with_empty_run(tmp_path):
-    path = tmp_path / "report.json"
-    path.write_text("old report content that is longer than an empty run " * 100, encoding="utf-8")
-    now = datetime(2026, 10, 28, tzinfo=timezone.utc)
-    write_report([], path, {}, now=now)
-    assert json.loads(path.read_text(encoding="utf-8")) == {
-        "meta": {"generated_utc": now.isoformat()},
-        "summary": {"counts": {}, "overall": "PASS"},
-        "results": [],
-    }, "replace the old file completely; do not append JSON documents"
-
-
-def test_e4_default_time_is_current_aware_utc(tmp_path):
-    path = tmp_path / "report.json"
-    before = datetime.now(timezone.utc)
-    write_report([], path, {"station": "A1"})
-    after = datetime.now(timezone.utc)
-    got = json.loads(path.read_text(encoding="utf-8"))
-    timestamp = got["meta"]["generated_utc"]
-    parsed = datetime.fromisoformat(timestamp)
-    assert timestamp.endswith("+00:00"), "use isoformat with an explicit UTC offset"
-    assert before <= parsed <= after, "when now is omitted, use the current UTC instant"
-
-
-def test_e1_file_error_reaches_caller(tmp_path, logger_names):
-    with pytest.raises(OSError):
-        get_station_logger(logger_names[0], tmp_path)
-
-
-def test_e4_file_error_reaches_caller(tmp_path):
-    with pytest.raises(OSError):
-        write_report([], tmp_path, {}, now=datetime(2026, 10, 28, tzinfo=timezone.utc))
+def test_e4_fixed_firmware_is_strict_xpass(quirk_ready: None, run_driver: Run) -> None:
+    report = run_driver("fixed-firmware", "test_e4_overload_quirk")
+    results = results_for(report, "test_e4_overload_quirk")
+    assert report["returncode"] == 1 and len(results) == 1 and results[0]["outcome"] == "failed" \
+        and "XPASS(strict)" in results[0]["detail"], (
+            "Assert the desired overload exception: repaired firmware should cause a strict XPASS.\n"
+            + report["output"]
+        )

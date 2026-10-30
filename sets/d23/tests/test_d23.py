@@ -1,330 +1,324 @@
-﻿"""Station packet checks use independent wire bytes, not learner encoders."""
+﻿"""Loopback station tests: no instrument, internet, or fixed port required."""
+from __future__ import annotations
 
-import math
-import struct
-import zlib
+from collections.abc import Callable, Iterator
+from io import BytesIO
+import socket
+from threading import Event, Thread
+from unittest.mock import Mock
 
 import pytest
 
-from starter.packets import (
-    PacketError,
-    build_packet,
-    find_packets,
-    pack_header,
-    parse_block,
-    parse_packet,
-    unpack_header,
-)
+from starter.tcp_instrument import TcpInstrument
 
 
-def _with_crc(body: bytes) -> bytes:
-    return body + zlib.crc32(body).to_bytes(4, "big")
+class FakeInstrument:
+    """Accept one station client and run a bounded instrument script."""
 
+    def __init__(self, script: Callable[[socket.socket], None]) -> None:
+        self.listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.listener.bind(("127.0.0.1", 0))
+        self.listener.listen(1)
+        self.listener.settimeout(0.05)
+        self.host, self.port = self.listener.getsockname()
+        self.script = script
+        self.client: socket.socket | None = None
+        self.stopping = Event()
+        self.errors: list[BaseException] = []
+        self.thread = Thread(target=self._run, name="d23-fake-instrument", daemon=True)
+        self.thread.start()
 
-def _wire(seq: int, ts_us: int, readings: list[tuple[int, float]]) -> bytes:
-    # Keep channel order and duplicates: malformed input must reach the parser.
-    header = (
-        b"\xeb\x90" + seq.to_bytes(2, "big") + ts_us.to_bytes(8, "big")
-        + len(readings).to_bytes(1, "big")
-    )
-    payload = b"".join(bytes([channel]) + struct.pack(">f", value) for channel, value in readings)
-    return _with_crc(header + payload)
+    def _run(self) -> None:
+        try:
+            while not self.stopping.is_set():
+                try:
+                    client, _ = self.listener.accept()
+                except TimeoutError:
+                    continue
+                self.client = client
+                with client:
+                    client.settimeout(1.5)
+                    self.script(client)
+                return
+        except OSError as error:
+            if not self.stopping.is_set():
+                self.errors.append(error)
+        except BaseException as error:
+            self.errors.append(error)
+
+    def stop(self) -> None:
+        self.stopping.set()
+        if self.client is not None:
+            try:
+                self.client.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass  # The handler may already have closed the accepted socket.
+        self.listener.close()
+        self.thread.join(timeout=2.0)
+        assert not self.thread.is_alive(), "fake instrument thread did not stop"
+        assert not self.errors, f"fake instrument script failed: {self.errors!r}"
 
 
 @pytest.fixture
-def station_packet() -> bytes:
-    # seq=1, timestamp=2, channel=3, value=1.5; literal header and payload.
-    return _with_crc(bytes.fromhex("eb900001000000000000000201033fc00000"))
+def instrument_server() -> Iterator[Callable[[Callable[[socket.socket], None]], FakeInstrument]]:
+    servers: list[FakeInstrument] = []
+
+    def start(script: Callable[[socket.socket], None]) -> FakeInstrument:
+        server = FakeInstrument(script)
+        servers.append(server)
+        return server
+
+    yield start
+    for server in servers:
+        server.stop()
 
 
-@pytest.mark.parametrize(
-    "seq,ts_us,count,expected",
-    [
-        (0, 0, 0, b"\xeb\x90" + b"\x00" * 11),
-        (65535, 2**64 - 1, 255, b"\xeb\x90" + b"\xff" * 11),
-        (0x1234, 0x0102030405060708, 3, bytes.fromhex("eb901234010203040506070803")),
-    ],
-)
-def test_e1_header_wire_bytes(seq: int, ts_us: int, count: int, expected: bytes) -> None:
-    got = pack_header(seq, ts_us, count)
-    assert isinstance(got, bytes), "pack_header must return bytes"
-    assert got == expected, f"header must have exact big-endian bytes: {got.hex()}"
+def read_command(connection: socket.socket) -> bytes:
+    """Read an exact command including its LF, without consuming the next one."""
+    command = b""
+    while not command.endswith(b"\n"):
+        chunk = connection.recv(1)
+        if not chunk:
+            raise AssertionError(f"client closed before command newline: {command!r}")
+        command += chunk
+    return command
 
 
-@pytest.mark.parametrize(
-    "wire,expected",
-    [
-        (b"\xeb\x90" + b"\x00" * 11, (0, 0, 0)),
-        (b"\xeb\x90" + b"\xff" * 11, (65535, 2**64 - 1, 255)),
-        (bytes.fromhex("eb901234010203040506070803"), (0x1234, 0x0102030405060708, 3)),
-    ],
-)
-def test_e1_unpack_independent_header(wire: bytes, expected: tuple[int, int, int]) -> None:
-    got = unpack_header(wire)
-    assert isinstance(got, tuple), "unpack_header must return a tuple"
-    assert got == expected, f"unpacked header expected {expected}, got {got}"
+def observe_close(closed: Event) -> Callable[[socket.socket], None]:
+    def script(connection: socket.socket) -> None:
+        assert connection.recv(1) == b"", "closing a client must not send a command"
+        closed.set()
+    return script
 
 
-@pytest.mark.parametrize(
-    "seq,ts_us,count",
-    [(-1, 0, 0), (65536, 0, 0), (0, -1, 0), (0, 2**64, 0), (0, 0, -1), (0, 0, 256)],
-)
-def test_e1_reject_header_range(seq: int, ts_us: int, count: int) -> None:
-    with pytest.raises(ValueError):
-        pack_header(seq, ts_us, count)
+class SocketView:
+    """Keep real TCP but force small receives or a deterministic send timeout."""
+
+    def __init__(self, connection: socket.socket, *, fail_send: bool = False) -> None:
+        self.connection = connection
+        self.fail_send = fail_send
+        self.receive_calls = 0
+
+    def __getattr__(self, name: str):
+        return getattr(self.connection, name)
+
+    def recv(self, size: int) -> bytes:
+        self.receive_calls += 1
+        return self.connection.recv(min(size, 2))
+
+    def sendall(self, payload: bytes) -> None:
+        if self.fail_send:
+            raise TimeoutError("simulated full transmit buffer")
+        self.connection.sendall(payload)
 
 
-@pytest.mark.parametrize("size", [*range(13), 14, 17, 40])
-def test_e1_reject_header_length(size: int) -> None:
-    with pytest.raises(PacketError):
-        unpack_header((b"\xeb\x90" + b"\x00" * 40)[:size])
+@pytest.mark.parametrize("timeout", [None, 0.35])
+def test_e1_connects_with_timeout_and_closes(instrument_server, monkeypatch, timeout) -> None:
+    closed = Event()
+    server = instrument_server(observe_close(closed))
+    original = socket.create_connection
+    connections: list[socket.socket] = []
+    calls = []
+
+    def connect(address, timeout=None):
+        calls.append((address, timeout))
+        connection = original(address, timeout=timeout)
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(socket, "create_connection", connect)
+    client = (TcpInstrument(server.host, server.port) if timeout is None
+              else TcpInstrument(server.host, server.port, timeout=timeout))
+    try:
+        expected_timeout = 2.0 if timeout is None else timeout
+        assert calls == [((server.host, server.port), expected_timeout)], "use create_connection with the requested timeout"
+        assert connections[0].gettimeout() == expected_timeout, "reads and writes need the same timeout"
+    finally:
+        client.close()
+    client.close()
+    assert closed.wait(1.0), "close() must release the station's TCP connection"
 
 
-@pytest.mark.parametrize("sync", [b"\x90\xeb", b"\x00\x00", b"\xeb\x91"])
-def test_e1_reject_header_sync(sync: bytes) -> None:
-    with pytest.raises(PacketError):
-        unpack_header(sync + b"\x00" * 11)
+def test_e1_context_returns_self_and_closes(instrument_server) -> None:
+    closed = Event()
+    server = instrument_server(observe_close(closed))
+    client = TcpInstrument(server.host, server.port)
+    try:
+        with client as entered:
+            assert entered is client, "with must yield the connected instrument"
+        assert closed.wait(1.0), "leaving with must close the connection"
+    finally:
+        client.close()
 
 
-def test_e2_exact_packet_and_crc(station_packet: bytes) -> None:
-    got = build_packet(1, 2, {3: 1.5})
-    assert isinstance(got, bytes), "the transmitter needs a bytes packet"
-    assert got == station_packet, "header, reading, or big-endian CRC bytes disagree"
+def test_e1_context_preserves_operator_error(instrument_server) -> None:
+    closed = Event()
+    server = instrument_server(observe_close(closed))
+    with pytest.raises(ValueError, match="operator cancelled"):
+        with TcpInstrument(server.host, server.port):
+            raise ValueError("operator cancelled")
+    assert closed.wait(1.0), "with must also close after a test-step exception"
 
 
-def test_e2_sorted_channels_and_input_unchanged() -> None:
-    readings = {255: -2.25, 7: 1.5, 0: 0.1}
-    before = list(readings.items())
-    expected = _wire(12, 0x0102030405060708, [(0, 0.1), (7, 1.5), (255, -2.25)])
-    got = build_packet(12, 0x0102030405060708, readings)
-    assert got == expected, "emit ascending channels and preserve f32 precision"
-    assert list(readings.items()) == before, "building must not modify the input dictionary"
+@pytest.mark.parametrize("cmd", ["*RST", "OUTP ON", "DISP:TEXT café"])
+def test_e2_write_sends_exact_bytes_without_reading(instrument_server, cmd) -> None:
+    received: list[bytes] = []
+    done = Event()
+
+    def script(connection: socket.socket) -> None:
+        received.append(read_command(connection))
+        done.set()  # Deliberately send no reply to a write-only command.
+        assert connection.recv(1) == b"", "write must send exactly one command line"
+
+    server = instrument_server(script)
+    with TcpInstrument(server.host, server.port, timeout=0.2) as client:
+        assert client.write(cmd) is None, "write has no return value"
+        assert done.wait(1.0), "instrument never received the command"
+    assert received == [(cmd + "\n").encode("utf-8")], "append one LF and encode the command"
 
 
-@pytest.mark.parametrize("count", [0, 255])
-def test_e2_reading_count_boundaries(count: int) -> None:
-    pairs = [(channel, channel / 2.0) for channel in range(count)]
-    got = build_packet(65535, 2**64 - 1, dict(pairs))
-    assert got == _wire(65535, 2**64 - 1, pairs), f"failed at {count} readings"
-    assert len(got) == 17 + 5 * count, "unexpected packet size or padding"
+@pytest.mark.parametrize("reply", [b"  12.50 V  \n", b"\n", "Température OK\n".encode("utf-8")])
+def test_e2_query_returns_only_reply_text(instrument_server, reply) -> None:
+    def script(connection: socket.socket) -> None:
+        assert read_command(connection) == b"MEAS:VOLT?\n"
+        connection.sendall(reply)
+
+    server = instrument_server(script)
+    with TcpInstrument(server.host, server.port) as client:
+        got = client.query("MEAS:VOLT?")
+    assert got == reply[:-1].decode("utf-8"), "remove only LF; preserve spaces and allow an empty reply"
 
 
-@pytest.mark.parametrize("seq,ts_us", [(-1, 0), (65536, 0), (0, -1), (0, 2**64)])
-def test_e2_reject_header_range(seq: int, ts_us: int) -> None:
-    with pytest.raises(ValueError):
-        build_packet(seq, ts_us, {})
+def test_e2_query_handles_several_receives(instrument_server, monkeypatch) -> None:
+    reply = "BENCH,LOAD,Température-OK,1.0"
+
+    def script(connection: socket.socket) -> None:
+        assert read_command(connection) == b"*IDN?\n"
+        connection.sendall((reply + "\n").encode("utf-8"))
+
+    server = instrument_server(script)
+    original = socket.create_connection
+    views: list[SocketView] = []
+
+    def connect(address, timeout=None):
+        view = SocketView(original(address, timeout=timeout))
+        views.append(view)
+        return view
+
+    monkeypatch.setattr(socket, "create_connection", connect)
+    with TcpInstrument(server.host, server.port) as client:
+        got = client.query("*IDN?")
+    assert got == reply, "one recv is not one reply; decode after collecting the complete line"
 
 
-@pytest.mark.parametrize("channel", [-1, 256])
-def test_e2_reject_channel_range(channel: int) -> None:
-    with pytest.raises(ValueError):
-        build_packet(1, 2, {channel: 1.0})
+def test_e2_query_preserves_buffered_reply_between_calls(monkeypatch) -> None:
+    replies = BytesIO(b"first\nsecond\n")
+    connection = Mock(spec=socket.socket)
+    # Share one byte stream for direct recv and buffered socket readers.
+    connection.recv.side_effect = replies.read
+    connection.makefile.return_value = replies
+    monkeypatch.setattr(socket, "create_connection", lambda *args, **kwargs: connection)
+
+    with TcpInstrument("127.0.0.1", 0) as client:
+        assert client.query("FIRST?") == "first", "return only the first complete reply"
+        assert client.query("SECOND?") == "second", "keep the next reply across query calls"
 
 
-def test_e2_reject_too_many_readings() -> None:
-    with pytest.raises(ValueError):
-        build_packet(1, 2, {channel: 1.0 for channel in range(256)})
+def test_e2_query_reports_closed_connection(instrument_server) -> None:
+    def script(connection: socket.socket) -> None:
+        assert read_command(connection) == b"READ?\n"
+        connection.sendall(b"unfinished")  # Closing without LF is not a valid reply.
 
-@pytest.mark.parametrize(
-    "seq,ts_us,pairs",
-    [
-        (0, 0, []),
-        (65535, 2**64 - 1, [(255, -2.25), (0, 0.1), (7, 1.5)]),
-        (3, 1000, [(channel, channel / 2.0) for channel in range(255)]),
-        (4, 2000, [(0, float("nan")), (1, float("inf")), (2, float("-inf"))]),
-    ],
-)
-def test_e3_decode_independent_packets(seq: int, ts_us: int, pairs: list[tuple[int, float]]) -> None:
-    got = parse_packet(_wire(seq, ts_us, pairs))
-    assert isinstance(got, tuple), "parse_packet must return a tuple"
-    got_seq, got_ts, readings = got
-    assert (got_seq, got_ts) == (seq, ts_us), "sequence or timestamp changed"
-    assert isinstance(readings, dict), "readings must be a channel-to-value dictionary"
-    assert set(readings) == {channel for channel, _ in pairs}, "channel identifiers changed"
-    for channel, value in pairs:
-        (expected,) = struct.unpack(">f", struct.pack(">f", value))
-        if math.isnan(expected):
-            assert math.isnan(readings[channel]), "preserve a decoded NaN value"
-        else:
-            assert readings[channel] == expected, f"wrong decoded f32 for channel {channel}"
+    server = instrument_server(script)
+    with TcpInstrument(server.host, server.port) as client:
+        with pytest.raises(ConnectionError):
+            client.query("READ?")
 
 
-def test_e3_decode_literal_packet(station_packet: bytes) -> None:
-    got = parse_packet(station_packet)
-    assert got == (1, 2, {3: 1.5}), f"literal station packet decoded as {got}"
+@pytest.mark.parametrize("cmd,partial", [
+    ("MEAS:CURR?", b""),
+    ("FETCH:VOLT?", b"12.3"),
+    (r'DISP:TEXT "C:\station\log"', b""),
+    ('DISP:TEXT "station\tlog"', b"12.3"),
+])
+def test_e3_read_timeout_names_command(instrument_server, cmd, partial) -> None:
+    def script(connection: socket.socket) -> None:
+        assert read_command(connection) == (cmd + "\n").encode("utf-8")
+        if partial:
+            connection.sendall(partial)
+        connection.recv(1)  # Wait for the client to close; no timing sleeps.
+
+    server = instrument_server(script)
+    with TcpInstrument(server.host, server.port, timeout=0.1) as client:
+        with pytest.raises(TimeoutError) as failure:
+            client.query(cmd)
+        assert cmd in str(failure.value), "the operator needs the command that timed out"
 
 
-@pytest.mark.parametrize("size", range(17))
-def test_e3_reject_short_data(station_packet: bytes, size: int) -> None:
-    with pytest.raises(PacketError):
-        parse_packet(station_packet[:size])
+@pytest.mark.parametrize("operation", ["write", "query"])
+@pytest.mark.parametrize("cmd", ["OUTP OFF", r'DISP:TEXT "C:\station\log"', 'DISP:TEXT "station\tlog"'])
+def test_e3_send_timeout_names_command(instrument_server, monkeypatch, operation, cmd) -> None:
+    closed = Event()
+    server = instrument_server(observe_close(closed))
+    original = socket.create_connection
+
+    def connect(address, timeout=None):
+        return SocketView(original(address, timeout=timeout), fail_send=True)
+
+    monkeypatch.setattr(socket, "create_connection", connect)
+    with TcpInstrument(server.host, server.port) as client:
+        with pytest.raises(TimeoutError) as failure:
+            getattr(client, operation)(cmd)
+        assert cmd in str(failure.value), "send timeouts also need command context"
 
 
-@pytest.mark.parametrize("damage", ["sync", "count_low", "count_high", "truncated", "extra", "little_crc"])
-def test_e3_reject_sync_length_and_crc_order(station_packet: bytes, damage: str) -> None:
-    body = bytearray(station_packet[:-4])
-    if damage == "sync":
-        body[:2] = b"\x90\xeb"
-        bad = _with_crc(bytes(body))
-    elif damage == "count_low":
-        body[12] = 0
-        bad = _with_crc(bytes(body))
-    elif damage == "count_high":
-        body[12] = 2
-        bad = _with_crc(bytes(body))
-    elif damage == "truncated":
-        bad = station_packet[:-1]
-    elif damage == "extra":
-        bad = station_packet + b"\x00"
-    else:
-        bad = station_packet[:-4] + station_packet[-4:][::-1]
-    with pytest.raises(PacketError):
-        parse_packet(bad)
+def test_e4_pipeline_sends_every_command_before_reading(instrument_server) -> None:
+    commands = ["MEAS:VOLT?", "MEAS:CURR?", "*OPC?"]
+
+    def script(connection: socket.socket) -> None:
+        for cmd in commands:
+            assert read_command(connection) == (cmd + "\n").encode("utf-8")
+        # One combined transmission exercises preservation of later reply bytes.
+        connection.sendall(b" 28.0 \n\n1\n")
+
+    server = instrument_server(script)
+    with TcpInstrument(server.host, server.port, timeout=0.5) as client:
+        got = client.query_many(commands)
+    assert got == [" 28.0 ", "", "1"], "pipeline all writes, then match one reply per command"
+    assert commands == ["MEAS:VOLT?", "MEAS:CURR?", "*OPC?"], "do not mutate the caller's list"
 
 
-@pytest.mark.parametrize("offset", [2, 4, 11, 13, 14, 17, 18, 21])
-def test_e3_reject_crc_damage(station_packet: bytes, offset: int) -> None:
-    damaged = bytearray(station_packet)
-    damaged[offset] ^= 1
-    with pytest.raises(PacketError):
-        parse_packet(bytes(damaged))
+def test_e4_empty_batch_has_no_network_traffic(instrument_server) -> None:
+    closed = Event()
+    server = instrument_server(observe_close(closed))
+    with TcpInstrument(server.host, server.port) as client:
+        assert client.query_many([]) == [], "no commands means no replies to wait for"
+    assert closed.wait(1.0), "empty batch must leave the connection quiet"
 
 
-@pytest.mark.parametrize("pairs", [[(1, 1.5), (1, 2.5)], [(255, 1.0), (0, 2.0), (255, 3.0)]])
-def test_e3_reject_duplicate_channels(pairs: list[tuple[int, float]]) -> None:
-    with pytest.raises(PacketError):
-        parse_packet(_wire(1, 2, pairs))
+def test_e4_repeated_commands_and_followup_query(instrument_server) -> None:
+    def script(connection: socket.socket) -> None:
+        assert read_command(connection) == b"READ?\n"
+        assert read_command(connection) == b"READ?\n"
+        connection.sendall(b"3.2\n3.3\n")
+        assert read_command(connection) == b"*IDN?\n"
+        connection.sendall(b"BENCH,DMM\n")
+
+    server = instrument_server(script)
+    with TcpInstrument(server.host, server.port) as client:
+        assert client.query_many(["READ?", "READ?"]) == ["3.2", "3.3"], "keep duplicate commands and reply order"
+        assert client.query("*IDN?") == "BENCH,DMM", "the same connection must work after a batch"
 
 
-def test_e4_recover_junk_adjacent_and_repeated_packets(station_packet: bytes) -> None:
-    empty = _wire(0, 0, [])
-    large = _wire(65535, 2**64 - 1, [(channel, float(channel)) for channel in range(255)])
-    stream = b"operator log\x00" + station_packet + empty + b"junk" + large + station_packet + b"tail\xeb"
-    got = find_packets(stream)
-    assert got == [station_packet, empty, large, station_packet], "preserve complete packets and stream order"
-    assert all(isinstance(packet, bytes) for packet in got), "return original packet bytes"
+def test_e4_timeout_names_current_pending_command(instrument_server) -> None:
+    def script(connection: socket.socket) -> None:
+        assert read_command(connection) == b"MEAS:VOLT?\n"
+        assert read_command(connection) == b"MEAS:CURR?\n"
+        connection.sendall(b"28.0\n")
+        connection.recv(1)
 
-
-@pytest.mark.parametrize("stream", [b"", b"junk", b"\xeb", b"\xeb\x90", b"\x90\xeb" * 6, b"\xeb\x90" + b"\x00" * 11])
-def test_e4_no_complete_valid_packet(stream: bytes) -> None:
-    assert find_packets(stream) == [], "junk and incomplete packets must be ignored"
-
-
-def test_e4_skip_crc_damage_and_duplicate_channels(station_packet: bytes) -> None:
-    damaged = bytearray(station_packet)
-    damaged[-1] ^= 1
-    duplicate = _wire(8, 9, [(2, 1.0), (2, 1.0)])
-    stream = bytes(damaged) + duplicate + station_packet + bytes(damaged)
-    assert find_packets(stream) == [station_packet], "reject both CRC damage and CRC-valid duplicate channels"
-
-
-def test_e4_resync_inside_rejected_complete_candidate(station_packet: bytes) -> None:
-    # count=4 claims 37 bytes. The real packet begins within that bad candidate.
-    false_header = b"\xeb\x90" + b"\x00" * 10 + b"\x04"
-    stream = false_header + station_packet + b"\x00" * 8
-    assert find_packets(stream) == [station_packet], "advance one byte after rejection, not the claimed length"
-
-
-def test_e4_resync_after_incomplete_candidate_and_overlapping_sync(station_packet: bytes) -> None:
-    false_header = b"\xeb\x90" + b"\x00" * 10 + b"\xff"
-    stream = false_header + b"junk\xeb" + station_packet + station_packet[:15]
-    assert find_packets(stream) == [station_packet], "a damaged large count must not hide later packets"
-
-
-def test_e4_keep_accepted_packet_with_sync_in_payload() -> None:
-    (value_with_sync,) = struct.unpack(">f", b"\xeb\x90\x00\x00")
-    packet = _wire(10, 20, [(1, value_with_sync), (2, 1.0)])
-    assert find_packets(packet + packet) == [packet, packet], "sync may occur inside a valid reading"
-
-
-def test_e5_default_waveform_and_little_endian() -> None:
-    assert parse_block(b"#14\x00\x01\xff\xfe\n") == [1, -2], "decode the documented big-endian waveform"
-    assert parse_block(b"#14\x01\x00\xfe\xff", big_endian=False) == [1, -2], "honor little-endian samples"
-
-
-@pytest.mark.parametrize("big_endian", [True, False])
-@pytest.mark.parametrize(
-    "fmt,values",
-    [
-        ("b", [-128, -1, 0, 127]),
-        ("B", [0, 10, 128, 255]),
-        ("h", [-32768, -2, 1, 32767]),
-        ("H", [0, 1, 32768, 65535]),
-        ("f", [-2.25, -0.0, 0.1, 123.125]),
-    ],
-)
-def test_e5_formats_and_byte_orders(fmt: str, values: list[int | float], big_endian: bool) -> None:
-    byte_order = ">" if big_endian else "<"
-    data = struct.pack(f"{byte_order}{len(values)}{fmt}", *values)
-    count = str(len(data)).encode("ascii")
-    reply = b"#" + str(len(count)).encode("ascii") + count + data
-    expected = [struct.unpack(byte_order + fmt, struct.pack(byte_order + fmt, value))[0] for value in values]
-    got = parse_block(reply, fmt, big_endian)
-    assert isinstance(got, list), "return a list of samples"
-    assert got == expected, f"wrong decoded values for fmt={fmt!r}, big_endian={big_endian}"
-    expected_type = float if fmt == "f" else int
-    assert all(type(value) is expected_type for value in got), "preserve integer versus float sample types"
-
-
-@pytest.mark.parametrize(
-    "reply,fmt,expected",
-    [
-        (b"#10", "b", []),
-        (b"#10\n", "B", []),
-        (b"#10", "h", []),
-        (b"#10\n", "H", []),
-        (b"#10", "f", []),
-        (b"#200\n", "h", []),
-        (b"#9000000004\x00\x01\xff\xfe", "h", [1, -2]),
-        (b"#11\n", "B", [10]),
-        (b"#11\n\n", "B", [10]),
-        (b"#11\r", "B", [13]),
-        (b"#14#1\n\x00", "B", [35, 49, 10, 0]),
-    ],
-)
-def test_e5_valid_framing(reply: bytes, fmt: str, expected: list[int | float]) -> None:
-    got = parse_block(reply, fmt)
-    assert got == expected, f"use the declared byte boundary for {reply!r}, got {got}"
-
-
-def test_e5_ten_thousand_point_waveform() -> None:
-    values = list(range(-5000, 5000))
-    data = struct.pack(">10000h", *values)
-    got = parse_block(b"#520000" + data + b"\n")
-    assert got == values, "decode all 10,000 samples from a five-digit byte count"
-
-
-@pytest.mark.parametrize(
-    "reply",
-    [
-        b"", b"14ab", b"x#10",                          # Missing initial #.
-        b"#", b"#a", b"#:", b"#/", b"#\xb2", b"#\xff",  # Missing/non-ASCII count width.
-        b"#0", b"#00\n",                                # Indefinite blocks.
-        b"#1", b"#2", b"#21", b"#3\n",                 # Incomplete count digits.
-        b"#1x", b"#2-1", b"#2+1", b"#2 1", b"#21 ", b"#2\x001", b"#1\xb2",
-        b"#14", b"#14\x00\x01", b"#14\x00\x01\n",  # Truncated data.
-        b"#12\x00\x01x", b"#12\x00\x01 ", b"#12\x00\x01\r\n",
-        b"#12\x00\x01\n\n", b"#12\x00\x01\nx", b"#12\x00\x01#10",
-        b"#10x", b"#10\n\n",                           # Extra bytes, even after empty data.
-    ],
-)
-def test_e5_reject_malformed_blocks(reply: bytes) -> None:
-    with pytest.raises(ValueError) as error:
-        parse_block(reply)
-    assert str(error.value).strip(), f"explain why block {reply!r} is malformed"
-
-
-@pytest.mark.parametrize(
-    "reply,fmt",
-    [(b"#10", fmt) for fmt in ("", "i", "d", "2h", ">h", "hh", " h", "s", "x", "c")]
-    + [
-        (b"#11\x00", "h"), (b"#13\x00\x01\x02", "h"),
-        (b"#11\x00", "H"), (b"#13\x00\x01\x02", "H"),
-        (b"#11\x00", "f"), (b"#12\x00\x01", "f"),
-        (b"#13\x00\x01\x02", "f"), (b"#15\x00\x01\x02\x03\x04", "f"),
-    ],
-)
-def test_e5_reject_formats_and_partial_samples(reply: bytes, fmt: str) -> None:
-    with pytest.raises(ValueError) as error:
-        parse_block(reply, fmt)
-    assert str(error.value).strip(), f"explain invalid fmt={fmt!r} or a partial sample"
+    server = instrument_server(script)
+    with TcpInstrument(server.host, server.port, timeout=0.1) as client:
+        with pytest.raises(TimeoutError) as failure:
+            client.query_many(["MEAS:VOLT?", "MEAS:CURR?"])
+        assert "MEAS:CURR?" in str(failure.value), "name the pending reply, not the first batch command"

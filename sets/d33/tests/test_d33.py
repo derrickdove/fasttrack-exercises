@@ -1,224 +1,258 @@
-"""Behavior checks for station transitions, callbacks, and cleanup."""
+﻿"""Station tools run as Python children so the same checks work on Linux and Windows."""
+from pathlib import Path
+import signal
+import subprocess
+import sys
 
 import pytest
 
-from starter.sequencer import TRANSITIONS, Sequencer, Step, can_move, run_steps
+from starter import procs
+from starter.procs import GracefulStop, exit_code_meaning, run_tool, supervise
 
 
-EXPECTED = {
-    "IDLE": {"SETUP", "ERROR", "ABORTED"},
-    "SETUP": {"RUNNING", "ERROR", "ABORTED"},
-    "RUNNING": {"PASS", "FAIL", "ERROR", "ABORTED"},
-    "PASS": set(),
-    "FAIL": set(),
-    "ERROR": set(),
-    "ABORTED": set(),
-}
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("print('supply ready')", (0, "supply ready\n", "")),
+        (
+            "import sys; print('CH2'); print('overcurrent', file=sys.stderr); sys.exit(2)",
+            (2, "CH2\n", "overcurrent\n"),
+        ),
+        ("pass", (0, "", "")),
+    ],
+)
+def test_e1_capture_exit_code_and_both_streams(source, expected):
+    got = run_tool([sys.executable, "-c", source], timeout=2.0)
+    assert got == expected, f"tool output must be preserved exactly: expected {expected!r}, got {got!r}"
+
+
+def test_e1_arguments_are_passed_literally():
+    label = "station A; echo WRONG & $CHASSIS"
+    cmd = [sys.executable, "-c", "import sys; print(sys.argv[1])", label]
+    original = cmd.copy()
+    got = run_tool(cmd, timeout=2.0)
+    assert got == (0, label + "\n", ""), "station labels must remain one literal argument"
+    assert cmd == original, "run_tool must not rewrite the caller's argument list"
+
+
+def test_e1_timeout_uses_run_capture_and_discards_partial_output(monkeypatch):
+    cmd = [sys.executable, "-c", "print('starting check')"]
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append((args, kwargs))
+        assert args == cmd, "forward the command as a list"
+        assert kwargs.get("capture_output") is True, "capture stdout and stderr"
+        assert kwargs.get("text") is True, "return strings, not bytes"
+        assert kwargs.get("timeout") == 0.05, "forward the caller's timeout"
+        assert kwargs.get("shell", False) is False, "do not interpret station arguments in a shell"
+        assert kwargs.get("check", False) is False, "nonzero codes are results, not exceptions"
+        raise subprocess.TimeoutExpired(args, 0.05, output=b"partial", stderr=b"diagnostic")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    got = run_tool(cmd, timeout=0.05)
+    assert got == (-9, "", "timeout"), f"discard partial timeout output; got {got!r}"
+    assert len(calls) == 1, "E1 runs a tool once; E4 owns retries"
+
+
+def test_e1_real_child_timeout():
+    # Even a learner who omits the timeout gets a bounded child, not an endless loop.
+    cmd = [sys.executable, "-c", "import time; time.sleep(0.2)"]
+    got = run_tool(cmd, timeout=0.01)
+    assert got == (-9, "", "timeout"), f"a timed-out tool needs the station timeout marker, got {got!r}"
+
+
+def test_e1_missing_executable_propagates(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        run_tool([str(tmp_path / "missing-station-tool")], timeout=1.0)
+
+
+@pytest.mark.parametrize("code, expected", [(0, "ok"), (1, "fail"), (2, "usage")])
+def test_e2_station_codes(code, expected):
+    got = exit_code_meaning(code)
+    assert got == expected, f"exit code {code} should mean {expected!r}, got {got!r}"
+
+
+@pytest.mark.parametrize("number", [1, 2, 9, 15, 37, 1000])
+def test_e2_signal_encodings_agree(number):
+    expected = f"killed by signal {number}"
+    for code in (-number, 128 + number):
+        got = exit_code_meaning(code)
+        assert got == expected, f"decode signal convention for code {code}: got {got!r}"
+
+
+@pytest.mark.parametrize("code", [3, 17, 127, 128])
+def test_e2_other_codes_include_128(code):
+    got = exit_code_meaning(code)
+    assert got == f"exit {code}", f"ordinary code {code} must not be classified as a signal"
+
+
+SIGNALS = [signal.SIGINT]
+if hasattr(signal, "SIGTERM"):
+    SIGNALS.append(signal.SIGTERM)
 
 
 @pytest.fixture
-def events() -> list[str]:
-    return []
+def safe_signals():
+    # Harmless baseline handlers keep incorrect learner code from terminating pytest.
+    original = {sig: signal.getsignal(sig) for sig in SIGNALS}
+    seen = []
+
+    def baseline(signum, frame):
+        seen.append(signum)
+
+    try:
+        for sig in SIGNALS:
+            signal.signal(sig, baseline)
+        yield baseline, seen
+    finally:
+        for sig, handler in original.items():
+            signal.signal(sig, handler)
 
 
-def station_step(
-    events: list[str],
-    name: str,
-    *,
-    passed: bool = True,
-    failure_phase: str | None = None,
-    error: type[BaseException] = RuntimeError,
-) -> Step:
-    """Create fake instrument callbacks with an optional injected failure."""
-    def record(phase: str) -> None:
-        events.append(f"{name}.{phase}")
-        if phase == failure_phase:
-            raise error(f"{name}: {phase} failed")
-
-    def setup() -> None:
-        record("setup")
-
-    def run() -> bool:
-        record("run")
-        return passed
-
-    def teardown() -> None:
-        record("teardown")
-
-    return setup, run, teardown
+def test_e3_initial_flag_and_entered_object(safe_signals):
+    stop = GracefulStop()
+    assert stop.requested is False, "a new station stop monitor starts clear"
+    with stop as entered:
+        assert entered is stop, "__enter__ must return the monitor itself"
+        assert entered.requested is False, "entering alone is not a stop request"
+    assert stop.requested is False
 
 
-def test_e1_transition_table() -> None:
-    # Exercise the stub first, so unfinished E1 reports NotImplementedError.
-    assert can_move("IDLE", "SETUP"), "a station must be able to begin setup"
-    assert TRANSITIONS == EXPECTED, "supply exactly the seven states and their allowed destinations"
-    assert all(isinstance(targets, set) for targets in TRANSITIONS.values())
+@pytest.mark.parametrize("sig", SIGNALS, ids=lambda sig: sig.name)
+def test_e3_signal_sets_flag_without_running_previous_handler(safe_signals, sig):
+    _, seen = safe_signals
+    with GracefulStop() as stop:
+        signal.raise_signal(sig)
+        assert stop.requested is True, f"{sig.name} must request a graceful station stop"
+        signal.raise_signal(sig)
+        assert stop.requested is True, "repeated stop signals leave the flag set"
+        assert seen == [], "the old handler must not run while the monitor is active"
+    assert stop.requested is True, "exiting preserves the last flag value"
 
 
-def test_e1_every_known_transition() -> None:
-    for source, destinations in EXPECTED.items():
-        for target in EXPECTED:
-            expected = target in destinations
-            assert can_move(source, target) is expected, f"wrong permission for {source} -> {target}"
-    assert TRANSITIONS == EXPECTED, "checking moves must not alter the transition table"
+@pytest.mark.parametrize("exceptional_exit", [False, True])
+def test_e3_restores_exact_handlers_on_every_exit(safe_signals, exceptional_exit):
+    baseline, _ = safe_signals
+    stop = GracefulStop()
+    if exceptional_exit:
+        with pytest.raises(ValueError, match="station check failed"):
+            with stop:
+                raise ValueError("station check failed")
+    else:
+        with stop:
+            pass
+    for sig in SIGNALS:
+        assert signal.getsignal(sig) is baseline, f"restore the exact prior {sig.name} handler"
 
 
-@pytest.mark.parametrize("source,target", [
-    ("UNKNOWN", "ERROR"), ("IDLE", "unknown"), ("idle", "SETUP"),
-    ("", "ABORTED"), ("RUNNING", "pass"), ("ERROR", "IDLE"),
-])
-def test_e1_unknown_and_terminal_moves(source: str, target: str) -> None:
-    assert can_move(source, target) is False, f"{source!r} -> {target!r} must be rejected"
+def test_e3_sequential_reuse_resets_flag_and_saves_current_handlers(safe_signals):
+    stop = GracefulStop()
+    with stop:
+        signal.raise_signal(signal.SIGINT)
+        assert stop.requested is True
+    previous_requests = []
+
+    def replacement(signum, frame):
+        previous_requests.append(signum)
+
+    for sig in SIGNALS:
+        signal.signal(sig, replacement)
+    with stop:
+        assert stop.requested is False, "a reused monitor starts a fresh check"
+    for sig in SIGNALS:
+        assert signal.getsignal(sig) is replacement, "save handlers on entry, not at construction"
+    assert previous_requests == []
 
 
-@pytest.mark.parametrize("terminal", ["PASS", "FAIL", "ERROR", "ABORTED"])
-def test_e2_records_legal_path(terminal: str) -> None:
-    station = Sequencer()
-    assert station.state == "IDLE" and station.history == ["IDLE"]
-    for target in ("SETUP", "RUNNING", terminal):
-        assert station.move(target) is None, "move changes the station and returns None"
-    assert station.state == terminal
-    assert station.history == ["IDLE", "SETUP", "RUNNING", terminal]
+def test_e3_nested_instances_restore_outer_monitor(safe_signals):
+    with GracefulStop() as outer:
+        outer_handlers = {sig: signal.getsignal(sig) for sig in SIGNALS}
+        with GracefulStop() as inner:
+            signal.raise_signal(signal.SIGINT)
+            assert inner.requested is True
+            assert outer.requested is False, "only the active inner monitor handles this request"
+        for sig in SIGNALS:
+            assert signal.getsignal(sig) == outer_handlers[sig], "restore the outer monitor's handler"
+        signal.raise_signal(signal.SIGINT)
+        assert outer.requested is True, "the outer handler must work again after inner exit"
 
 
-@pytest.mark.parametrize("target", ["RUNNING", "PASS", "IDLE", "idle", "UNKNOWN", ""])
-def test_e2_rejected_move_preserves_state(target: str) -> None:
-    station = Sequencer()
+def counter_command(tmp_path: Path, failures: int) -> tuple[list[str], Path]:
+    """A tool records each launch and succeeds after a fixed number of failures."""
+    counter = tmp_path / "station attempts.txt"
+    source = (
+        "from pathlib import Path; import sys; "
+        "p = Path(sys.argv[1]); "
+        "n = int(p.read_text()) if p.exists() else 0; "
+        "p.write_text(str(n + 1)); "
+        "sys.exit(1 if n < int(sys.argv[2]) else 0)"
+    )
+    return [sys.executable, "-c", source, str(counter), str(failures)], counter
+
+
+def test_e4_success_stops_after_one_real_launch(tmp_path):
+    cmd, counter = counter_command(tmp_path, failures=0)
+    got = supervise(cmd, restarts=3)
+    assert got == [0], f"a successful station tool needs no restart, got {got!r}"
+    assert counter.read_text() == "1", "do not launch extra attempts after success"
+
+
+def test_e4_transient_failure_retries_then_stops(tmp_path):
+    cmd, counter = counter_command(tmp_path, failures=2)
+    original = cmd.copy()
+    got = supervise(cmd, restarts=4)
+    assert got == [1, 1, 0], f"record failures and final success in order, got {got!r}"
+    assert counter.read_text() == "3", "stop as soon as the instrument tool succeeds"
+    assert cmd == original, "restart the same command without rewriting its arguments"
+
+
+@pytest.mark.parametrize("restarts", [0, 2])
+def test_e4_budget_counts_additional_attempts(tmp_path, restarts):
+    cmd, counter = counter_command(tmp_path, failures=99)
+    got = supervise(cmd, restarts=restarts)
+    assert got == [1] * (restarts + 1), f"{restarts} retries allow {restarts + 1} total attempts"
+    assert counter.read_text() == str(restarts + 1), "the budget must match actual launches"
+
+
+def test_e4_timeouts_and_other_nonzero_codes_are_retryable(monkeypatch):
+    cmd = [sys.executable, "-c", "print('probe')"]
+    outcomes = iter([-9, -15, 2, 0])
+    calls = []
+
+    def fake_tool(args, timeout):
+        calls.append((args.copy(), timeout))
+        assert len(calls) <= 4, "stop after the first successful attempt"
+        return next(outcomes), "discard this output", "discard this diagnostic"
+
+    monkeypatch.setattr(procs, "run_tool", fake_tool)
+    got = supervise(cmd, restarts=7)
+    assert got == [-9, -15, 2, 0], f"retry every nonzero result, including timeout: got {got!r}"
+    assert calls == [(cmd, 5.0)] * 4, "reuse E1 with the same command and a five-second timeout"
+
+
+@pytest.mark.parametrize("restarts", [-1, -3])
+def test_e4_negative_budget_rejected_before_launch(monkeypatch, restarts):
+    calls = []
+
+    def fake_tool(args, timeout):
+        calls.append(args)
+        return 0, "", ""
+
+    monkeypatch.setattr(procs, "run_tool", fake_tool)
     with pytest.raises(ValueError):
-        station.move(target)
-    assert station.state == "IDLE", "a rejected move must leave state unchanged"
-    assert station.history == ["IDLE"], "a rejected move must not enter history"
-    station.move("SETUP")
-    with pytest.raises(ValueError):
-        station.move("PASS")
-    assert station.state == "SETUP" and station.history == ["IDLE", "SETUP"]
+        supervise(["station-tool"], restarts=restarts)
+    assert calls == [], "invalid retry budgets must not launch a station tool"
 
 
-@pytest.mark.parametrize("terminal", ["ERROR", "ABORTED"])
-def test_e2_emergency_moves_and_terminal_lock(terminal: str) -> None:
-    station = Sequencer()
-    station.move(terminal)
-    for target in EXPECTED:
-        with pytest.raises(ValueError):
-            station.move(target)
-    assert station.state == terminal
-    assert station.history == ["IDLE", terminal], "terminal states cannot be restarted or changed"
+def test_e4_launch_error_propagates_without_retry(monkeypatch):
+    calls = []
 
+    def fake_tool(args, timeout):
+        calls.append(args)
+        raise FileNotFoundError("missing station checker")
 
-def test_e2_instances_have_separate_history() -> None:
-    first, second = Sequencer(), Sequencer()
-    first.move("SETUP")
-    assert second.state == "IDLE" and second.history == ["IDLE"]
-    assert first.history is not second.history, "each station owns its history"
-
-
-def test_e3_all_setups_then_runs_then_reverse_cleanup(events: list[str]) -> None:
-    steps = [station_step(events, name) for name in ("supply", "meter", "load")]
-    result = run_steps(steps)
-    assert result == ("PASS", ["IDLE", "SETUP", "RUNNING", "PASS"])
-    assert events == [
-        "supply.setup", "meter.setup", "load.setup",
-        "supply.run", "meter.run", "load.run",
-        "load.teardown", "meter.teardown", "supply.teardown",
-    ], f"wrong station operation order: {events}"
-
-
-def test_e3_empty_station_sequence() -> None:
-    assert run_steps([]) == ("PASS", ["IDLE", "SETUP", "RUNNING", "PASS"])
-
-
-def test_e3_failed_measurement_stops_runs_but_cleans_all(events: list[str]) -> None:
-    steps = [station_step(events, "supply"), station_step(events, "meter", passed=False),
-             station_step(events, "load")]
-    assert run_steps(steps) == ("FAIL", ["IDLE", "SETUP", "RUNNING", "FAIL"])
-    assert events == [
-        "supply.setup", "meter.setup", "load.setup", "supply.run", "meter.run",
-        "load.teardown", "meter.teardown", "supply.teardown",
-    ], "a failed measurement skips later runs, but not their registered cleanup"
-
-
-@pytest.mark.parametrize("failed_index", [0, 1, 2])
-def test_e3_setup_error_cleans_even_partial_setup(events: list[str], failed_index: int) -> None:
-    steps = [station_step(events, str(index), failure_phase="setup" if index == failed_index else None)
-             for index in range(3)]
-    assert run_steps(steps) == ("ERROR", ["IDLE", "SETUP", "ERROR"])
-    expected = [f"{index}.setup" for index in range(failed_index + 1)]
-    expected += [f"{index}.teardown" for index in reversed(range(failed_index + 1))]
-    assert events == expected, "clean only attempted setups, including the setup that raised"
-
-
-def test_e3_run_error_stops_measurements_and_cleans_all(events: list[str]) -> None:
-    steps = [station_step(events, "supply", failure_phase="run", error=ValueError),
-             station_step(events, "meter")]
-    assert run_steps(steps) == ("ERROR", ["IDLE", "SETUP", "RUNNING", "ERROR"])
-    assert events == ["supply.setup", "meter.setup", "supply.run", "meter.teardown", "supply.teardown"]
-
-
-def test_e3_calls_are_independent_and_input_is_preserved(events: list[str]) -> None:
-    steps = [station_step(events, "meter")]
-    saved = steps.copy()
-    first = run_steps(steps)
-    second = run_steps(steps)
-    assert steps == saved, "run_steps must not consume or reorder the input list"
-    assert first == second == ("PASS", ["IDLE", "SETUP", "RUNNING", "PASS"])
-    assert first[1] is not second[1], "each run needs a fresh history"
-    assert events == ["meter.setup", "meter.run", "meter.teardown"] * 2
-
-
-@pytest.mark.parametrize("failed_index", [0, 1, 2])
-def test_e4_setup_interrupt_still_cleans_partial_setup(events: list[str], failed_index: int) -> None:
-    steps = [station_step(events, str(index), failure_phase="setup" if index == failed_index else None,
-                          error=KeyboardInterrupt) for index in range(3)]
-    assert run_steps(steps) == ("ABORTED", ["IDLE", "SETUP", "ABORTED"])
-    expected = [f"{index}.setup" for index in range(failed_index + 1)]
-    expected += [f"{index}.teardown" for index in reversed(range(failed_index + 1))]
-    assert events == expected, "Ctrl+C during setup must not leave attempted instruments open"
-
-
-def test_e4_run_interrupt_stops_runs_and_cleans_all(events: list[str]) -> None:
-    steps = [station_step(events, "supply"),
-             station_step(events, "meter", failure_phase="run", error=KeyboardInterrupt),
-             station_step(events, "load")]
-    assert run_steps(steps) == ("ABORTED", ["IDLE", "SETUP", "RUNNING", "ABORTED"])
-    assert events == [
-        "supply.setup", "meter.setup", "load.setup", "supply.run", "meter.run",
-        "load.teardown", "meter.teardown", "supply.teardown",
-    ]
-
-
-@pytest.mark.parametrize("prior_result", ["PASS", "FAIL", "ERROR", "ABORTED"])
-@pytest.mark.parametrize("cleanup_error", [RuntimeError, KeyboardInterrupt])
-def test_e4_cleanup_error_wins_over_selected_result(
-    events: list[str], prior_result: str, cleanup_error: type[BaseException],
-) -> None:
-    measurement_error = KeyboardInterrupt if prior_result == "ABORTED" else RuntimeError
-    first = station_step(events, "supply", passed=prior_result != "FAIL",
-                         failure_phase="run" if prior_result in {"ERROR", "ABORTED"} else None,
-                         error=measurement_error)
-    steps = [first, station_step(events, "meter"),
-             station_step(events, "load", failure_phase="teardown", error=cleanup_error)]
-    assert run_steps(steps) == ("ERROR", ["IDLE", "SETUP", "RUNNING", "ERROR"])
-    expected = ["supply.setup", "meter.setup", "load.setup", "supply.run"]
-    if prior_result == "PASS":
-        expected += ["meter.run", "load.run"]
-    expected += ["load.teardown", "meter.teardown", "supply.teardown"]
-    assert events == expected, "cleanup must continue after a teardown raises"
-
-
-def test_e4_multiple_cleanup_failures_do_not_skip_remaining_cleanup(events: list[str]) -> None:
-    steps = [station_step(events, "supply"),
-             station_step(events, "meter", failure_phase="teardown", error=KeyboardInterrupt),
-             station_step(events, "load", failure_phase="teardown", error=ValueError)]
-    assert run_steps(steps) == ("ERROR", ["IDLE", "SETUP", "RUNNING", "ERROR"])
-    assert events == [
-        "supply.setup", "meter.setup", "load.setup", "supply.run", "meter.run", "load.run",
-        "load.teardown", "meter.teardown", "supply.teardown",
-    ]
-
-
-def test_e4_setup_abort_with_cleanup_failure_finishes_error(events: list[str]) -> None:
-    steps = [station_step(events, "supply", failure_phase="teardown"),
-             station_step(events, "meter", failure_phase="setup", error=KeyboardInterrupt),
-             station_step(events, "load")]
-    assert run_steps(steps) == ("ERROR", ["IDLE", "SETUP", "ERROR"])
-    assert events == ["supply.setup", "meter.setup", "meter.teardown", "supply.teardown"]
+    monkeypatch.setattr(procs, "run_tool", fake_tool)
+    with pytest.raises(FileNotFoundError, match="missing station checker"):
+        supervise(["missing-station-tool"], restarts=3)
+    assert len(calls) == 1, "a launch error is not an exit code and must not be retried"

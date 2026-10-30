@@ -1,4 +1,4 @@
-# r1 — Week 1 review: weekly review, block 1
+# r1 — Block 1 review: everything so far
 
 **Time:** about 50 minutes · **Read first:** review day, no new reading; reuse the d01–d06 readings listed below · **You edit:** `starter/review1.py`
 
