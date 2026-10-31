@@ -272,19 +272,35 @@ def test_e3_send_timeout_names_command(instrument_server, monkeypatch, operation
         assert cmd in str(failure.value), "send timeouts also need command context"
 
 
-def test_e4_pipeline_sends_every_command_before_reading(instrument_server) -> None:
+def sequential_socket(monkeypatch, exchanges: list[tuple[str, bytes]]) -> Mock:
+    """Reject a query while any bytes of the previous reply remain unread."""
+    replies = BytesIO()
+    expected = iter(exchanges)
+    connection = Mock(spec=socket.socket)
+
+    def sendall(payload: bytes) -> None:
+        assert replies.tell() == len(replies.getvalue()), "read the complete reply before sending another query"
+        command, reply = next(expected)
+        assert payload == (command + "\n").encode("utf-8"), "send one query at a time, in order"
+        replies.seek(0)
+        replies.truncate()
+        replies.write(reply)
+        replies.seek(0)
+
+    connection.sendall.side_effect = sendall
+    connection.recv.side_effect = lambda size: replies.read(min(size, 2))
+    connection.makefile.return_value = replies
+    monkeypatch.setattr(socket, "create_connection", lambda *args, **kwargs: connection)
+    return connection
+
+
+def test_e4_reads_complete_reply_before_next_query(monkeypatch) -> None:
     commands = ["MEAS:VOLT?", "MEAS:CURR?", "*OPC?"]
+    sequential_socket(monkeypatch, list(zip(commands, [b" 28.0 \n", b"\n", b"1\n"])))
 
-    def script(connection: socket.socket) -> None:
-        for cmd in commands:
-            assert read_command(connection) == (cmd + "\n").encode("utf-8")
-        # One combined transmission exercises preservation of later reply bytes.
-        connection.sendall(b" 28.0 \n\n1\n")
-
-    server = instrument_server(script)
-    with TcpInstrument(server.host, server.port, timeout=0.5) as client:
+    with TcpInstrument("127.0.0.1", 0) as client:
         got = client.query_many(commands)
-    assert got == [" 28.0 ", "", "1"], "pipeline all writes, then match one reply per command"
+    assert got == [" 28.0 ", "", "1"], "complete each query/reply exchange before starting the next"
     assert commands == ["MEAS:VOLT?", "MEAS:CURR?", "*OPC?"], "do not mutate the caller's list"
 
 
@@ -296,25 +312,44 @@ def test_e4_empty_batch_has_no_network_traffic(instrument_server) -> None:
     assert closed.wait(1.0), "empty batch must leave the connection quiet"
 
 
-def test_e4_repeated_commands_and_followup_query(instrument_server) -> None:
-    def script(connection: socket.socket) -> None:
-        assert read_command(connection) == b"READ?\n"
-        assert read_command(connection) == b"READ?\n"
-        connection.sendall(b"3.2\n3.3\n")
-        assert read_command(connection) == b"*IDN?\n"
-        connection.sendall(b"BENCH,DMM\n")
+def test_e4_repeated_commands_and_followup_query(monkeypatch) -> None:
+    sequential_socket(monkeypatch, [
+        ("READ?", b"3.2\n"),
+        ("READ?", b"3.3\n"),
+        ("*IDN?", b"BENCH,DMM\n"),
+        ("READ?", b"3.4\n"),
+    ])
 
-    server = instrument_server(script)
-    with TcpInstrument(server.host, server.port) as client:
+    with TcpInstrument("127.0.0.1", 0) as client:
         assert client.query_many(["READ?", "READ?"]) == ["3.2", "3.3"], "keep duplicate commands and reply order"
         assert client.query("*IDN?") == "BENCH,DMM", "the same connection must work after a batch"
+        assert client.query_many(["READ?"]) == ["3.4"], "a later batch must also work on the same connection"
 
 
-def test_e4_timeout_names_current_pending_command(instrument_server) -> None:
+def test_e4_send_timeout_names_current_command(monkeypatch) -> None:
+    connection = sequential_socket(monkeypatch, [("MEAS:VOLT?", b"28.0\n")])
+    sendall = connection.sendall.side_effect
+
+    def fail_second_send(payload: bytes) -> None:
+        if payload == b"MEAS:CURR?\n":
+            raise TimeoutError("simulated full transmit buffer")
+        sendall(payload)
+
+    connection.sendall.side_effect = fail_second_send
+    with TcpInstrument("127.0.0.1", 0) as client:
+        with pytest.raises(TimeoutError) as failure:
+            client.query_many(["MEAS:VOLT?", "MEAS:CURR?"])
+        assert "MEAS:CURR?" in str(failure.value), "name the command whose send timed out"
+
+
+@pytest.mark.parametrize("partial", [b"", b"0.2"])
+def test_e4_timeout_names_current_pending_command(instrument_server, partial) -> None:
     def script(connection: socket.socket) -> None:
         assert read_command(connection) == b"MEAS:VOLT?\n"
-        assert read_command(connection) == b"MEAS:CURR?\n"
         connection.sendall(b"28.0\n")
+        assert read_command(connection) == b"MEAS:CURR?\n"
+        if partial:
+            connection.sendall(partial)
         connection.recv(1)
 
     server = instrument_server(script)

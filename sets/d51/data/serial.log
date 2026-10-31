@@ -1,0 +1,10 @@
+# Invented captured serial exchanges; both cases command 5.000 V.
+# Times are relative to a load-switch event at t_ms=0, on the same timebase as scope.csv.
+# reply is exact received text; reported_V is the production report's numeric value in volts.
+# case_a and case_b are separate station runs; do not assume they share a fault.
+S01 case=case_a t_ms=-10.0 tx="MEAS:VOLT?" reply="5.000 V" reported_V=5.000
+S02 case=case_a t_ms=0.0 tx="MEAS:VOLT?" reply="5000 mV" reported_V=5000.000
+S03 case=case_a t_ms=10.0 tx="MEAS:VOLT?" reply="5.000 V" reported_V=5.000
+S04 case=case_b t_ms=-10.0 tx="MEAS:VOLT?" reply="5.000 V" reported_V=5.000
+S05 case=case_b t_ms=0.0 tx="MEAS:VOLT?" reply="4.980 V" reported_V=4.980
+S06 case=case_b t_ms=10.0 tx="MEAS:VOLT?" reply="5.000 V" reported_V=5.000

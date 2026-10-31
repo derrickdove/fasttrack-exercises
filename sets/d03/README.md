@@ -4,7 +4,7 @@
 
 ## What you're building
 
-A test station is a computer and instruments used to check hardware. A channel is a named measurement source, such as `BUS_V` for supply voltage; a reading pairs that name with a measured number. You will organize readings, summarize each channel, find missing channels, and flag repeated hardware serial numbers before a test starts.
+A test station is a computer and instruments used to check hardware. A channel is a named measurement source, such as `BUS_V` for supply voltage; a reading pairs that name with a measured number. You will organize readings, summarize each channel, find missing channels, flag repeated hardware serial numbers before a test starts, and validate a supply command script.
 
 ## How this works
 
@@ -82,26 +82,42 @@ From the Linux reading: **redirection** sends a program's output to a file (`>`)
 
 **Reread:** Python Tutorial §5.1, More on Lists; §5.4, Sets; your book's hash-table chapter on keeping track of keys already seen.
 
-### E5 — Does the rover command loop come home? (medium, ~20 min)
+### E5 — Validate a supply power sequence (medium, ~20 min)
 
-**Goal:** A **test fixture** is equipment used to hold or position hardware during a test. Its **motion stage** is a small robot cart on the test floor that carries a sensor head. It repeats a command string forever. Return `True` if its path is **bounded** (stays within a fixed, finite area), otherwise `False`. The cart starts at position `(0, 0)` facing north. Its **heading** is the direction it faces. `L` turns 90 degrees left in place, `R` turns 90 degrees right in place, and `F` moves forward one unit in the current heading. Use `(x, y)` for position: east increases `x`, west decreases `x`, north increases `y`, and south decreases `y`.
+**Goal:** A **power supply** is an instrument that provides electrical power; its **output** is the connection that delivers that power to hardware. A **command script** is a list of instruction strings to check in order. Validate the script without controlling real hardware. Return a new list of problem strings in script order, using the exact messages below. Continue checking after every problem.
 
-**Signature:** `def is_valid_loop(commands: str) -> bool`
+**Signature:** `def validate_power_sequence(commands: list[str]) -> list[str]`
 
-**Example:**
+The output starts off on every call. Use a set containing exactly these known commands. Commands match exactly, including capitalization and spaces:
+
+| Command | Meaning and effect |
+| --- | --- |
+| `"ON"` | Turn the output on. If already on, report a problem and leave it on. |
+| `"OFF"` | Turn the output off. Turning it off again is allowed. |
+| `"MEAS:VOLT"` | Request a voltage reading (electrical potential difference). Requires the output to be on; does not change its state. |
+| `"MEAS:CURR"` | Request a current reading (flow of electrical charge). Requires the output to be on; does not change its state. |
+
+An **index** is an item's position in a list, starting at `0`. In the messages below, replace `{index}` with the command's index as decimal digits. Emit one message for each command that has a problem. An unknown command has no effect on the output, even if its text starts with `MEAS:`. After checking all commands, append the final problem if the output is still on.
+
+| Problem | Exact message |
+| --- | --- |
+| Either known measurement command while output is off | `"{index}: measurement while output is off"` |
+| Any command outside the known set | `"{index}: unknown command"` |
+| `"ON"` while output is already on | `"{index}: ON while already on"` |
+| Script ends with output on | `"end: output is still on"` |
+
+**Examples:**
 
 | Call | Result |
 | --- | --- |
-| `is_valid_loop("F")` | `False` |
-| `is_valid_loop("LRF")` | `False` |
-| `is_valid_loop("L")` | `True` |
-| `is_valid_loop("FLLF")` | `True` |
-| `is_valid_loop("LF")` | `True` |
-| `is_valid_loop("FFRFFRFFRFFR")` | `True` |
-| `is_valid_loop("FRF")` | `True` |
+| `validate_power_sequence(["ON", "MEAS:VOLT", "OFF"])` | `[]` |
+| `validate_power_sequence([])` | `[]` |
+| `validate_power_sequence(["MEAS:VOLT"])` | `["0: measurement while output is off"]` |
+| `validate_power_sequence(["RESET"])` | `["0: unknown command"]` |
+| `validate_power_sequence(["ON", "ON", "OFF"])` | `["1: ON while already on"]` |
+| `validate_power_sequence(["ON"])` | `["end: output is still on"]` |
+| `validate_power_sequence(["MEAS:CURR", "ON", "ON", "RESET", "OFF", "MEAS:VOLT", "ON"])` | `["0: measurement while output is off", "2: ON while already on", "3: unknown command", "5: measurement while output is off", "end: output is still on"]` |
 
-A **pass** runs the entire string once, keeping the previous position and heading for the next pass. After at most four complete passes the cart returns to `(0, 0)` if and only if its path is bounded; heading does not matter for returning home. Each pass changes the heading by a total of 0, 90, 180, or 270 degrees. For `"LF"`, the first pass ends at `(-1, 0)` facing west. The next three passes end at `(-1, -1)` facing south, `(0, -1)` facing east, then `(0, 0)` facing north: a bounded square. You can always run all four passes and check the final position. A tuple can hold a position or a forward step; a set can hold the allowed command letters.
+**Watch out:** Empty input and any script with no problems return `[]`. Return problems rather than raising an exception. Do not stop at the first problem, sort the messages, remove repeated problems, or change the input list. The final power-on problem comes after all command problems. Keep power state local to each call. `enumerate(commands)` supplies `(index, command)` tuples while looping through the list.
 
-**Watch out:** Empty input raises `ValueError` (reports an error for an unacceptable value). Any character other than `L`, `R`, or `F` raises `ValueError` with a message naming the bad character. Validate the whole string before returning a result, even if an earlier part stays at or returns to the start. Commands are case-sensitive: lowercase letters, spaces, and newlines are invalid. Check after complete passes; neither the initial position nor a temporary visit home during a pass establishes a bounded path. A turn-only string such as `"L"` is valid because it stays at the start. Return a `bool` (`True` or `False`). `test_e5_fast_enough` supplies 10,000 characters and allows less than 1 second for the call; do not try to simulate forever.
-
-**Reread:** Python Tutorial §5.3, Tuples and Sequences; §5.4, Sets.
+**Reread:** Python Tutorial §5.1, More on Lists; §5.3, Tuples and Sequences; §5.4, Sets; §5.6, Looping Techniques.

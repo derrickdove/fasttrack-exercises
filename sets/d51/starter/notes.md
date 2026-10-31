@@ -1,7 +1,9 @@
 # d51 bench notebook
 
-Use one or two sentences per blank. This notebook is a manual learning aid;
-only the four Python functions are graded. A hypothesis is a possible cause
+Use one or two sentences per blank. This notebook supports E1-E4;
+E5 timing and E6 captured-evidence diagnosis are also graded in
+`starter/timing.py`. E6 requires evidence IDs, a fault decision, a distinguishing
+next measurement, and a safe disposition. A hypothesis is a possible cause
 that you can check. Evidence is an observation that supports or rejects it.
 
 | Bug | Observed symptom / reproduction input | Hypothesis and evidence | Repair and confirming test |
@@ -13,5 +15,7 @@ that you can check. Evidence is an observation that supports or rejects it.
 
 For E1, record what a multimeter could confirm about the steady voltage.
 For E3, record what an oscilloscope could reveal about a short voltage dip
-that a slow software reading could miss. These are thought experiments;
-no physical instruments are needed.
+that a slow software reading could miss. Then use the actual supplied
+serial, DMM, and scope captures in `data/` for the graded E6 decisions.
+No physical instruments are needed; the E6 README defines each capture
+condition and the exact answer fields.

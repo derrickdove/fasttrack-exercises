@@ -23,11 +23,13 @@ def parse_sensor_line(line: str) -> dict[str, float]:
     raise NotImplementedError("E3: verify the XOR checksum before parsing measurements")
 
 
-def read_frames(port: serial.Serial, count: int) -> tuple[list[dict[str, float]], int]:
-    """Collect count valid frames and count rejected lines; propagate timeouts."""
-    raise NotImplementedError("E4: collect valid sensor frames while counting corrupted lines")
+def read_frames(
+    port: serial.Serial, count: int, *, max_bad: int = 20
+) -> tuple[list[dict[str, float]], int]:
+    """Collect count good frames; raise ValueError at max_bad rejected lines."""
+    raise NotImplementedError("E4: collect good frames and stop at the bad-frame budget")
 
 
 def bus_answers() -> dict[str, str]:
-    """Return Q1 through Q5 mapped to uppercase option letters for the bus quiz."""
-    raise NotImplementedError("E5: return the option letters for the bench bus questions")
+    """Return Q1 and Q2 mapped to uppercase option letters for the UART quiz."""
+    raise NotImplementedError("E5: return the option letters for the UART and settings questions")

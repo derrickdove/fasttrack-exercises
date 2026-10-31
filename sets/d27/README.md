@@ -1,6 +1,6 @@
 # d27 — Telemetry reliability: gaps, duplicates and wraparound
 
-**Time:** about 65 minutes · **Read first:** [Wikipedia: Serial number arithmetic](https://en.wikipedia.org/wiki/Serial_number_arithmetic) (overview) and [The Linux Command Line, chapter 17: Searching for Files](https://linuxcommand.org/tlcl.php) (`find`, `xargs`). Python's [`collections.deque`](https://docs.python.org/3/library/collections.html#collections.deque) is a useful lookup; [RFC 1982 §3](https://www.rfc-editor.org/rfc/rfc1982#section-3) is optional. · **You edit:** `starter/sequence.py`
+**Time:** about 55 minutes · **Read first:** [Wikipedia: Serial number arithmetic](https://en.wikipedia.org/wiki/Serial_number_arithmetic) (overview) and [The Linux Command Line, chapter 17: Searching for Files](https://linuxcommand.org/tlcl.php) (`find`, `xargs`). Python's [`collections.deque`](https://docs.python.org/3/library/collections.html#collections.deque) is a useful lookup; [RFC 1982 §3](https://www.rfc-editor.org/rfc/rfc1982#section-3) is optional. · **You edit:** `starter/sequence.py`
 
 ## What you're building
 
@@ -97,7 +97,7 @@ Process the list in its original arrival order using a fresh `GapTracker`. Retur
 
 **Reread:** Wikipedia, overview and Comparison; Python `collections.deque`, bounded history operations. Chapter 17's `find` and `xargs` explain how a station operator could locate captures before running this analysis.
 
-### E5 — Count events in the last N milliseconds (medium, ~20 min)
+### E5 — Count events in the last N milliseconds (medium, ~10 min)
 
 **Goal:** The telemetry monitor records one event each time a packet is dropped. Let the operator ask how many drops occurred in the last N milliseconds. A **millisecond** (ms) is one thousandth of a second; an event's **timestamp** is the clock value when it was recorded.
 
@@ -117,7 +117,7 @@ Start with no events. `record()` records one event at `clock()` and returns `Non
 
 Raise `ValueError` unless `ms` is an integer in **0..10_000**. Reject `True` and `False` too: Python treats booleans as integers in `isinstance(value, int)`, so that check alone is insufficient. Floats such as `5.0` and strings such as `"5"` are invalid; do not convert them.
 
-On `record()`, a valid `count_last()`, and `len(counter)`, remove events strictly older than `now - 10_000` from a deque using `popleft()`. No allowed future query can need them. Implement `__len__` so `len(counter)` returns the number of stored events after this cleanup, even if the clock has advanced without another event. Never discard a younger event just because the current query requests a short window. Storage should depend on events in the last 10,000 ms, rather than the whole station run; this is a time limit, not a fixed limit on the number of drops. This includes auxiliary storage such as a timestamp list: expired entries must be removed periodically even if `len(counter)` already reports only live events. Each counter has independent history.
+On `record()`, a valid `count_last()`, and `len(counter)`, remove events strictly older than `now - 10_000` from a deque using `popleft()`. No allowed future query can need them. Implement `__len__` so `len(counter)` returns the number of stored events after this cleanup, even if the clock has advanced without another event. Never discard a younger event just because the current query requests a short window. Storage should depend on events in the last 10,000 ms, rather than the whole station run; this is a time limit, not a fixed limit on the number of drops. This also applies to any extra list or dictionary you keep: expired entries must be removed periodically even if your counts are already correct. Each counter has independent history.
 
 **Example:** A fake clock lets you try exact boundaries without sleeping:
 
@@ -140,6 +140,4 @@ counter.count_last(10_000)        # 1: the two drops at 1,000 have expired
 len(counter)                     # 1
 ```
 
-**Watch out:** The speed test requires **200,000 records plus 200,000 queries in at most 2 seconds**. Scanning every retained event for every query is too slow. One approach is to keep a sorted timestamp list alongside the deque. An **index** is a position in a list, starting at 0. **Binary search** repeatedly halves a sorted search range; `bisect_left(times, cutoff, lo=start)` returns the index of the first timestamp at least `cutoff`, searching from index `start` (or the list length if none matches). Subtract that index from the list length to count the matching events. Since the clock never goes backwards, appending keeps timestamps sorted. Track how many list entries have expired as a starting index; occasionally copy only the remaining part with a **slice**, `times[start:]`, when expired entries are at least as numerous as retained entries. That keeps the extra list bounded without copying all remaining entries on every removal. A deque is fast at its ends; repeatedly looking up its middle is not fast, so use a list for binary search.
-
-**Reread:** The day's serial-number arithmetic overview for the surrounding telemetry work; Python `collections.deque`, `append` and `popleft` (reread from d15). For the suggested fast lookup, see Python's [`bisect_left`](https://docs.python.org/3/library/bisect.html#bisect.bisect_left).
+**Reread:** The day's serial-number arithmetic overview for the surrounding telemetry work; Python `collections.deque`, `append` and `popleft` (reread from d15).

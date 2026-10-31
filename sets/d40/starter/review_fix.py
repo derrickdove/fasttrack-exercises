@@ -1,5 +1,4 @@
 ﻿"""Review fixes for a station's voltage limit checker."""
-import re
 
 
 def within_limits(value: float, low: float, high: float) -> bool:
@@ -23,9 +22,3 @@ def failed_channels(readings: dict[str, float], low: float, high: float) -> list
         return failures
     """
     raise NotImplementedError("E2: check every channel before returning")
-
-
-def branch_name_ok(name: str) -> bool:
-    """E4: Match feature/CTS-<digits>-<slug> or fix/CTS-<digits>-<slug>."""
-    raise NotImplementedError("E4: validate the entire station-work branch name")
-

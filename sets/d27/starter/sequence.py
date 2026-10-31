@@ -1,5 +1,4 @@
 """Track the sequence numbers in a chassis test station's telemetry."""
-from bisect import bisect_left
 from collections import deque
 from collections.abc import Callable
 
@@ -49,7 +48,7 @@ class EventCounter:
 
     def count_last(self, ms: int) -> int:
         """Count events in [now - ms, now]; reject non-int or out-of-range ms."""
-        raise NotImplementedError("E5: Validate the window and count its events efficiently")
+        raise NotImplementedError("E5: Validate the window and count its events")
 
     def __len__(self) -> int:
         """Discard expired events and return the number of stored events."""

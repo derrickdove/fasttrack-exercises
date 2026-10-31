@@ -8,7 +8,7 @@ A test station is a setup that measures hardware and checks whether it works. It
 
 ## How this works
 
-1. Replace the `raise NotImplementedError(...)` lines in `starter/models.py`. Don't edit `tests/`. The imports, enum members, dataclass fields, and method signatures are supplied.
+1. Replace the `raise NotImplementedError(...)` lines in `starter/models.py`. Don't edit `tests/`. The imports, enum members, dataclass fields, and method signatures are supplied. `RunningStats.__init__` and its four properties are also complete; E3 only needs `add`.
 2. Press **Ctrl+Shift+B → Test: d06** (or run `bash tools/run.sh d06` / `tools\run.ps1 d06` from the repo root). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
@@ -61,7 +61,7 @@ Return the most severe member: `ERROR` wins over `FAIL`, which wins over `PASS`.
 
 **Reread:** Python Tutorial §9.3.2–9.3.4, Class Objects through Method Objects; dataclasses documentation, `__post_init__` under Post-init processing, and Frozen instances.
 
-### E3 — Keep running statistics for one signal (medium, ~12 min)
+### E3 — Keep running statistics for one signal (medium, ~6 min)
 
 **Goal:** Update a signal's statistics as each measurement arrives, without storing its entire history.
 
@@ -69,15 +69,17 @@ Return the most severe member: `ERROR` wins over `FAIL`, which wins over `PASS`.
 
 A **running statistic** updates a stored result when a new sample arrives; a **sample** is one measured number. New instances start with `count == 0`. Every `add` includes one finite number and returns `None`. Inputs here are finite numbers; additional validation is not required. `count` is the number added, `mean` is their sum divided by count (the arithmetic average), and `min`/`max` are the smallest/largest values seen. Accessing **any** of `mean`, `min`, or `max` on an empty instance raises `ValueError`.
 
+Only implement `add`; initialization and all four properties are supplied. The supplied instance attributes are `_count` (initially `0`), `_total` (initially `0.0`), `_min`, and `_max` (both initially `None`, meaning no sample has arrived yet). Update these four attributes in `add` so the supplied properties return the results described above.
+
 All four properties are read-only: callers may read them but may not assign to them. Instances must keep independent state. Use **O(1)** work and storage: a fixed amount per `add` and property read, independent of how many samples came before. Keep a count, total, and extrema (smallest and largest values), rather than a growing list. Values in the tests keep totals within the finite range.
 
 **Example:** after `stats = RunningStats(); stats.add(12.0); stats.add(10.0)`, `(stats.count, stats.mean, stats.min, stats.max)` → `(2, 11.0, 10.0, 12.0)`.
 
 **Watch out:** Don't initialize extrema to zero; the first sample might be positive or negative. The speed check allows 2 seconds for 200,000 updates with property reads. The property called `min` belongs to your instance; Python's separate `min(...)` function still exists.
 
-**Reread:** Python Tutorial §9.3.3–9.3.5, Instance Objects, Method Objects, and Class and Instance Variables; §9.4, Random Remarks, for methods calling other methods. Use the supplied `@property` decorators to expose getters without parentheses.
+**Reread:** Python Tutorial §9.3.3–9.3.5, Instance Objects, Method Objects, and Class and Instance Variables; §9.4, Random Remarks, for methods calling other methods. Read the supplied `@property` methods to see how they expose values without parentheses.
 
-### E4 — Group channels for an operator summary (medium, ~11 min)
+### E4 — Group channels for an operator summary (medium, ~17 min)
 
 **Goal:** Build a **channel bank**, a collection holding one `RunningStats` for each distinct channel name, so the operator can review every signal.
 

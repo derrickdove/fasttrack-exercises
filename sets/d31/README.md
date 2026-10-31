@@ -1,10 +1,10 @@
 # d31 — Concurrency for I/O: threads, queues and clean shutdown
 
-**Time:** about 53 minutes · **Read first:** [Python threading docs: Thread and Event](https://docs.python.org/3/library/threading.html), [Python queue docs](https://docs.python.org/3/library/queue.html), [Python glossary: global interpreter lock](https://docs.python.org/3/glossary.html#term-global-interpreter-lock), and [Pro Git 7.1: Revision Selection](https://git-scm.com/book/en/v2/Git-Tools-Revision-Selection) · **You edit:** `starter/workers.py`
+**Time:** about 53 minutes · **Read first:** [Python threading docs: Thread, Event and Lock](https://docs.python.org/3/library/threading.html), [Python queue docs](https://docs.python.org/3/library/queue.html), [Python glossary: global interpreter lock](https://docs.python.org/3/glossary.html#term-global-interpreter-lock), and [Pro Git 7.1: Revision Selection](https://git-scm.com/book/en/v2/Git-Tools-Revision-Selection) · **You edit:** `starter/workers.py`
 
 ## What you're building
 
-A chassis test station must read instruments and receive telemetry (measurements sent by another device) while the operator continues working. Build background readers and a worker pool that finish cleanly when the station stops. All network tests use this computer only; no hardware is needed.
+A chassis test station must read instruments and receive telemetry (measurements sent by another device) while the operator continues working. Build background readers that finish cleanly when the station stops, and protect shared instrument readings using a supplied worker pool. All network tests use this computer only; no hardware is needed.
 
 ## How this works
 
@@ -25,9 +25,11 @@ readings.put_nowait(28.1)
 ready.set()
 ```
 
+A **PSU** (power supply unit) supplies electrical power; a **channel** is one independently controlled output on that instrument. A **transaction** is a group of operations that must stay together: selecting a channel and querying (requesting) its voltage must finish before another worker selects a different channel on the same PSU. A **lock** (`threading.Lock`) lets one thread at a time enter a protected section of code. `with lock:` acquires (takes ownership of) it before the block and releases it for another thread when the block ends, even if an exception occurs. Threads sharing an instrument must share its lock; separate instruments need separate locks.
+
 A **socket** is a network endpoint. **UDP** sends separate messages called **datagrams**; `recvfrom(size)` returns `(bytes_received, sender_address)`. A **parser** converts bytes into a usable value. A **timeout** bounds how long a blocking call waits. A **worker pool** is a fixed group of threads sharing jobs. A **sentinel** is a special queue item that tells a worker to exit.
 
-For this set, caller-supplied queues are unbounded (no fixed size limit; `Queue()`), and each source/parser/worker call finishes within 0.2 seconds. No forced thread cancellation is needed. `drain` and the background readers do not call `task_done()` (the optional queue task counter is outside this set). Use only the standard library. Never inspect private Queue fields.
+For this set, caller-supplied queues are unbounded (no fixed size limit; `Queue()`), and each source/parser call finishes within 0.2 seconds. E4's supplied instrument operations also finish within 0.2 seconds each; a worker can additionally wait for another transaction to release the lock. No forced thread cancellation is needed. `drain` and the background readers do not call `task_done()` (the optional queue task counter is outside this set). Use only the standard library. Never inspect private Queue fields.
 
 ## Exercises
 
@@ -77,21 +79,25 @@ The caller supplies a UDP socket already bound to `127.0.0.1` (this computer) an
 
 **Reread:** threading docs, `Thread.start`, `Thread.join`, `Thread.is_alive`, and “Event objects”; queue docs, `Queue.put_nowait`. Optional API lookup: [socket timeouts](https://docs.python.org/3/library/socket.html#socket.socket.settimeout) and [recvfrom](https://docs.python.org/3/library/socket.html#socket.socket.recvfrom).
 
-### E4 — Parallel station checks with ordered results (medium, ~15 min)
+### E4 — Protect a shared PSU transaction (medium, ~15 min)
 
-**Goal:** Run independent instrument checks using threads sharing a job queue.
+**Goal:** Keep each channel selection and voltage query together while a supplied worker pool runs station checks.
 
-**Signature:** `run_pipeline(items: Iterable[T], workers: int, fn: Callable[[T], R]) -> list[R]`. An **iterable** supplies items one at a time; `R` means the result type may differ from the input type.
+**Signatures:** `PSUReader(select_channel: Callable[[str], None], query_voltage: Callable[[], float])` and `measure_voltage(channel: str) -> float`.
 
-`workers` is an integer. Reject values below 1 with `ValueError`, even for empty input, before consuming `items`. Consume the finite iterable once. For empty input return `[]` without calling `fn` or starting workers. Otherwise start `min(workers, number_of_items)` worker threads. Queue indexed jobs (each paired with its zero-based input position) and one exit sentinel per worker. Call `fn` exactly once for every input occurrence, including duplicates and `None`; the workers must actually overlap when there are multiple workers and waiting jobs.
+The constructor is complete. It saves two supplied functions as `self.select_channel` and `self.query_voltage`, and creates `self.lock`, a separate `threading.Lock` for this reader. The caller creates one reader per physical instrument and shares that reader among all workers using that instrument. The supplied functions perform the instrument operations; you do not write instrument commands or validate channel names here.
 
-Return results in input order, even when jobs finish in a different order. Catch ordinary `Exception` failures from `fn`, record them, and keep processing all remaining jobs. After every worker has stopped, re-raise the original exception object from the first failure recorded by a worker. Simultaneous failures may be recorded in either order. Use a queue to record failures safely. `KeyboardInterrupt` and other `BaseException` subclasses are outside the contract. Never return or raise while a worker is still alive. Use bounded waits when joining (for example, repeat `join(timeout=0.2)` while alive).
+Implement only `measure_voltage`. Hold `self.lock` continuously while calling `self.select_channel(channel)` once, then `self.query_voltage()` once with no arguments. Return the query's float unchanged. No other call using this reader may select or query between those two operations. Release the lock on success and on failure. If either supplied function raises an ordinary exception, let that same exception reach the caller; do not retry, and do not query after a failed selection. Calls using different readers must still be able to run in parallel, so do not use one lock for the whole pool or for all readers.
 
-**Example:** `run_pipeline(["CH1", "CH2"], 2, lambda channel: channel + ":PASS")` gives `["CH1:PASS", "CH2:PASS"]`. A failed CH1 still allows CH2 to finish before the failure reaches the caller.
+The complete `run_pipeline(items: Iterable[T], workers: int, fn: Callable[[T], R]) -> list[R]` is supplied; leave it as it is. An **iterable** supplies items one at a time; `R` means the result type may differ from the input type. It consumes the finite input once, calls `fn` once per occurrence (including duplicates and `None`), and returns results in input order. With waiting work, its threads overlap. Pass the shared reader's `measure_voltage` method as `fn` to read several channels safely.
 
-**Watch out:** Store each job's input index alongside its result. Do not use `None` alone as a job; it is a valid input. Do not use `ThreadPoolExecutor` here: practice `Thread` and `Queue` directly.
+For reference, the pool rejects an integer `workers < 1` before consuming input. Empty input returns `[]` without starting workers. Otherwise it starts `min(workers, number_of_items)` threads using indexed jobs and exit sentinels. It records ordinary `Exception` failures in a queue, finishes the remaining jobs, joins all workers with bounded waits, then re-raises the original first-recorded failure. Simultaneous failures may be recorded in either order. `KeyboardInterrupt` and other `BaseException` subclasses are outside this contract. You do not implement this machinery.
 
-**Reread:** threading docs, “Thread objects”; queue docs, “Queue objects” and the worker-thread example. For investigating a shutdown regression later, reread Pro Git 7.1, “Double Dot” and “Triple Dot”: a **revision** is a saved commit, and a **range** selects commits between revisions for `git log`. For example, `git log HEAD~3..HEAD` lists the last three commits on a straight history. As a companion investigation command, `git blame path` identifies the commits that last changed each line. No Git changes are required for this set.
+**Example:** With supplied functions that select the requested channel and return `28.1` for CH1 or `5.0` for CH2, `run_pipeline(["CH1", "CH2", "CH1"], 3, reader.measure_voltage)` gives `[28.1, 5.0, 28.1]`.
+
+**Watch out:** Locking selection and query separately leaves a gap for another worker to change the channel. Use a `with` block so a failed instrument operation also releases the lock.
+
+**Reread:** threading docs, “Lock objects” and “Using locks, conditions, and semaphores in the with statement”. For investigating a shutdown regression later, reread Pro Git 7.1, “Double Dot” and “Triple Dot”: a **revision** is a saved commit, and a **range** selects commits between revisions for `git log`. For example, `git log HEAD~3..HEAD` lists the last three commits on a straight history. As a companion investigation command, `git blame path` identifies the commits that last changed each line. No Git changes are required for this set.
 
 Optional reading: *The Pragmatic Programmer*, topic on concurrency.
 

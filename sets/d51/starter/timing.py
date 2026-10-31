@@ -1,4 +1,4 @@
-"""Measure station-step latency and choose where optimization belongs."""
+"""Measure station-step latency and diagnose captured bench evidence."""
 
 from collections.abc import Callable
 import math
@@ -6,11 +6,26 @@ import statistics
 import time
 
 
+def summarize_durations(durations_ms: list[float]) -> dict[str, float]:
+    """Supplied E5 helper: summarize a nonempty list of elapsed milliseconds.
+
+    Values must be finite and nonnegative. Sorting a copy preserves the input.
+    measure() owns collecting valid durations; leave this helper unchanged.
+    """
+    durations = sorted(durations_ms)
+    return {
+        "min": durations[0],
+        "median": float(statistics.median(durations)),
+        "p99": durations[math.ceil(0.99 * len(durations)) - 1],
+        "max": durations[-1],
+    }
+
+
 def measure(
     fn: Callable[[], object], runs: int, clock: Callable[[], float] = time.perf_counter
 ) -> dict[str, float]:
-    """E5: Time each call and return min, median, nearest-rank p99, and max in ms."""
-    raise NotImplementedError("E5: time each call and summarize the durations in milliseconds")
+    """E5 TODO: Collect per-call milliseconds; return summarize_durations(values)."""
+    raise NotImplementedError("E5: collect per-call milliseconds and call the supplied summary helper")
 
 
 def meets_deadline(stats: dict[str, float], deadline_ms: float) -> bool:
@@ -18,6 +33,10 @@ def meets_deadline(stats: dict[str, float], deadline_ms: float) -> bool:
     raise NotImplementedError("E5: compare the maximum duration with the deadline")
 
 
-def speed_answers() -> dict[str, str]:
-    """E6: Return option letters for Q1, Q2, and Q3 from the README."""
-    raise NotImplementedError("E6: choose evidence-based language and optimization decisions")
+def diagnose_captures() -> dict[str, dict[str, str]]:
+    """E6 TODO: Diagnose case_a and case_b using data/ and the README contract.
+
+    For each case return fault, serial_evidence, dmm_evidence, scope_evidence,
+    next_measurement, and disposition. No file parser is required.
+    """
+    raise NotImplementedError("E6: weigh the serial, DMM, and scope evidence and choose the next measurement")

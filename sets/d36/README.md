@@ -95,3 +95,34 @@ JSON is a text format for structured data. Produce exactly one JSON object on on
 **Watch out:** JSON strings use double quotes and JSON Booleans are lowercase. Only the three fixed required key names appear in the output, so you do not need a general JSON string escaper.
 
 **Reread:** The Linux Command Line ch. 32, processing options; Missing Semester "Shell Tools and Scripting," composing command-line tools.
+
+## Terminal drill (WSL2 Ubuntu, ~5 min)
+
+This drill is ungraded; its minutes come from the day's readings. Finish E3 first. Use your clone inside Ubuntu's Linux filesystem, starting in the repo root. An **execute permission** allows a file to run as a program. `chmod` changes permissions; `u+x` adds execute permission for the file's owner, and `u-x` removes it.
+
+Create a temporary complete configuration, inspect the script's permissions, then enable and run it directly:
+
+```bash
+cd sets/d36
+config=$(mktemp /tmp/fasttrack-station.XXXXXX)
+printf '%s\n' 'station_id=bench-7' 'instrument_host=127.0.0.1' 'log_dir=/tmp/fasttrack-logs' > "$config"
+ls -l starter/check_station.sh
+chmod u+x starter/check_station.sh
+ls -l starter/check_station.sh
+./starter/check_station.sh "$config"
+git diff --summary
+```
+
+`mktemp` creates a uniquely named temporary file; `$(...)` puts its printed path in the shell variable `config`. `>` writes the configuration into that file. `ls -l` shows permissions in its first column: the owner's execute position changes from `-` to `x`. `./` means run the file at this relative path; its first `#!/usr/bin/env bash` line selects Bash. The completed script prints `Station OK`. `git diff --summary` shows a `mode change` for `sets/d36/starter/check_station.sh`: Git records whether a tracked file is executable.
+
+Remove the permission change afterward so the tests' expectations are unaffected, inspect the restored permissions and Git summary, then remove the temporary configuration and return to the repo root:
+
+```bash
+chmod u-x starter/check_station.sh
+ls -l starter/check_station.sh
+git diff --summary
+rm "$config"
+cd ../..
+```
+
+The script's mode change should disappear from the summary. Your code edits remain. The graded tests invoke `bash script`, so they do not require execute permission; this drill practices the direct invocation an operator uses.

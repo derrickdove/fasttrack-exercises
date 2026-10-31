@@ -1,5 +1,6 @@
 """Inspect deployment text; never execute Docker, systemd, or Ansible."""
 
+import argparse
 import configparser
 from pathlib import PurePosixPath
 import re
@@ -46,13 +47,24 @@ def test_systemd_unit_has_network_dependencies_and_install_target(capstone_root)
     assert "multi-user.target" in unit["Install"]["WantedBy"].split()
 
 
-def test_systemd_service_runs_chassis_with_restart_policy_and_non_root_user(capstone_root, invokes_chassis):
+def test_systemd_service_runs_chassis_once_with_non_root_user(capstone_root, invokes_chassis):
     unit = _read_unit(capstone_root)
     service = unit["Service"]
-    assert service["Type"] == "simple"
+    assert service["Type"] == "oneshot", "the saved-file check finishes after one run"
     assert invokes_chassis(service["ExecStart"]), "ExecStart must run python -m chassis"
-    assert service["Restart"] == "on-failure"
-    assert service["RestartSec"].strip(), "include RestartSec"
+    command = shlex.split(service["ExecStart"])
+    module_index = command.index("-m")
+    assert command[module_index + 1:module_index + 3] == ["chassis", "check"], (
+        "ExecStart must run python -m chassis check"
+    )
+    arguments = command[module_index + 3:]
+    assert not {"-h", "--help"}.intersection(arguments), "ExecStart must check files, not show help"
+    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    parser.add_argument("--limits", required=True)
+    parser.add_argument("--measurements", required=True)
+    saved_files, _ = parser.parse_known_args(arguments)
+    assert saved_files.limits and saved_files.measurements, "both saved-file arguments need a path"
+    assert service["Restart"] == "no", "a UUT FAIL exits 1; do not re-check the same files forever"
     assert service["User"].strip() and service["User"].strip() not in {"root", "0"}
 
 

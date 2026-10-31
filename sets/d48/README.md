@@ -9,10 +9,12 @@ A **driver** translates station software requests into instrument operations. Th
 ## How this works
 
 1. Read `include/psu_driver.h` (the declarations: names and types) and `starter/psu_driver.cpp` (the definitions: executable bodies). Change only the E1-E5 bodies in the `.cpp` file, including the E5 destructor. For E2 and E3, restore the commented parameter names (`/*reply*/` becomes `reply`) and replace the `throw std::logic_error(...)` stubs. E1 has a seeded bug; E4 has missing teardown. Keep the supplied helpers and declarations. Don't edit `tests/`.
-2. Press **Ctrl+Shift+B -> Test: d48**, or run `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d48` on Windows / `bash tools/run.sh d48` on Linux or Mac. At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise. Each exercise has several test cases; every case must pass.
+2. Save your changes and run `bash tools/run.sh d48` in your WSL terminal. **Ctrl+Shift+B -> Test: d48** is a shortcut. In native Windows PowerShell, run `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d48`. At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise. Each exercise has several test cases; every case must pass.
 3. Report **all pass / partial / stuck** in the tracker.
 
-A **compiler** turns C++ source into a program. The runner uses C++20 (the language edition), preferring Visual Studio's C++ tools on Windows and otherwise `g++` from PATH; Linux/Mac use `clang++` or `g++`. Install Visual Studio Build Tools with **Desktop development with C++**, or a GCC/Clang C++ compiler, if the runner reports none. Python 3.12+ runs the shared build helper; no extra Python packages are needed for this set. **doctest** is the bundled C++ test library, separate from Python's similarly named library.
+A **compiler** turns C++ source into a program. In WSL2 Ubuntu, the root README's setup installs `build-essential`, the Ubuntu package that supplies the `g++` compiler and build tools. If it is missing, run `sudo apt-get update && sudo apt-get install -y build-essential` in Ubuntu before starting. The runner uses C++20 (the language edition), finding `clang++` or `g++` on Linux/Mac.
+
+**Native Windows alternative:** install Visual Studio Build Tools with **Desktop development with C++**. On Windows the runner prefers those tools, then tries `g++` if available. Python 3.12+ runs the shared build helper; no extra Python packages are needed for this set. **doctest** is the bundled C++ test library, separate from Python's similarly named library.
 
 An **environment variable** is a named value inherited by child programs. **PATH** is the environment variable listing directories searched for programs such as `g++`; reopen the terminal after changing it. In Bash, `command -v g++` locates that compiler and `export CXX=g++` selects it on Linux/Mac. `FT_PYTHON` can select the Python executable used by either runner.
 

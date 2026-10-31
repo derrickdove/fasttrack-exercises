@@ -1,10 +1,9 @@
-"""Station event logs and JSON run reports."""
+"""Station event logs and pytest JUnit reports."""
 from collections import Counter, defaultdict
-from datetime import datetime, timezone
-import json
 import logging
 from pathlib import Path
 from typing import Any
+import xml.etree.ElementTree as ET
 
 
 def get_station_logger(name: str, path: str | Path) -> logging.Logger:
@@ -22,12 +21,6 @@ def failures_by_channel(results: list[dict[str, Any]]) -> dict[str, list[str]]:
     raise NotImplementedError("E3: collect failure messages with defaultdict(list)")
 
 
-def write_report(
-    results: list[dict[str, Any]],
-    path: str | Path,
-    meta: dict[str, Any],
-    *,
-    now: datetime | None = None,
-) -> None:
-    """Write meta (including generated_utc), summary and results as UTF-8 JSON."""
-    raise NotImplementedError("E4: copy metadata, add UTC time, and write the report")
+def read_junit(path: str | Path) -> list[dict[str, Any]]:
+    """Read test names, outcomes and per-test properties in XML document order."""
+    raise NotImplementedError("E4: read each JUnit testcase outcome and its properties")

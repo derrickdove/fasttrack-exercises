@@ -38,6 +38,6 @@ class TcpInstrument:
         raise NotImplementedError("E2: Collect bytes through one reply newline")
 
     def query_many(self, cmds: list[str]) -> list[str]:
-        """Send all commands before reading their replies in the same order."""
-        raise NotImplementedError("E4: Pipeline the commands and collect their replies")
+        """Send each query and read its complete reply before sending the next."""
+        raise NotImplementedError("E4: Query each command and collect its reply before the next")
 

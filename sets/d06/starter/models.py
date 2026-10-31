@@ -37,11 +37,17 @@ class Reading:
 
 
 class RunningStats:
-    """Incremental statistics for finite numbers, with constant work per add."""
+    """Incremental statistics for finite numbers, with constant work per add.
+
+    Initialization and properties are supplied; E3 implements add.
+    """
 
     def __init__(self) -> None:
         """Start an empty collection without retaining individual samples."""
-        raise NotImplementedError("E3: Initialize count, total, and extrema")
+        self._count = 0
+        self._total = 0.0
+        self._min: float | None = None
+        self._max: float | None = None
 
     def add(self, value: float) -> None:
         """Include one finite number in the accumulated statistics."""
@@ -50,22 +56,28 @@ class RunningStats:
     @property
     def count(self) -> int:
         """Return the number of samples, initially zero."""
-        raise NotImplementedError("E3: Return the sample count")
+        return self._count
 
     @property
     def mean(self) -> float:
         """Return the arithmetic mean, or raise ValueError when empty."""
-        raise NotImplementedError("E3: Compute total divided by count")
+        if self._count == 0:
+            raise ValueError("no samples")
+        return self._total / self._count
 
     @property
     def min(self) -> float:
         """Return the smallest sample, or raise ValueError when empty."""
-        raise NotImplementedError("E3: Return the smallest value seen")
+        if self._min is None:
+            raise ValueError("no samples")
+        return self._min
 
     @property
     def max(self) -> float:
         """Return the largest sample, or raise ValueError when empty."""
-        raise NotImplementedError("E3: Return the largest value seen")
+        if self._max is None:
+            raise ValueError("no samples")
+        return self._max
 
 
 class ChannelBank:

@@ -1,14 +1,14 @@
 # d13 — Logging and structured reports
 
-**Time:** about 45 minutes · **Read first:** [Python Logging HOWTO, Basic Logging Tutorial](https://docs.python.org/3/howto/logging.html#basic-logging-tutorial); Pro Git [3.5 Remote Branches](https://git-scm.com/book/en/v2/Git-Branching-Remote-Branches) and [3.6 Rebasing](https://git-scm.com/book/en/v2/Git-Branching-Rebasing); Python [`collections`: Counter and defaultdict](https://docs.python.org/3/library/collections.html) · **You edit:** `starter/reporting.py`
+**Time:** about 70 minutes · **Read first:** [Python Logging HOWTO, Basic Logging Tutorial](https://docs.python.org/3/howto/logging.html#basic-logging-tutorial); Pro Git [3.5 Remote Branches](https://git-scm.com/book/en/v2/Git-Branching-Remote-Branches); Python [`collections`: Counter and defaultdict](https://docs.python.org/3/library/collections.html) · **You edit:** `starter/reporting.py` and `starter/station_checks.py`
 
 ## What you're building
 
-A test station runs checks on instrument channels (named measurement inputs, such as `CH1`). Operators need a readable event log and a machine-readable report to find failed checks and decide whether a run passed. You will build both from recorded check results; no instrument or network connection is needed.
+A test station runs checks on instrument channels (named measurement inputs, such as `CH1`). Operators need a readable event log and a machine-readable report to find failed checks and decide whether a run passed. You will build the log helpers, then run fake station checks with pytest and read its report. No instrument or network connection is needed.
 
 ## How this works
 
-1. Replace the `raise NotImplementedError(...)` lines in `starter/reporting.py`. Don't edit `tests/`.
+1. Replace the `raise NotImplementedError(...)` lines in `starter/reporting.py` and `starter/station_checks.py`; E4 also needs a test decorator. Don't edit `tests/`.
 2. Press Ctrl+Shift+B → **Test: d13** (or run `bash tools/run.sh d13` / `tools\run.ps1 d13` from the repo root). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
@@ -26,9 +26,9 @@ notes["CH4"].append("connector reseated")
 print(visits["CH2"], notes["CH4"])  # 2 ['connector reseated']
 ```
 
-**JSON** is a text format for dictionaries, lists, strings, numbers, booleans and null. **Metadata** describes the run, such as station and operator names. **UTC** is the shared world time reference. An **aware datetime** includes a time-zone offset; ISO 8601 is a standard timestamp spelling, such as `2026-10-28T12:30:00+00:00`. An **injectable time** lets tests supply a fixed datetime instead of reading the clock.
+**Metadata** describes the hardware used for a test, such as its station ID (identifier) and serial number (the hardware unit's identifying label).
 
-For E2–E4, every input result is a dictionary containing string keys `channel`, `status`, and `message`; all three values are strings. Status is always exactly `PASS`, `FAIL`, or `ERROR`. Other JSON-compatible fields may be present and must be preserved in reports. Inputs are valid; you do not need to validate malformed results. Do not change input dictionaries or lists. File paths accept `str` or `pathlib.Path`; parent directories already exist. Let file errors reach the caller.
+For E2–E3, every input result is a dictionary containing string keys `channel`, `status`, and `message`; all three values are strings. Status is always exactly `PASS`, `FAIL`, or `ERROR`. Other fields may be present. Inputs are valid; you do not need to validate malformed results. Do not change input dictionaries or lists. File paths accept `str` or `pathlib.Path`; parent directories already exist. Let file errors reach the caller.
 
 ## Exercises
 
@@ -46,7 +46,7 @@ For E2–E4, every input result is a dictionary containing string keys `channel`
 
 ### E2 — Overall run outcome (easy, ~10 min)
 
-**Goal:** Use `Counter` to count result statuses. Return exactly `{"counts": <ordinary dict of observed statuses and counts>, "overall": <worst status>}`. Worst means `ERROR` before `FAIL` before `PASS`, regardless of input order. Include only observed statuses in `counts`. Empty input returns `{"counts": {}, "overall": "PASS"}`: this helper treats a run with no failed checks as passing.
+**Goal:** Use `Counter` to count result statuses. Return exactly `{"counts": <ordinary dict of observed statuses and counts>, "overall": <worst status>}`. Worst means `ERROR` before `FAIL` before `PASS`, regardless of input order. Include only observed statuses in `counts`. Empty input returns `{"counts": {}, "overall": "ERROR"}`: no results cannot establish a passing run.
 
 **Signature:** `def summarize(results: list[dict[str, Any]]) -> dict[str, Any]`
 
@@ -68,14 +68,73 @@ For E2–E4, every input result is a dictionary containing string keys `channel`
 
 **Reread:** `collections` → “defaultdict objects” and its examples of grouping values into lists; Logging HOWTO → “Logging variable data”.
 
-### E4 — Save the run report (medium, ~14 min)
+### E4 — Run pytest and read its JUnit report (medium, ~39 min)
 
-**Goal:** Write a UTF-8 JSON file containing exactly the top-level keys `meta`, `summary`, and `results`. `summary` is E2's output, and `results` is the original list with its order and all fields preserved. `meta` is a copy of the supplied metadata with `generated_utc` added (or replaced). Return `None` and overwrite any existing report file.
+**Goal:** Write a small pytest test module (a Python file containing tests) for a fake station check, run it to create a report, then read every test's outcome and hardware metadata. Budget about 10 minutes for the guidance below and 29 minutes for the lab.
 
-**Signature:** `def write_report(results: list[dict[str, Any]], path: str | Path, meta: dict[str, Any], *, now: datetime | None = None) -> None`
+**Reporting guidance (read before coding):** **CI** (continuous integration) runs automated checks when code changes. **JUnit XML** is a report format that CI systems read to display individual test results. **XML** stores data in named elements, such as `<testcase>`, with attributes (named values in an opening tag) and child elements nested inside. JUnit is a format name here; pytest writes it directly, and you do not need Java.
 
-**Example:** With `results=[]`, `meta={"station": "A1"}`, and `now=datetime(2026, 10, 28, 12, 30, tzinfo=timezone.utc)`, the decoded file is `{"meta": {"station": "A1", "generated_utc": "2026-10-28T12:30:00+00:00"}, "summary": {"counts": {}, "overall": "PASS"}, "results": []}`.
+A pytest **fixture** prepares a test before its body runs. A failed `assert` in the test body becomes a `<failure>` child; an exception during fixture setup becomes an `<error>` child because the check could not run. A passing test has neither. A skipped test (a check deliberately not run) has `<skipped>`. These become `FAIL`, `ERROR`, `PASS`, and `SKIP` in your reader; these labels are separate from E2's application statuses.
 
-**Watch out:** When `now` is supplied, it is always an aware datetime. Convert it to UTC and use `.isoformat()` (retain fractional seconds if present; use `+00:00`, not `Z`). When omitted, obtain the current aware UTC datetime with `datetime.now(timezone.utc)`. `generated_utc` belongs inside `meta`, not beside it. Never add it to the caller's metadata. JSON indentation and escaping are up to you; tests decode the file. Reuse `summarize` instead of repeating E2's logic.
+**Parametrization** runs one test function with several input rows. Its `ids` argument gives each row a readable name in square brackets, such as `test_e4_voltage[nominal]`. A **decorator** is a line starting with `@` above a function that configures it. `indirect=["fixture_name"]` sends that parameter through the named fixture, where `request.param` holds the row's input; ordinary parameters go straight to the test function.
 
-**Reread:** Logging HOWTO → “Displaying the date/time in messages” for why timestamps help investigations; `collections` → “Counter objects” for the embedded summary. The supplied `json`, `datetime`, and `timezone` imports support the report. Pro Git 3.5 → “Tracking Branches” and 3.6 → “The Basic Rebase” are today's workflow reading; this set does not run Git commands.
+```python
+@pytest.mark.parametrize(
+    "relay_ready, channel", [("connected", 2)],
+    ids=["relay-channel-two"], indirect=["relay_ready"],
+)
+def test_relay(relay_ready, channel):
+    assert channel > 0
+```
+
+Here `relay_ready` would be a fixture you define; pytest supplies `channel` directly. This example only shows the decorator pattern.
+
+pytest supplies `record_property`, a fixture whose value is a function you call as `record_property("name", value)`. Each call adds a property under the current test's `<properties>` element, including when another fixture later fails. Record hardware metadata before the operation that might raise. Use `-o junit_family=xunit1` for this lab: `xunit1` is pytest's older XML layout that supports per-test properties. The default `xunit2` layout warns that custom properties do not fit its schema (the format's rules).
+
+Python's standard-library `xml.etree.ElementTree` (imported as `ET` in your starter) reads XML. `ET.parse(path).getroot()` loads a file's outer element, `.iter("testcase")` visits test cases in document order, `.find("failure")` finds a direct child or returns `None`, and `.findall("properties/property")` finds properties inside that test. An element's `.attrib` is its attribute dictionary. Check `element is not None`, rather than relying on an element's truth value: an empty child still records a failure.
+
+**Part A — Author the station module.** Edit `starter/station_checks.py`. Keep the supplied names and signatures; do not add other tests or change the two metadata constants.
+
+1. Complete the `station_ready` fixture. Call `record_property` for `station_id` with `STATION_ID` and `serial_number` with `SERIAL_NUMBER`, once each. Then, if `request.param == "offline"`, raise `RuntimeError("station offline")`. In `"ready"` mode, finish normally without returning a value. The supplied `Callable` type hint means a function you can call; this one takes a property name and value and returns `None`.
+2. Add `@pytest.mark.parametrize` above `test_e4_voltage`, using parameter names `"station_ready, voltage"`, the rows below in this order, their exact `ids`, and `indirect=["station_ready"]`.
+
+| Fixture mode | Voltage (V, volts) | ID | Expected result |
+| --- | --- | --- | --- |
+| `"ready"` | `5.0` | `"nominal"` | PASS |
+| `"ready"` | `4.0` | `"undervoltage"` | FAIL |
+| `"offline"` | `5.0` | `"offline"` | ERROR |
+
+3. Complete `test_e4_voltage` with an assertion that the actual `voltage` is between `4.8` and `5.2`, including both limits. Do not force a failure based on a row's ID or catch the intentional failures. The `station_ready` argument makes pytest run the fixture first; its value is `None`.
+4. From the repo root, with the course Python environment active, run:
+
+```text
+python -m pytest sets/d13/starter/station_checks.py -q --junitxml=sets/d13/station.xml -o junit_family=xunit1
+```
+
+`--junitxml` selects the output file. This command intentionally exits with code `1` and reports `1 failed, 1 passed, 1 error`. Open `sets/d13/station.xml` and find the three case names, the `<failure>` and `<error>`, and both hardware properties on every case. The d13 grader runs this module in a separate Python process (a subprocess) in a temporary directory, so these intentional outcomes do not make E4 fail when implemented correctly.
+
+**Part B — Read the report.** Replace the E4 stub in `starter/reporting.py`.
+
+**Signature:** `def read_junit(path: str | Path) -> list[dict[str, Any]]`
+
+Return one dictionary per `<testcase>`, in XML document order, with exactly these keys:
+
+- `name`: its `name` attribute, including any bracketed parameter ID.
+- `outcome`: `"ERROR"` if it has an `<error>` child, otherwise `"FAIL"` for `<failure>`, otherwise `"SKIP"` for `<skipped>`, otherwise `"PASS"`.
+- `properties`: an ordinary dictionary of each `<properties>/<property>` child's `name` and `value` attributes. Values stay strings. Use `{}` when properties are absent.
+
+Accept either `<testsuite>` (one group of tests) or `<testsuites>` (several groups) as the outer element. Visit all test cases, even across multiple groups. Every test case has a name; property names are unique within a test and have value attributes. Other XML attributes and elements may be ignored. Empty reports return `[]`. Let file errors and `ET.ParseError` (ElementTree's exception for malformed XML) reach the caller. Do not modify the report or read pytest's console text instead of XML.
+
+**Example:** Reading the report from Part A returns:
+
+```python
+[
+    {"name": "test_e4_voltage[nominal]", "outcome": "PASS", "properties": {"station_id": "CHASSIS-A1", "serial_number": "SN-0042"}},
+    {"name": "test_e4_voltage[undervoltage]", "outcome": "FAIL", "properties": {"station_id": "CHASSIS-A1", "serial_number": "SN-0042"}},
+    {"name": "test_e4_voltage[offline]", "outcome": "ERROR", "properties": {"station_id": "CHASSIS-A1", "serial_number": "SN-0042"}},
+]
+```
+
+**Watch out:** A fixture error is not an assertion failure. Read properties from each test case, including the offline case. The station module's intentional failures are evidence to inspect; the normal **Test: d13** command grades both your authored tests and your reader and should show `Exercises: 4 / 4 passed` when all exercises are complete.
+
+**Reread:** The reporting guidance above; pytest → “Creating JUnitXML format files”, “record_property”, and “Indirect parametrization”; Python `xml.etree.ElementTree` → “Finding interesting elements”. Pro Git 3.5 → “Tracking Branches” remains today's workflow reading; the rebasing reading's 25 minutes now belong to this lab.

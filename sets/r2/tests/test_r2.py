@@ -273,16 +273,27 @@ def test_e6_header_only(tmp_path: Path) -> None:
     assert load_limit_bands(path) == {}, "a valid header without records has no bands"
 
 
-def test_e6_later_band_wins(tmp_path: Path) -> None:
-    path = tmp_path / "updated.csv"
-    path.write_text("channel,low,high\nBUS_V,27,29\nBUS_V,26,30\n", encoding="utf-8")
-    assert load_limit_bands(path) == {"BUS_V": (26.0, 30.0)}, "keep the last band for a repeated channel"
+@pytest.mark.parametrize("rows,line", [
+    ("BUS_V,27,29\nBUS_V,26,30\n", 3),
+    ("BUS_V,27,29\n\nI7,0,2\nBUS_V,27,29\n", 5),
+    ('"BUS\nV",27,29\n"BUS\nV",26,30\n', 5),
+])
+def test_e6_duplicate_band(tmp_path: Path, rows: str, line: int) -> None:
+    path = tmp_path / "duplicate.csv"
+    path.write_text("channel,low,high\n" + rows, encoding="utf-8")
+    with pytest.raises(ValueError, match=rf"\bline {line}\b"):
+        load_limit_bands(path)
 
 
-@pytest.mark.parametrize("low,high", [("bad", "2"), ("0", "bad"), ("", "1"), ("0", "")])
+@pytest.mark.parametrize("low,high", [
+    ("bad", "2"), ("0", "bad"), ("", "1"), ("0", ""),
+    ("nan", "2"), ("0", "nan"),
+    ("+inf", "2"), ("0", "+inf"),
+    ("-inf", "2"), ("0", "-inf"),
+])
 def test_e6_invalid_number(tmp_path: Path, low: str, high: str) -> None:
     path = tmp_path / "bad-number.csv"
-    path.write_text(f"channel,low,high\nI7,{low},{high}\nI7,0,2\n", encoding="utf-8")
+    path.write_text(f"channel,low,high\nI7,{low},{high}\nI8,0,2\n", encoding="utf-8")
     with pytest.raises(ValueError):
         load_limit_bands(path)
 

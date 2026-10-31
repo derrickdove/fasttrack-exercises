@@ -6,7 +6,11 @@ import csv
 from dataclasses import dataclass
 import math
 from pathlib import Path
+from queue import Queue
+import socket
 import struct
+import subprocess
+from threading import Event, Thread
 from typing import Protocol
 import zlib
 
@@ -50,9 +54,9 @@ class Transport(Protocol):
         raise NotImplementedError("E4: transport interface; use the supplied fake")
 
 
-def blocked_tools(exits: list[tuple[str, int]]) -> list[str]:
-    """E1: Return sorted unique tool names with any nonzero exit code."""
-    raise NotImplementedError("E1: implement the README contract")
+def run_tool(args: list[str], timeout: float) -> tuple[int, str, str]:
+    """E1: Run a real tool and return its exit code, stdout, and stderr."""
+    raise NotImplementedError("E1: launch the tool with captured output and a timeout")
 
 
 def test_e2_trip_boundary(tripped: Callable[[float, float], bool]) -> None:
@@ -75,14 +79,11 @@ def check_all(measurements: Iterable[Measurement], limits: dict[str, Limit]) -> 
     raise NotImplementedError("E5: implement the README contract")
 
 
-class WindowAlarm:
-    """E6: A bounded deque and running sum for a full-window mean alarm."""
-
-    def __init__(self, size: int, threshold: float) -> None:
-        raise NotImplementedError("E6: implement the README contract")
-
-    def add(self, value: float) -> bool | None:
-        raise NotImplementedError("E6: implement the README contract")
+def exchange_lines(
+    connection: socket.socket, command: str, reply_count: int,
+) -> list[str]:
+    """E6: Exchange one request for newline-delimited replies on a TCP socket."""
+    raise NotImplementedError("E6: send the request and buffer complete reply lines")
 
 
 def guarded_read(
@@ -109,16 +110,39 @@ class GapTracker:
         raise NotImplementedError("E9: implement the README contract")
 
 
-class AlarmThrottle:
-    """E10: Limit allowed alarms in a time window using an injected clock."""
+class UdpListener:
+    """E10: Supplied loopback listener; complete receive_once and stop only."""
 
-    def __init__(self, clock: Callable[[], int], window_ms: int, max_alarms: int) -> None:
-        raise NotImplementedError("E10: validate settings and initialize the alarm deque")
+    def __init__(self) -> None:
+        self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._socket.bind(("127.0.0.1", 0))
+        self._socket.settimeout(0.05)
+        self.address: tuple[str, int] = self._socket.getsockname()
+        self.packets: Queue[bytes] = Queue()
+        self.idle = Event()
+        self._stopping = Event()
+        self.error: BaseException | None = None
+        self._thread = Thread(target=self._run, name="check34-udp")
+        self._thread.start()
 
-    def allow(self) -> bool:
-        """Expire old alarms; record this alarm only if there is room."""
-        raise NotImplementedError("E10: implement the README contract")
+    def _run(self) -> None:
+        """Supplied: collect datagrams, record failures, and always close."""
+        try:
+            while not self._stopping.is_set():
+                data = self.receive_once()
+                if data is None:
+                    self.idle.set()
+                else:
+                    self.packets.put_nowait(data)
+        except BaseException as error:
+            self.error = error
+        finally:
+            self._socket.close()
 
-    def __len__(self) -> int:
-        """Return the number of stored allowed alarm times without reading the clock."""
-        raise NotImplementedError("E10: return the number of stored alarm times")
+    def receive_once(self) -> bytes | None:
+        """LEARNER: receive one datagram; a socket timeout returns None."""
+        raise NotImplementedError("E10: receive a datagram or return None on timeout")
+
+    def stop(self) -> None:
+        """LEARNER: request stop, join within one second, surface failures."""
+        raise NotImplementedError("E10: signal stop and join the listener thread")

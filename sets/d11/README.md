@@ -79,13 +79,13 @@ supply_current,0.0,2.0,A
 
 **Reread:** pytest, “Requesting fixtures” and “Fixtures can request other fixtures”; follow its `tmp_path` link to “The tmp_path fixture.”
 
-### E3 — Always switch the output off (medium, ~16 min)
+### E3 — Always switch the output off (medium, ~20 min)
 
-**Goal:** Model a station step that enables a supply, lets the test run, then disables it even when an assertion fails.
+**Goal:** Model a station step that enables a supply, lets the test run, then disables it even when enabling output raises an error or an assertion fails.
 
 **Signature:** `def powered_psu(fake_psu: FakeInstrument) -> Iterator[FakeInstrument]` (yield fixture).
 
-Write `"OUTP ON"` to the supplied `fake_psu` before yielding that exact object. `OUTP` means output: ON enables it and OFF disables it. Yield once, inside a `try` block, and write `"OUTP OFF"` in `finally` after the test finishes. Do not catch or suppress test failures. Do not create another fake or clear its command history.
+Write `"OUTP ON"` to the supplied `fake_psu` before yielding that exact object. `OUTP` means output: ON enables it and OFF disables it. Put both the ON write and the single `yield` inside the same `try` block, and write `"OUTP OFF"` in `finally`. Always attempt OFF, including when the ON write records the command and then raises an **exception** (an error that interrupts normal execution), before the test body starts. Let that original exception reach pytest unchanged; do not catch or suppress it or test failures. Do not create another fake or clear its command history.
 
 **Example:** if a test writes `"MEAS:START"` (a sample station command), the history after teardown is `["OUTP ON", "MEAS:START", "OUTP OFF"]` for both passing and failing tests. During the test, the final OFF has not happened yet.
 
@@ -93,7 +93,7 @@ Write `"OUTP ON"` to the supplied `fake_psu` before yielding that exact object. 
 
 **Reread:** pytest, “Teardown/Cleanup (AKA Fixture finalization),” “yield fixtures (recommended),” and “Safe teardowns.”
 
-### E4 — Build independent measurement dictionaries (medium, ~12 min)
+### E4 — Build independent measurement dictionaries (medium, ~8 min)
 
 **Goal:** Give tests a convenient factory for station readings. A **reading** is one measured value with its name and unit.
 

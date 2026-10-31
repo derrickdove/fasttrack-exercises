@@ -20,6 +20,6 @@ def duplicate_serials(serials: list[str]) -> list[str]:
     raise NotImplementedError("E4: track seen serials and report each duplicate once")
 
 
-def is_valid_loop(commands: str) -> bool:
-    """Return whether repeating the commands keeps the cart's path bounded."""
-    raise NotImplementedError("E5: track the cart's position and heading over repeated passes")
+def validate_power_sequence(commands: list[str]) -> list[str]:
+    """Return command problems in order, followed by any final power-on problem."""
+    raise NotImplementedError("E5: track supply power and collect command problems in order")

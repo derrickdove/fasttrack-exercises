@@ -1,0 +1,5 @@
+Oct 30 09:15:00 bench2 systemd[1]: Started chassis-demo.service - Chassis test station.
+Oct 30 09:15:00 bench2 python3[1186]: Starting station worker.
+[application log lines are absent from this saved excerpt]
+Oct 30 09:15:01 bench2 systemd[1]: chassis-demo.service: Main process exited, code=exited, status=1/FAILURE
+Oct 30 09:15:01 bench2 systemd[1]: chassis-demo.service: Failed with result 'exit-code'.

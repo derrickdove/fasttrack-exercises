@@ -39,7 +39,7 @@ def test_interval(milliseconds: int, seconds: float) -> None:
 
 ## Exercises
 
-### E1 — Typed current conversion (easy, ~7 min)
+### E1 — Typed current conversion (easy, ~4 min)
 
 **Goal:** Normalize an instrument's current into amperes, abbreviated `A`. A milliampere (`mA`) is 0.001 A; a microampere (`uA`) is 0.000001 A.
 
@@ -131,19 +131,19 @@ Your E5 tests must accept the correct helper and catch three defects separately:
 **Reread:** d11: pytest "How to use fixtures", fixture arguments and per-test isolation; d13: Logging HOWTO, logging levels and named loggers; d09: assertion reporting.
 
 
-### E6 — Load a station's limit bands (easy–medium, ~9 min)
+### E6 — Load a station's limit bands (easy–medium, ~12 min)
 
-**Goal:** Read the allowed range for each measurement channel from a CSV file. A **limit band** is the pair `(low, high)` of acceptable boundaries, including equality at either boundary.
+**Goal:** Read the allowed range for each measurement channel from a CSV file. A **limit band** is the pair `(low, high)` of acceptable boundaries, including equality at either boundary. Each boundary is called a **bound**.
 
 **Signature:** `def load_limit_bands(path: str | Path) -> dict[str, tuple[float, float]]`
 
 CSV means comma-separated values: a text table with a header naming its columns. The header is exactly `channel,low,high`; each record has those three fields. Use `csv.DictReader` and open the file with `encoding="utf-8", newline=""`. A `Path` represents a file location; `Path(path)` accepts either allowed input type. A `with` block closes the file even if a row fails.
 
-Return a dictionary mapping each channel to its limits as a tuple of floats. Preserve channel text exactly, including spaces, capitalization, non-English characters, and quoted commas. Skip completely empty lines. A header-only file returns `{}`. If a channel occurs again, its later row replaces its earlier band; dictionary order does not matter.
+Return a dictionary mapping each channel to its limits as a tuple of floats. Preserve channel text exactly, including spaces, capitalization, non-English characters, and quoted commas. Skip completely empty lines. A header-only file returns `{}`. Dictionary order does not matter. A duplicate is a channel whose exact text has already appeared. Reject duplicates with `ValueError`, even when both bands are identical. Include `line N` in the error message, where `N` is the repeated record's source line number. Use the reader's `line_num`: the header is line 1, empty lines count, and a quoted record spanning several lines uses its final line.
 
 **Example:** A file containing `channel,low,high`, then `BUS_V,27,29` and `I7,0,0` on separate lines returns `{"BUS_V": (27.0, 29.0), "I7": (0.0, 0.0)}`.
 
-**Watch out:** Negative and equal limits are valid. Every row must raise `ValueError` if either number cannot be converted with `float()` or if `low > high`, even when a later row would replace it. Numeric values are finite; no extra NaN/infinity check is needed. A missing file raises `FileNotFoundError`. Do not change the file, print results, or return partial data after an error. Header and field-count validation are outside this exercise.
+**Watch out:** Negative and equal limits are valid. Reject a row with `ValueError` if either bound cannot be converted with `float()`, is non-finite (NaN or positive/negative infinity), or if `low > high`. `math.isfinite(number)` returns `True` only for a finite number; converting text with `float()` alone does not reject NaN or infinity. Reject any bad row immediately, even if the channel appears again later. A missing file raises `FileNotFoundError`. Do not change the file, print results, or return partial data after an error. Header and field-count validation are outside this exercise.
 
 Reread: d04
 

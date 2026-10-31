@@ -75,6 +75,14 @@ class ResourceManagerLike(Protocol):
         ...
 
 
+class OutputSupply(Protocol):
+    """Supplied E10 interface; compatible with StationSupply or a recording fake."""
+
+    def enable_output(self, on: bool) -> None:
+        """Enable or disable the supply output."""
+        ...
+
+
 class VisaTimeout(Exception):
     """Supplied fake-resource timeout; real VISA uses VisaIOError(error_timeout)."""
 
@@ -87,17 +95,47 @@ def validate_config(raw: dict[str, object]) -> StationConfig:
 class StationSupply:
     """E2: Drive a supply using validated station settings."""
 
+    # Supplied scaffolding: validate configuration and prepare the resource.
     def __init__(self, resource: ResourceLike, max_voltage: float) -> None:
         """Store an already-configured resource; callers use from_config."""
-        raise NotImplementedError("E2: store the resource, limit and closed state")
+        self.resource = resource
+        self.max_voltage = max_voltage
+        self._closed = False
 
     @classmethod
     def from_config(
         cls, config: dict[str, object], rm: ResourceManagerLike,
     ) -> StationSupply:
         """Validate all settings, open the resource, and set its timeout/terminations."""
-        raise NotImplementedError("E2: validate config before opening the supply")
+        for key in config:
+            if key not in {"ip", "timeout_ms", "max_voltage"}:
+                raise ValueError(f"unknown key: {key}")
+        ip = config.get("ip")
+        timeout_ms = config.get("timeout_ms", 2000)
+        max_voltage = config.get("max_voltage")
+        if not isinstance(ip, str) or not ip:
+            raise ValueError("ip must be nonempty text")
+        if type(timeout_ms) is not int or timeout_ms <= 0:
+            raise ValueError("timeout_ms must be a positive integer")
+        if (isinstance(max_voltage, bool)
+                or not isinstance(max_voltage, (int, float))
+                or not math.isfinite(max_voltage) or max_voltage <= 0):
+            raise ValueError("max_voltage must be a positive finite number")
+        resource = rm.open_resource(f"TCPIP::{ip}::INSTR")
+        try:
+            resource.timeout = timeout_ms
+            resource.read_termination = "\n"
+            resource.write_termination = "\n"
+        except BaseException:
+            try:
+                resource.close()
+            except BaseException:
+                # A cleanup failure must not replace the setup exception.
+                pass
+            raise
+        return cls(resource, max_voltage)
 
+    # Learner work: implement the methods below.
     def read_voltage(self) -> float:
         """Query MEAS:VOLT?, retry one fake or VISA timeout, and convert the reply."""
         raise NotImplementedError("E2: query voltage with one timeout retry")
@@ -133,7 +171,12 @@ def judge_samples(samples: list[float], low: float, high: float, required: int) 
 
 def decode_snapshot(packet: bytes) -> Snapshot:
     """E4: Decode the eight-byte FC maintenance snapshot, checking its XOR."""
-    raise NotImplementedError("E4: implement decode_snapshot")
+    # Supplied: reject the wrong length and unpack the wire fields.
+    if len(packet) != 8:
+        raise ValueError("snapshot must be eight bytes")
+    magic, sequence, millivolts, flags, received = struct.unpack(">2sHHBB", packet)
+    # Learner work: check the identifier, checksum and flags; build the Snapshot.
+    raise NotImplementedError("E4: validate unpacked fields and return a Snapshot")
 
 
 def audit_sequences(sequences: list[int]) -> dict[str, int]:
@@ -171,3 +214,15 @@ def service_findings(text: str) -> list[str]:
 def interlock_reasons(status: int, telemetry_age_s: float, max_age_s: float) -> list[str]:
     """E10: Decode hardware inhibit bits and reject stale telemetry."""
     raise NotImplementedError("E10: implement interlock_reasons")
+
+
+def run_interlocked(
+    supply: OutputSupply, read_interlock: Callable[[], tuple[int, float]],
+    max_age_s: float,
+) -> list[str]:
+    """E10: Read one interlock sample and enable only when no reasons inhibit it."""
+    # Learner work: repair this ordering before running real hardware.
+    supply.enable_output(True)
+    status, age_s = read_interlock()
+    reasons = interlock_reasons(status, age_s, max_age_s)
+    return reasons

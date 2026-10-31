@@ -93,3 +93,38 @@ with GracefulStop() as stop:
 **Watch out:** `restarts` counts additional tries, so zero still permits one attempt. Negative `restarts` raises `ValueError` before launching anything. Any nonzero code, including E1's `-9` timeout marker, consumes an attempt and permits another if budget remains. Use the same `cmd` each time; do not add a delay or change its arguments. Discard the output strings. Other errors from E1 propagate instead of being retried. Finish E1 first; E4 reuses it.
 
 **Reread:** Python `subprocess` docs, `run` and `CompletedProcess.returncode`; Missing Semester, “Job Control”. For tomorrow's check, revisit your most recently partial or stuck set in the tracker.
+
+## Terminal drill (WSL2 Ubuntu, ~5 min)
+
+This drill is ungraded; its minutes come from the day's readings. Finish E3 first. In Ubuntu terminal A, from the repo root, run this **worker** (a process that waits for work or a stop request):
+
+```bash
+.venv/bin/python - <<'PY'
+import os
+import sys
+import time
+
+sys.path.insert(0, "sets/d33")
+from starter.procs import GracefulStop
+
+with GracefulStop() as stop:
+    print(f"worker PID: {os.getpid()}", flush=True)
+    try:
+        while not stop.requested:
+            time.sleep(0.1)
+    finally:
+        print("cleanup: station work stopped", flush=True)
+print("worker exited; previous signal handlers restored", flush=True)
+PY
+```
+
+`-` makes Python read code from standard input; `<<'PY'` feeds it the lines up to the closing `PY`. `sys.path.insert` lets Python find this set's `starter` module. A **PID** is the operating system's process identifier; `os.getpid()` prints this worker's PID after its handlers are installed. `flush=True` displays the message immediately. `time.sleep(0.1)` pauses briefly between flag checks; `finally` runs cleanup when the loop ends. Here cleanup is represented by a message; real station code would close instrument connections there.
+
+In another Ubuntu terminal, replace `<pid>` below with the printed number (omit the angle brackets). `ps` displays that process and its command; `kill -TERM` sends it SIGTERM:
+
+```bash
+ps -p <pid> -o pid,comm,args
+kill -TERM <pid>
+```
+
+Watch terminal A print the cleanup and exit messages, then return to its shell prompt. The handler only sets `requested`; the loop notices it, runs cleanup, and leaves the context manager, which restores the previous handlers. Ctrl+C in terminal A also requests a graceful stop if you need to end the drill.

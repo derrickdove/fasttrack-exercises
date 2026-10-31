@@ -12,6 +12,7 @@ import pyvisa
 from pyvisa.constants import StatusCode
 from pyvisa.errors import VisaIOError
 
+from starter import check54 as station, test_interlock_learner as regressions
 from starter.check54 import (
     Snapshot, StationConfig, StationSupply, VisaTimeout, audit_sequences, decode_snapshot,
     execute_steps, interlock_reasons, judge_samples, main, service_findings,
@@ -153,6 +154,30 @@ def test_e2_invalid_config_never_opens(key: str, value: object, missing: bool) -
     assert settings == before
 
 
+@pytest.mark.parametrize("attribute", ["timeout", "read_termination", "write_termination"])
+@pytest.mark.parametrize("setup_error", [OSError("setup failed"), KeyboardInterrupt()])
+@pytest.mark.parametrize("close_fails", [False, True])
+def test_e2_setup_failure_closes_and_preserves_original_error(
+    monkeypatch: pytest.MonkeyPatch, attribute: str, setup_error: BaseException,
+    close_fails: bool,
+) -> None:
+    resource = ScriptedResource([])
+    resource.close_error = OSError("cannot close") if close_fails else None
+    rm = FakeResourceManager(resource)
+
+    def fail_setting(self: ScriptedResource, name: str, value: object) -> None:
+        if name == attribute:
+            raise setup_error
+        object.__setattr__(self, name, value)
+
+    monkeypatch.setattr(ScriptedResource, "__setattr__", fail_setting)
+    with pytest.raises(type(setup_error)) as caught:
+        StationSupply.from_config({"ip": "192.0.2.45", "max_voltage": 12.5}, rm)
+    assert caught.value is setup_error, "a close failure must not replace the setup exception"
+    assert rm.opened == ["TCPIP::192.0.2.45::INSTR"]
+    assert resource.events == [("close",)], "failed setup must close once without sending commands"
+
+
 @pytest.mark.parametrize("replies,expected,queries", [
     ([" 3.3125\r\n"], 3.3125, 1), (["-2.5e-2"], -0.025, 1), (["0"], 0.0, 1),
     ([VisaTimeout("first"), "12.034"], 12.034, 2),
@@ -247,6 +272,8 @@ def test_e2_context_disables_then_closes_and_preserves_block_error(
     else:
         with pytest.raises(type(expected)) as caught:
             run_block()
+        if isinstance(caught.value, NotImplementedError):
+            raise caught.value
         assert caught.value is expected, "a block exception must survive cleanup failures"
     assert resource.events == [("write", "OUTP 0"), ("close",)]
     supply.close()
@@ -615,3 +642,87 @@ def test_e10_status_must_fit_a_byte(status: int) -> None:
 def test_e10_invalid_age_configuration(age: float, maximum: float) -> None:
     with pytest.raises(ValueError):
         interlock_reasons(1, age, maximum)
+
+
+@pytest.fixture(scope="module")
+def interlock_ready() -> None:
+    # Surface the learner stub before exercising the intentionally unsafe harness.
+    interlock_reasons(0x01, 0.0, 1.0)
+
+
+@pytest.mark.parametrize("sample,maximum,expected", [
+    ((0x01, 0.0), 1.0, []), ((0x01, 1.0), 1.0, []),
+    ((0x7B, 0.5), 1.0, []), ((0x01, 1.0), 2.0, []),
+    ((0x01, 1.001), 1.0, ["STALE"]), ((0x01, 0.25), 0.1, ["STALE"]),
+    ((0x00, 0.0), 1.0, ["DOOR_OPEN"]), ((0x05, 0.0), 1.0, ["ESTOP"]),
+    ((0x81, 0.0), 1.0, ["SUPPLY_FAULT"]),
+    ((0x84, 2.0), 1.0, ["DOOR_OPEN", "ESTOP", "SUPPLY_FAULT", "STALE"]),
+    ((256, 0.0), 1.0, ValueError), ((1, -1.0), 1.0, ValueError),
+    ((1, math.nan), 1.0, ValueError), ((1, 0.0), 0.0, ValueError),
+    ((1, 0.0), math.inf, ValueError),
+    (OSError("interlock link lost"), 1.0, OSError),
+])
+def test_e10_station_enables_only_after_a_fresh_ok_read(
+    interlock_ready: None, sample: tuple[int, float] | Exception, maximum: float,
+    expected: list[str] | type[Exception],
+) -> None:
+    events: list[tuple[object, ...]] = []
+
+    class Output:
+        def enable_output(self, on: bool) -> None:
+            events.append(("enable", on))
+
+    def read_interlock() -> tuple[int, float]:
+        events.append(("read",))
+        if isinstance(sample, Exception):
+            raise sample
+        return sample
+
+    if isinstance(expected, type):
+        with pytest.raises(expected):
+            station.run_interlocked(Output(), read_interlock, maximum)
+        assert events == [("read",)], "a failed interlock read must never enable output"
+    else:
+        assert station.run_interlocked(Output(), read_interlock, maximum) == expected
+        wanted = [("read",)] if expected else [("read",), ("enable", True)]
+        assert events == wanted, "read once; enable once only after a fresh, fault-free decision"
+
+        if not expected:
+            events.clear()
+            sample = (0x81, 0.0)
+            assert station.run_interlocked(Output(), read_interlock, maximum) == ["SUPPLY_FAULT"]
+            assert events == [("read",)], "a previous OK decision must not authorize a later call"
+
+
+@pytest.mark.parametrize("regression,status,age", [
+    (regressions.test_e10_fresh, 0x01, 1.0),
+    (regressions.test_e10_stale, 0x01, 1.001),
+    (regressions.test_e10_faulted, 0x81, 0.0),
+], ids=["fresh", "stale", "faulted"])
+def test_e10_learner_regressions_reject_unsafe_ordering(
+    monkeypatch: pytest.MonkeyPatch, regression: Callable[[], None], status: int, age: float,
+) -> None:
+    samples: list[tuple[int, float]] = []
+    read = regressions.FakeStation.read_interlock
+
+    def recording_read(fake: regressions.FakeStation) -> tuple[int, float]:
+        sample = read(fake)
+        samples.append(sample)
+        return sample
+
+    monkeypatch.setattr(regressions.FakeStation, "read_interlock", recording_read)
+    # Run each learner test normally first; unfinished bodies surface as stubs.
+    regression()
+    assert (status, age) in samples, "exercise the required interlock input in this regression"
+
+    def unsafe_order(
+        supply: station.OutputSupply, read_interlock: Callable[[], tuple[int, float]],
+        max_age_s: float,
+    ) -> list[str]:
+        supply.enable_output(True)
+        status, age_s = read_interlock()
+        return station.interlock_reasons(status, age_s, max_age_s)
+
+    monkeypatch.setattr(station, "run_interlocked", unsafe_order)
+    with pytest.raises((AssertionError, pytest.fail.Exception)):
+        regression()

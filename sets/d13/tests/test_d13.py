@@ -1,8 +1,12 @@
 from copy import deepcopy
-from datetime import datetime, timedelta, timezone
-import json
 import logging
 import re
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import xml.etree.ElementTree as ET
 
 import pytest
 
@@ -10,7 +14,7 @@ from starter.reporting import (
     failures_by_channel,
     get_station_logger,
     summarize,
-    write_report,
+    read_junit,
 )
 
 
@@ -127,7 +131,7 @@ def test_e2_worst_status_is_severity_not_order_or_frequency(statuses, expected):
 
 
 def test_e2_empty_run():
-    assert summarize([]) == {"counts": {}, "overall": "PASS"}, "empty runs use the documented default"
+    assert summarize([]) == {"counts": {}, "overall": "ERROR"}, "no results cannot establish a passing run"
 
 
 def test_e2_preserves_input_and_does_not_share_counts():
@@ -179,83 +183,134 @@ def test_e3_preserves_input_and_uses_separate_lists():
     assert failures_by_channel(results) == {"CH1": ["low"], "CH2": ["offline"]}, "calls must be independent"
 
 
+@pytest.fixture(scope="module")
+def e4_ready(tmp_path_factory):
+    path = tmp_path_factory.mktemp("junit-probe") / "empty.xml"
+    path.write_text("<testsuites />", encoding="utf-8")
+    read_junit(path)  # Unfinished E4 fails with its own NotImplementedError.
+
+
+@pytest.fixture(scope="module")
+def run_station(tmp_path_factory, e4_ready):
+    base = tmp_path_factory.mktemp("station-junit")
+    cache = {}
+
+    def run(voltage=None):
+        if voltage in cache:
+            return cache[voltage]
+        directory = base / f"run-{len(cache)}"
+        directory.mkdir()
+        source = Path(__file__).resolve().parents[1] / "starter" / "station_checks.py"
+        shutil.copyfile(source, directory / "station_checks.py")
+        (directory / "pytest.ini").write_text("[pytest]\njunit_family = xunit1\n", encoding="utf-8")
+        if voltage is not None:
+            # Change the supplied measurements to check the learner's actual assertion.
+            hook = (
+                "def pytest_collection_modifyitems(items):\n"
+                "    for item in items:\n"
+                "        if item.callspec.params['station_ready'] == 'ready':\n"
+                f"            item.callspec.params['voltage'] = {voltage!r}\n"
+            )
+            (directory / "conftest.py").write_text(hook, encoding="utf-8")
+        env = os.environ.copy()
+        env.update(PYTEST_DISABLE_PLUGIN_AUTOLOAD="1", PYTEST_ADDOPTS="", PYTHONDONTWRITEBYTECODE="1")
+        env.pop("PYTHONPATH", None)
+        env.pop("PYTEST_PLUGINS", None)
+        command = [sys.executable, "-m", "pytest", "station_checks.py", "-q", "--tb=short",
+                   "-c", "pytest.ini", "-p", "no:cacheprovider", "--junitxml=station.xml"]
+        completed = subprocess.run(command, cwd=directory, env=env, capture_output=True,
+                                   text=True, encoding="utf-8", errors="replace", timeout=10)
+        output = completed.stdout + completed.stderr
+        report = directory / "station.xml"
+        assert report.exists(), f"pytest must produce its JUnit report:\n{output}"
+        assert completed.returncode == 1, f"This lab deliberately includes failing checks:\n{output}"
+        cases = list(ET.parse(report).getroot().iter("testcase"))
+        assert [case.attrib["name"] for case in cases] == [
+            "test_e4_voltage[nominal]", "test_e4_voltage[undervoltage]", "test_e4_voltage[offline]",
+        ], f"Use the three required parametrize rows and ids:\n{output}"
+        cache[voltage] = report, cases
+        return cache[voltage]
+
+    return run
+
+
+def test_e4_station_cases_have_outcomes_and_metadata(run_station):
+    _, cases = run_station()
+    assert all(cases[0].find(tag) is None for tag in ("error", "failure", "skipped")), "nominal must pass"
+    failure = cases[1].find("failure")
+    assert failure is not None, "undervoltage must fail an assertion"
+    error = cases[2].find("error")
+    assert error is not None and "RuntimeError: station offline" in error.attrib["message"], "offline must fail in fixture setup"
+    for case in cases:
+        property_nodes = case.findall("properties/property")
+        assert len(property_nodes) == 2, "record each metadata property exactly once"
+        properties = {prop.attrib["name"]: prop.attrib["value"] for prop in property_nodes}
+        assert properties == {"station_id": "CHASSIS-A1", "serial_number": "SN-0042"}, (
+            "Record both properties before fixture setup can fail."
+        )
+
+
+@pytest.mark.parametrize("voltage, tag", [(5.0, None), (4.8, None), (5.2, None), (4.0, "failure"), (5.3, "failure")])
+def test_e4_station_asserts_the_measurement(run_station, voltage, tag):
+    _, cases = run_station(voltage)
+    for case in cases[:2]:
+        if tag is None:
+            assert all(case.find(child) is None for child in ("error", "failure", "skipped")), "in-limit measurements must pass"
+        else:
+            assert case.find(tag) is not None, "assert the actual voltage; do not fail a case just because of its id"
+    assert cases[2].find("error") is not None, "offline must still be a fixture error"
+
+
+def test_e4_reads_real_pytest_report(run_station):
+    report, _ = run_station()
+    assert read_junit(report) == [
+        {"name": f"test_e4_voltage[{case_id}]", "outcome": outcome,
+         "properties": {"station_id": "CHASSIS-A1", "serial_number": "SN-0042"}}
+        for case_id, outcome in (("nominal", "PASS"), ("undervoltage", "FAIL"), ("offline", "ERROR"))
+    ], "read the generated report, including metadata on the failed setup"
+
+
+@pytest.mark.parametrize("root", ["testsuite", "testsuites"])
 @pytest.mark.parametrize("string_path", [False, True])
-def test_e4_report_shape_summary_and_full_results(tmp_path, string_path):
-    results = [
-        {"channel": "CH2", "status": "PASS", "message": "ready", "reading": 2.5},
-        {"channel": "CH1", "status": "ERROR", "message": "capteur débranché", "details": [1, None]},
-        {"channel": "CH1", "status": "FAIL", "message": "voltage low"},
+def test_e4_reads_properties_statuses_and_document_order(tmp_path, e4_ready, root, string_path):
+    suite = """<testsuite><testcase name="voltage[high]">
+      <properties><property name="station_id" value="A&amp;B"/>
+      <property name="serial_number" value="SN-µ"/></properties><failure message="high"/>
+      </testcase><testcase name="setup"><error message="offline"/></testcase>
+      <testcase name="optional"><skipped message="not fitted"/></testcase>
+      <testcase name="ready"/></testsuite>"""
+    xml = suite if root == "testsuite" else f"<testsuites>{suite}<testsuite><testcase name='last'/></testsuite></testsuites>"
+    path = tmp_path / "station report.xml"
+    path.write_text(xml, encoding="utf-8")
+    original = path.read_bytes()
+    expected = [
+        {"name": "voltage[high]", "outcome": "FAIL", "properties": {"station_id": "A&B", "serial_number": "SN-µ"}},
+        {"name": "setup", "outcome": "ERROR", "properties": {}},
+        {"name": "optional", "outcome": "SKIP", "properties": {}},
+        {"name": "ready", "outcome": "PASS", "properties": {}},
     ]
-    meta = {"station": "A1", "operator": "Zoë", "attempt": 2}
-    now = datetime(2026, 10, 28, 12, 30, tzinfo=timezone.utc)
-    path = tmp_path / "run report.json"
-    returned = write_report(results, str(path) if string_path else path, meta, now=now)
-    got = json.loads(path.read_text(encoding="utf-8"))
-    assert returned is None, "write_report writes a file and returns None"
-    assert got == {
-        "meta": {**meta, "generated_utc": "2026-10-28T12:30:00+00:00"},
-        "summary": {"counts": {"PASS": 1, "ERROR": 1, "FAIL": 1}, "overall": "ERROR"},
-        "results": results,
-    }, "preserve run metadata and full result records, using the documented report shape"
+    if root == "testsuites":
+        expected.append({"name": "last", "outcome": "PASS", "properties": {}})
+    assert read_junit(str(path) if string_path else path) == expected, "use each testcase's children and properties"
+    assert path.read_bytes() == original, "reading must not modify the XML report"
 
 
-@pytest.mark.parametrize(
-    "now, expected",
-    [
-        (datetime(2026, 10, 28, 1, 30, 2, 123456, tzinfo=timezone(timedelta(hours=2))),
-         "2026-10-27T23:30:02.123456+00:00"),
-        (datetime(2026, 10, 28, 23, 45, tzinfo=timezone(timedelta(hours=-3, minutes=-30))),
-         "2026-10-29T03:15:00+00:00"),
-    ],
-)
-def test_e4_injected_time_is_converted_to_utc(tmp_path, now, expected):
-    path = tmp_path / "report.json"
-    write_report([], path, {}, now=now)
-    got = json.loads(path.read_text(encoding="utf-8"))
-    assert got["meta"]["generated_utc"] == expected, "convert the instant to UTC, preserving fractional seconds"
+@pytest.mark.parametrize("xml", ["<testsuites/>", "<testsuite/>", "<testsuites><testsuite/></testsuites>"])
+def test_e4_empty_report(tmp_path, e4_ready, xml):
+    path = tmp_path / "empty.xml"
+    path.write_text(xml, encoding="utf-8")
+    assert read_junit(path) == [], "an empty report contains no test outcomes"
 
 
-def test_e4_metadata_copy_overwrites_old_timestamp_without_mutating_inputs(tmp_path):
-    results = [{"channel": "CH1", "status": "FAIL", "message": "low", "details": {"v": 1.0}}]
-    meta = {"station": "A1", "generated_utc": "old timestamp", "tags": ["acceptance"]}
-    before_results, before_meta = deepcopy(results), deepcopy(meta)
-    now = datetime(2026, 10, 28, tzinfo=timezone.utc)
-    path = tmp_path / "report.json"
-    write_report(results, path, meta, now=now)
-    got = json.loads(path.read_text(encoding="utf-8"))
-    assert results == before_results and meta == before_meta, "do not change caller-owned inputs"
-    assert got["meta"] == {**meta, "generated_utc": now.isoformat()}, "replace a stale timestamp in the file copy"
-
-
-def test_e4_overwrites_existing_report_with_empty_run(tmp_path):
-    path = tmp_path / "report.json"
-    path.write_text("old report content that is longer than an empty run " * 100, encoding="utf-8")
-    now = datetime(2026, 10, 28, tzinfo=timezone.utc)
-    write_report([], path, {}, now=now)
-    assert json.loads(path.read_text(encoding="utf-8")) == {
-        "meta": {"generated_utc": now.isoformat()},
-        "summary": {"counts": {}, "overall": "PASS"},
-        "results": [],
-    }, "replace the old file completely; do not append JSON documents"
-
-
-def test_e4_default_time_is_current_aware_utc(tmp_path):
-    path = tmp_path / "report.json"
-    before = datetime.now(timezone.utc)
-    write_report([], path, {"station": "A1"})
-    after = datetime.now(timezone.utc)
-    got = json.loads(path.read_text(encoding="utf-8"))
-    timestamp = got["meta"]["generated_utc"]
-    parsed = datetime.fromisoformat(timestamp)
-    assert timestamp.endswith("+00:00"), "use isoformat with an explicit UTC offset"
-    assert before <= parsed <= after, "when now is omitted, use the current UTC instant"
+def test_e4_xml_and_file_errors_reach_caller(tmp_path, e4_ready):
+    with pytest.raises(OSError):
+        read_junit(tmp_path / "missing.xml")
+    path = tmp_path / "broken.xml"
+    path.write_text("<testsuites>", encoding="utf-8")
+    with pytest.raises(ET.ParseError):
+        read_junit(path)
 
 
 def test_e1_file_error_reaches_caller(tmp_path, logger_names):
     with pytest.raises(OSError):
         get_station_logger(logger_names[0], tmp_path)
-
-
-def test_e4_file_error_reaches_caller(tmp_path):
-    with pytest.raises(OSError):
-        write_report([], tmp_path, {}, now=datetime(2026, 10, 28, tzinfo=timezone.utc))

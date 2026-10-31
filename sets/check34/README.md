@@ -4,16 +4,16 @@
 
 ## What you're building
 
-A chassis test station needs to decide whether its tools are ready, read limits, command a power supply, check measurements, and account for telemetry. These ten new problems test the minimum skills needed to do that work without real hardware. A **test station** is the computer and instruments used to test a chassis; **telemetry** is measurement data sent from a device to that computer.
+A chassis test station needs to launch its tools, read limits, command a power supply, check measurements, exchange instrument replies, and stop a telemetry listener cleanly. These ten new problems test the minimum skills needed to do that work without real hardware. A **test station** is the computer and instruments used to test a chassis; **telemetry** is measurement data sent from a device to that computer. A **listener** is code that waits for incoming traffic.
 
 ## How this works
 
-1. Replace the `raise NotImplementedError(...)` bodies in `starter/check34.py`. Don't edit `tests/`. The supplied data classes and `Transport` interface stay as supplied; don't implement the interface's two placeholder methods.
+1. Replace the `raise NotImplementedError(...)` bodies in `starter/check34.py`. Don't edit `tests/`. The supplied data classes and `Transport` interface stay as supplied; don't implement the interface's two placeholder methods. In E10, complete only the two marked learner methods; keep its supplied code.
 2. Press **Ctrl+Shift+B → Test: check34** (or run `bash tools/run.sh check34` / `tools\run.ps1 check34`). At first you'll see `Exercises: 0 / 10 passed`. Rerun after each exercise.
-3. **Time-box this check to 165 minutes:** set a timer, work from E1 to E10, and move on when an exercise's budget expires. The exercises are ordered from easiest to hardest and can be completed independently. Record unfinished exercises and the ones that took longest.
+3. **Time-box this check to 165 minutes:** set a timer, work from E1 to E10, and move on when an exercise's budget expires. The exercises can be completed independently. E10 includes 10 minutes of code work plus 5 minutes reserved for reading these instructions and rerunning tests throughout the check. Record unfinished exercises and the ones that took longest.
 4. Report **all pass / partial / stuck** in the tracker when time is up. Use the reread table to choose your next practice.
 
-The earlier readings to keep nearby are Python Tutorial §5 (data structures), §7.2 (files), and §8 (exceptions); the `csv`, `dataclasses`, `subprocess`, `typing.Protocol`, `collections.deque`, `struct`, and `zlib.crc32` documentation; pytest “Get started” and “How to write and report assertions”; and the day 27 serial-number arithmetic overview. Each exercise identifies the relevant part precisely.
+The earlier readings to keep nearby are Python Tutorial §5 (data structures), §7.2 (files), and §8 (exceptions); the `csv`, `dataclasses`, `subprocess`, `socket`, `threading`, `queue`, `typing.Protocol`, `collections.deque`, `struct`, and `zlib.crc32` documentation; pytest “Get started” and “How to write and report assertions”; and the day 27 serial-number arithmetic overview. Each exercise identifies the relevant part precisely.
 
 A **test harness** is the supplied test code that calls your work and checks its behavior. An **interface** lists the operations an object promises to provide. A **contract** states inputs, outputs, and errors. A **dataclass** supplies fields, construction, and equality automatically; all four supplied data classes are frozen, meaning you cannot assign new values to their fields. A **callable** is a function or other object that you can call. An **iterable** can supply items one at a time; some iterables can be consumed only once. `None` means no value, and **finite** excludes `nan` (not a number), `inf`, and `-inf`.
 
@@ -30,19 +30,21 @@ The supplied records are `Limit(low: float | None, high: float | None, unit: str
 
 ## Exercises
 
-### E1 — Which station tools block readiness? (easy, ~8 min)
+### E1 — Launch a station tool (easy, ~8 min)
 
-**Goal:** Review process results before an operator starts the chassis test. A **process** is a running program; its **exit code** is an integer returned when it finishes. Zero means success; every nonzero value, including a negative signal code, blocks readiness here. A **signal** is a notification to a process, such as a request to stop.
+**Goal:** Run a tool before an operator starts the chassis test. A **process** is a running program; a **subprocess** is a program launched by your Python program. Its **exit code** is the integer it returns when it finishes: zero means success, and nonzero means failure. **Standard output** (`stdout`) is its normal text output; **standard error** (`stderr`) is its separate diagnostic output.
 
-**Signature:** `def blocked_tools(exits: list[tuple[str, int]]) -> list[str]`
+**Signature:** `def run_tool(args: list[str], timeout: float) -> tuple[int, str, str]`
 
-Each pair is a tool name and one attempt's exit code. Return the names with **any** nonzero attempt, once each, in Python's normal case-sensitive sorted order. A later success does not erase an earlier failure. Leave the input unchanged. Empty input or only successes returns `[]`. Names are already valid, nonempty strings; do not trim or change case.
+Launch `args` once with `subprocess.run`: the first item names the program, and later items are its arguments (input strings). Capture stdout and stderr separately as **UTF-8** text (a character encoding: rules for storing text). Return `(exit_code, stdout, stderr)` without trimming whitespace. A nonzero exit code is a result to return, not an exception. Do not change `args`.
 
-**Example:** `blocked_tools([("scope", 0), ("psu", 1), ("psu", 0)])` → `["psu"]`.
+The list is nonempty and already valid; `timeout` is a finite positive number of seconds. A **timeout** limits how long an operation may wait. Pass it to `subprocess.run`. If it expires, the child process (the launched program) must be killed and waited for before `subprocess.TimeoutExpired` propagates unchanged. A missing executable raises `FileNotFoundError` unchanged. `subprocess.run` already handles timeout cleanup for you. Do not launch a shell (a command interpreter); pass the argument list directly, so spaces and punctuation remain literal argument characters. Use `capture_output=True`, `text=True`, `encoding="utf-8"`, and `check=False`.
 
-**Watch out:** Negative exit codes are failures too.
+**Example:** After `import sys`, `run_tool([sys.executable, "-c", "print('ready')"], 5.0)` → `(0, "ready\n", "")`. `sys.executable` is the path to the Python interpreter currently running; `-c` asks it to execute the following Python source string. This works on Windows and Linux without an external tool installation.
 
-**Reread:** d03, Python Tutorial §5.4–5.5 (sets and dictionaries); d33, `subprocess` docs, `CompletedProcess.returncode`.
+**Watch out:** Return both output streams even when the exit code is nonzero. Do not catch a timeout and pretend the tool succeeded.
+
+**Reread:** d33, `subprocess` docs (`run`, `CompletedProcess`, `TimeoutExpired`), and `sys.executable`.
 
 ### E2 — Test a low-voltage trip rule (easy+, ~12 min)
 
@@ -130,23 +132,25 @@ A `None` bound is unbounded on that side. Matching units is case-sensitive; do n
 
 **Reread:** d02, Python Tutorial §4.1–4.4 (conditions and loops); d03, §5.5 (dictionaries); d06, `dataclasses` docs.
 
-### E6 — A bounded voltage alarm window (medium+, ~18 min)
+### E6 — Read fragmented instrument replies (medium+, ~18 min)
 
-**Goal:** Keep the latest readings in a **deque**, a queue supporting efficient removal at the front and insertion at the back. A **window** is the most recent fixed number of readings; its mean is their sum divided by their count.
+**Goal:** Exchange one instrument request over **TCP** (Transmission Control Protocol), a connection that delivers bytes in order. A **byte** is a number from 0 to 255; Python's `bytes` stores a sequence of bytes, written as `b"..."`. A **socket** is a Python object that sends and receives network bytes. TCP is a byte stream: a reply can be **fragmented** (split across receives), and replies can be **coalesced** (combined in one receive). A receive boundary is not a message boundary.
 
-**Signatures:** `WindowAlarm(size: int, threshold: float)` and `add(value: float) -> bool | None`.
+**Signature:** `def exchange_lines(connection: socket.socket, command: str, reply_count: int) -> list[str]`
 
-In `__init__`, require `size > 0` and a finite threshold, else raise `ValueError`. Size is an integer. Each instance owns an initially empty public `values: deque[float]` with `maxlen == size`, its `size`, and its `threshold`. Callers only inspect these fields; they will not edit them.
+The harness supplies an already connected TCP socket with a positive timeout. Its fake server is **loopback-only**: address `127.0.0.1` connects to this same computer, with no network hardware or internet. The operating system chooses an unused **port** (a numbered endpoint) when the server binds to port `0`. You do not create or connect a socket in this exercise.
 
-`add` rejects non-finite values with `ValueError` **without changing state**. Otherwise retain this reading and the previous `size - 1` readings, oldest first. Return `None` until there are `size` readings. Once full, return a bool indicating whether the mean is **strictly greater** than threshold; equality returns `False`. Size 1 works immediately. Instances must not share state.
+Send `command` encoded as **ASCII** (the character encoding used by these instrument commands), followed by exactly one newline byte `b"\n"`, using `connection.sendall`. `sendall` sends all the supplied bytes or raises an error. The command is valid ASCII and contains no newline; `reply_count` is a positive integer. No input validation is needed.
 
-Keep a running sum and subtract the oldest reading before a full deque discards it. Each update must take constant work regardless of size: **O(1)** means the amount of work does not grow with window size. Do not recompute `sum(values)` every time. The speed check runs 200,000 updates with size 20,000 in at most 2 seconds; use normal station-scale numbers, not extreme floating-point magnitudes.
+Use `connection.recv(4096)` to receive up to 4096 bytes at a time. Accumulate bytes until you have exactly `reply_count` complete lines. Each line ends with `b"\n"`. Decode each line as ASCII and return the strings in arrival order, removing only the terminating newline. Preserve spaces and empty lines. Keep unfinished bytes between receives, and extract all complete lines already received before receiving again. The server sends exactly the requested number of ASCII lines; this function is used for one exchange per connection.
 
-**Example:** For size 2, threshold 3, adding `[2, 4, 6]` returns `[None, False, True]` and leaves `values` equal to `deque([4, 6], maxlen=2)`.
+An empty receive `b""` means **EOF** (end of the stream: the server at the other end closed the connection). If EOF arrives before all requested newline-terminated lines, raise `ConnectionError`, including when an unfinished line remains. Let `TimeoutError` and other socket errors propagate unchanged. The socket's timeout bounds each send/receive separately; leave that setting unchanged. The caller owns and closes the socket, on success or error. Do not close it here, retry, or use sleeps.
 
-**Watch out:** A bounded deque automatically drops the oldest item when full; account for its value before appending.
+**Example:** For command `"MEAS:VOLT?"`, count `2`, and server sends `b"5."` followed by `b"125\nOK\n"`, return `["5.125", "OK"]`. The request bytes are `b"MEAS:VOLT?\n"`. TCP may regroup those server sends; the result must stay the same.
 
-**Reread:** d15, `collections.deque` docs (`maxlen`, `append`), and A Common-Sense Guide to DSA, chapters on Big O and queues.
+**Watch out:** `recv` may return fewer bytes than requested. Do not discard the bytes after the first newline or treat partial text as a complete reply.
+
+**Reread:** d23, TCP stream framing (using newline bytes to mark message ends); `socket` docs (`sendall`, `recv`, timeouts).
 
 ### E7 — Teardown without hiding the real failure (hard, ~18 min)
 
@@ -216,37 +220,40 @@ For a nonduplicate, remove seq from missing if present. On the first arrival, se
 
 **Reread:** d27, “Serial number arithmetic” overview and `collections.deque` docs; RFC 1982 §3 is optional background. This contract explicitly resolves the half-range case and defines what enters the duplicate window.
 
-### E10 — Throttle repeated alarms (medium+, ~15 min)
+### E10 — Receive telemetry and stop cleanly (medium+, ~15 min: 10 code + 5 slack)
 
-**Goal:** Keep the station's alarm display from flooding the operator. A **throttle** limits how often an action is allowed. Decide whether to display each incoming alarm using only the alarms already allowed in a moving time window.
+**Goal:** Finish a supplied **UDP** (User Datagram Protocol) listener. UDP delivers separate messages called **datagrams**; a receive returns one datagram rather than part of a TCP stream. A **listener** waits for incoming traffic. A **thread** runs work alongside the main program; a **worker** is the thread doing the receive work.
 
-**Signatures:** `AlarmThrottle(clock: Callable[[], int], window_ms: int, max_alarms: int)`, `allow() -> bool`, and `__len__() -> int` (called by `len(throttle)`).
+**Signatures:** `UdpListener()`, `receive_once() -> bytes | None`, and `stop() -> None`.
 
-The supplied `clock` is a callable returning integer milliseconds and never going backwards. Pass this function into the constructor and call it to get the current time; the tests use a fake clock so no real waiting is needed. A millisecond is one thousandth of a second. Each instance starts with its own empty alarm history.
+Keep the supplied constructor and `_run` loop. They bind (assign an address to) a UDP socket at `127.0.0.1` and port `0`, set a 0.05-second receive timeout, and start one worker. `listener.address` is the assigned `(host, port)` pair. `listener.packets` is a `queue.Queue[bytes]`, a container that safely transfers items between threads. The worker stores one item per datagram. Read one with `listener.packets.get(timeout=2.0)`; this bounds the wait to two seconds. Instances own separate sockets, queues, and threads.
 
-Require `window_ms` and `max_alarms` to be positive integers, else raise `ValueError`. Reject booleans as well as floats, strings, and other non-integers: Python treats `bool` as a kind of `int`, but `True` is not a valid setting here. Do not validate the supplied clock's return values.
+Complete only the methods marked `LEARNER`:
 
-On each `allow()` call, read `now` from the clock and remove expired allowed alarms. An earlier allowed alarm at time `t` counts **exactly while `now - t < window_ms`**; it expires when `now - t == window_ms`. If fewer than `max_alarms` allowed alarms remain, record `now` and return `True`. Otherwise return `False` and record nothing. Multiple allowed alarms in the same millisecond each occupy a slot. A rejected alarm must not extend the wait for the next allowed alarm.
+- `receive_once`: call `self._socket.recvfrom(65535)`, which returns `(data, sender_address)` for one datagram of at most 65535 bytes. Return `data` unchanged, including `b""` for an empty datagram. On `TimeoutError` (also named `socket.timeout`) return `None`, so the worker can check whether to stop. Let other errors propagate. Do not change the socket timeout or close it here.
+- `stop`: call `self._stopping.set()` to request that the worker finish, then `self._thread.join(timeout=1.0)`. An **Event** is a thread-safe flag: `set()` raises it, and `is_set()` checks it. A **join** waits for a thread to finish; a join timeout does not itself stop the thread. If `self._thread.is_alive()` after the join, raise `TimeoutError`. Otherwise, if `self.error` is not `None`, raise that same saved exception object. On normal completion return `None`. Calling stop repeatedly is safe; each call still reports a saved worker error.
 
-Use a deque of allowed alarm times, oldest first, and remove expired times from its left. Store at most `max_alarms` times, including during a long burst of rejected alarms. `len(throttle)` returns the number of stored times without reading the clock or expiring anything; expiry happens in `allow()`. Callers only inspect this length. Each stored time should be appended and removed once, rather than scanning the whole history on every call. The speed check makes 200,000 `allow()` calls in under 2 seconds.
+The supplied worker checks the stop flag between receives, records any failure in `self.error`, and always closes its socket before it finishes. Its `idle` Event is set after the first receive timeout; tests use it to confirm a quiet instrument does not stop the listener. Let the receive timeout wake the worker so it can see the stop flag; keep socket cleanup in the supplied worker. Do not add sleeps or create extra threads. Always call `stop()` when finished, including after an error in the caller.
 
-**Example:** With `window_ms=100` and `max_alarms=2`, calls at clock times `[0, 40, 99, 100, 140]` return `[True, True, False, True, True]` and leave `len(throttle) == 2`. At 100 ms the alarm from 0 ms has expired; the rejected alarm at 99 ms used no slot.
+**Example:** After creating `listener = UdpListener()`, sending the datagram `b"rail=5.0"` to `listener.address` makes `listener.packets.get(timeout=2.0)` return `b"rail=5.0"`. After `listener.stop()`, the worker is finished and its socket is closed.
 
-**Watch out:** This window counts allowed alarms, not attempts. Expire all old entries before checking capacity, including after a long idle gap.
+**Watch out:** An empty UDP datagram is valid data, unlike TCP EOF. A receive timeout means no datagram arrived yet; it must not terminate the worker.
 
-**Reread:** d27, events-in-the-last-N-ms counter (deque over time, injected clock); d15, `collections.deque` docs (`append`, `popleft`).
+**Reread:** d25 UDP datagrams; d31 `threading.Event`, `Thread.join`, and `queue.Queue`; `socket.recvfrom` docs.
+
+**Budget:** Spend about 10 minutes on these two methods. Reserve the other 5 minutes in this slot for reading the check's instructions and rerunning tests across the set.
 
 ## If you failed Ek, reread dXX
 
 | Failed exercise | Reread days and focus |
 | --- | --- |
-| E1 | d03 sets/sorting; d33 exit codes in `subprocess` |
+| E1 | d33 subprocess arguments, output capture, exit codes, and timeout cleanup |
 | E2 | d09 pytest assertions and boundary cases |
 | E3 | d04 CSV/files; d05 exceptions and useful error messages |
 | E4 | d16 SCPI commands; d19 fake transports and validation before writes |
 | E5 | d02 comparisons; d03 grouping by name; d06 dataclasses |
-| E6 | d15 bounded deques, running sums, and constant work per update |
+| E6 | d23 TCP byte streams, newline framing, partial receives, and timeouts |
 | E7 | d05 exception propagation; d20 cleanup even when setup fails |
 | E8 | d26 binary formats, byte order, lengths, and CRC |
 | E9 | d27 gaps, duplicate windows, wraparound, and late recovery |
-| E10 | d27 events-in-the-last-N-ms counter (deque over time, injected clock); d15 deques |
+| E10 | d25 UDP datagrams; d31 stop Events, bounded joins, and queues |

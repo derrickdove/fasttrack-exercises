@@ -71,7 +71,29 @@ def parse_error(reply: str) -> tuple[int, str]:
 """,
     "sweep-channel": r"""
 def build_query(channel: int) -> str:
+    if channel <= 0:
+        raise ValueError("channel must be positive")
     return "MEAS:VOLT? (@1)\n"
+""",
+    "sweep-validation": r"""
+def build_query(channel: int) -> str:
+    return f"MEAS:VOLT? (@{channel})\n"
+""",
+    "sweep-zero": r"""
+_original_query = build_query
+
+def build_query(channel: int) -> str:
+    if channel == 0:
+        return f"MEAS:VOLT? (@{channel})\n"
+    return _original_query(channel)
+""",
+    "sweep-negative": r"""
+_original_query = build_query
+
+def build_query(channel: int) -> str:
+    if channel < 0:
+        return f"MEAS:VOLT? (@{channel})\n"
+    return _original_query(channel)
 """,
     "fixed-firmware": r"""
 def read_voltage(reply: str) -> float:
@@ -275,6 +297,17 @@ def test_e3_sweep_is_slow_and_checks_channels(sweep_ready: None, run_driver: Run
     assert broken["returncode"] == 1 and any(result["outcome"] == "failed"
                                              for result in results_for(broken, name)), (
         f"Your sweep must catch a driver that always queries channel 1:\n{broken['output']}"
+    )
+
+
+@pytest.mark.parametrize("variant", ["sweep-validation", "sweep-zero", "sweep-negative"])
+def test_e3_sweep_rejects_invalid_channels(sweep_ready: None, run_driver: Run, variant: str) -> None:
+    name = "test_e3_station_sweep"
+    broken = run_driver(variant, name)
+    assert broken["returncode"] == 1 and any(result["outcome"] == "failed"
+                                             for result in results_for(broken, name)), (
+        "Your sweep must use pytest.raises(ValueError) for both channels 0 and -1; "
+        f"it accepted the {variant} bug:\n{broken['output']}"
     )
 
 

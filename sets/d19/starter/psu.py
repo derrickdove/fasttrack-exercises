@@ -1,6 +1,7 @@
 """A bench power supply with an injectable VISA resource manager."""
 from __future__ import annotations
 
+from math import isfinite
 from pathlib import Path
 from types import TracebackType
 from typing import Literal, Protocol, runtime_checkable
@@ -44,7 +45,15 @@ class Psu:
         max_voltage: float | None = None,
         max_current: float | None = None,
     ) -> None:
-        raise NotImplementedError("E5: validate timeout, open the resource and set communication attributes; E6: retain limits")
+        # Supplied: validate and retain limits before any connection is opened.
+        for key, maximum in (("max_voltage", max_voltage), ("max_current", max_current)):
+            if maximum is not None and (not isfinite(maximum) or maximum < 0):
+                raise ValueError(f"{key} must be finite and nonnegative")
+        self._max_voltage = max_voltage
+        self._max_current = max_current
+        self._closed = False
+        # E5: replace the raise below; keep the supplied setup above.
+        raise NotImplementedError("E5: validate timeout, open the resource and set communication attributes")
 
     def read_voltage(self) -> float:
         raise NotImplementedError("E5: query MEAS:VOLT? and convert the reply to float")
@@ -53,10 +62,10 @@ class Psu:
         raise NotImplementedError("E5: query MEAS:CURR? and convert the reply to float")
 
     def set_voltage(self, volts: float) -> None:
-        raise NotImplementedError("E5: reject negative volts and write three decimals; E6: enforce max_voltage")
+        raise NotImplementedError("E5: reject negative or non-finite volts and write three decimals; E6: enforce max_voltage")
 
     def set_current_limit(self, amps: float) -> None:
-        raise NotImplementedError("E5: reject negative amps and write three decimals; E6: enforce max_current")
+        raise NotImplementedError("E5: reject negative or non-finite amps and write three decimals; E6: enforce max_current")
 
     def enable_output(self, enable: bool) -> None:
         raise NotImplementedError("E5: require a bool and write OUTP 1 or OUTP 0")
@@ -65,7 +74,27 @@ class Psu:
     def from_config(
         cls, path: str | Path, *, rm: ResourceManagerLike | pyvisa.ResourceManager | None = None
     ) -> Psu:
-        raise NotImplementedError("E6: load TOML, validate keys and construct cls with the supplied manager")
+        """Supplied: validate TOML settings before constructing the requested class."""
+        with open(path, "rb") as source:
+            config = tomllib.load(source)
+        ip = config.get("ip")
+        if not isinstance(ip, str):
+            raise ValueError("ip must be a str")
+        timeout_ms = config.get("timeout_ms", 2000)
+        if type(timeout_ms) is not int or timeout_ms <= 0:
+            raise ValueError("timeout_ms must be a positive int")
+        for key in ("max_voltage", "max_current"):
+            if key in config:
+                maximum = config[key]
+                if isinstance(maximum, bool) or not isinstance(maximum, (int, float)):
+                    raise ValueError(f"{key} must be a number")
+                if not isfinite(maximum) or maximum < 0:
+                    raise ValueError(f"{key} must be finite and nonnegative")
+        return cls(
+            ip, timeout_ms, rm=rm,
+            max_voltage=config.get("max_voltage"),
+            max_current=config.get("max_current"),
+        )
 
     def close(self) -> None:
         raise NotImplementedError("E6: close the resource at most once")

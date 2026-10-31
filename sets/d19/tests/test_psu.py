@@ -130,7 +130,7 @@ def test_e5_queries_convert_and_report_bad_replies(method: str, command: str,
     assert manager.resource.writes == []
 
 
-def test_e5_setpoints_format_and_reject_negatives(manager: FakeResourceManager) -> None:
+def test_e5_setpoints_format_and_reject_invalid_values(manager: FakeResourceManager) -> None:
     supply = Psu("192.0.2.1", rm=manager)
     assert supply.set_voltage(12.0344) is None
     assert supply.set_current_limit(0.5126) is None
@@ -139,9 +139,10 @@ def test_e5_setpoints_format_and_reject_negatives(manager: FakeResourceManager) 
     expected = ["VOLT 12.034", "CURR 0.513", "VOLT 0.000", "CURR 0.000"]
     assert manager.resource.writes == expected, "write exactly three decimal places"
     for setter in (supply.set_voltage, supply.set_current_limit):
-        with pytest.raises(ValueError):
-            setter(-0.0001)
-        assert manager.resource.writes == expected, "validate before writing or rounding"
+        for invalid in (-0.0001, float("nan"), float("inf"), float("-inf")):
+            with pytest.raises(ValueError):
+                setter(invalid)
+            assert manager.resource.writes == expected, f"reject {invalid!r} before writing or rounding"
     assert manager.resource.queries == []
 
 
@@ -187,8 +188,19 @@ def test_e5_real_pyvisa_sim_voltage(tmp_path: Path) -> None:
     ("set_current_limit", "max_current", 0.5, ["CURR 0.000", "CURR 0.500"]),
 ])
 def test_e6_limits_allow_boundary_and_reject_before_rounding(
-    method: str, key: str, limit: float, expected: list[str], manager: FakeResourceManager
+    method: str, key: str, limit: float, expected: list[str], manager: FakeResourceManager,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Establish implementation before checking constructor rejection paths.
+    Psu("probe", rm=manager)
+    manager.opened.clear()
+    monkeypatch.setattr(pyvisa, "ResourceManager", lambda: manager)
+    for invalid in (-1.0, -0.0001, float("nan"), float("inf"), float("-inf")):
+        for resource_manager in (manager, None):
+            with pytest.raises(ValueError, match=key):
+                Psu("192.0.2.1", rm=resource_manager, **{key: invalid})
+            assert manager.opened == [], f"reject {key}={invalid!r} before opening hardware"
+            assert manager.resource.writes == [] and manager.resource.queries == []
     supply = Psu("192.0.2.1", rm=manager, **{key: limit})
     setter = getattr(supply, method)
     setter(0)
@@ -202,10 +214,11 @@ def test_e6_limits_allow_boundary_and_reject_before_rounding(
         "name the maximum and its value (any equivalent numeric spelling)"
     )
     assert manager.resource.writes == expected, "reject above-max requests before any write"
-    for negative in (-1.0, -0.0001):
+    for invalid in (-1.0, -0.0001, float("nan"), float("inf"), float("-inf")):
         with pytest.raises(ValueError):
-            setter(negative)
-        assert manager.resource.writes == expected, "keep negative-value checks with a configured maximum"
+            setter(invalid)
+        assert manager.resource.writes == expected, "reject invalid setpoints with a configured maximum"
+    assert manager.resource.queries == []
     zero = Psu("192.0.2.1", rm=manager, **{key: 0})
     getattr(zero, method)(0)
     with pytest.raises(ValueError, match=key):
@@ -248,7 +261,8 @@ def test_e6_config_defaults_limits_and_classmethod(tmp_path: Path, manager: Fake
     *[(f'ip = "10.0.0.1"\ntimeout_ms = {value}', "timeout_ms")
       for value in ('"2000"', '2.0', 'true', '0', '-1')],
     *[(f'ip = "10.0.0.1"\n{key} = {value}', key)
-      for key in ("max_voltage", "max_current") for value in ('"12"', 'true', '[]')],
+      for key in ("max_voltage", "max_current")
+      for value in ('"12"', 'true', '[]', '-1', '-0.0001', 'nan', '+inf', '-inf')],
 ])
 def test_e6_config_errors_name_key_before_open(content: str, key: str, tmp_path: Path,
                                                manager: FakeResourceManager) -> None:
@@ -260,6 +274,7 @@ def test_e6_config_errors_name_key_before_open(content: str, key: str, tmp_path:
     with pytest.raises(ValueError, match=key):
         Psu.from_config(config, rm=manager)
     assert manager.opened == [], "validate the whole config before opening hardware"
+    assert manager.resource.writes == [] and manager.resource.queries == []
 
 
 def test_e6_close_is_idempotent(manager: FakeResourceManager) -> None:

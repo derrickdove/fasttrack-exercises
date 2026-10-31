@@ -219,19 +219,37 @@ def test_e4_accepts_file_guards_in_args_or_module(tmp_path: Path, module: str, g
     assert idempotent_tasks(path) == [], "creates/removes may be in module parameters or task args"
 
 
-@pytest.mark.parametrize("value", ["false", "true", "'station_result.rc == 0'", "[]"])
-def test_e4_changed_when_is_checked_by_presence(tmp_path: Path, value: str) -> None:
+@pytest.mark.parametrize("value", ["false", "true", "'station_result.rc == 0'", "[]", "'false'", "0", "null", "{}"])
+def test_e4_only_boolean_false_guards_without_file_guards(tmp_path: Path, value: str) -> None:
+    read_only = value == "false"
+    command_name = "Read telemetry status" if read_only else "Initialize station"
+    shell_name = "Read driver status" if read_only else "Reload driver"
+    command = "telemetry-status" if read_only else "station-init"
+    shell = "driver-status" if read_only else "chassis-driver reload"
     path = _write_playbook(tmp_path, f"""
 - hosts: bench
   tasks:
-    - name: Read telemetry status
-      ansible.builtin.command: telemetry-status
+    - name: {command_name}
+      ansible.builtin.command: {command}
       changed_when: {value}
-    - name: Read driver status
-      ansible.builtin.shell: driver-status
+    - name: {shell_name}
+      ansible.builtin.shell:
+        cmd: {shell}
+      changed_when: {value}
+    - name: File-guarded initialization
+      ansible.builtin.command: station-init
+      args:
+        creates: /opt/chassis/ready
+      changed_when: {value}
+    - name: File-guarded cleanup
+      ansible.builtin.shell:
+        cmd: station-cleanup
+        removes: /opt/chassis/pending
       changed_when: {value}
 """)
-    assert idempotent_tasks(path) == [], "Even changed_when: false is an explicit reporting rule"
+    expected = [] if read_only else [command_name, shell_name]
+    got = idempotent_tasks(path)
+    assert got == expected, f"Only boolean false or creates/removes guards a task; changed_when: {value} gave {got!r}"
 
 
 def test_e4_unrelated_keys_do_not_guard_tasks(tmp_path: Path) -> None:

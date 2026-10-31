@@ -1,0 +1,5 @@
+* chassis-demo.service - Chassis test station
+     Loaded: loaded (/etc/systemd/system/chassis-demo.service; enabled)
+     Active: failed (Result: exit-code)
+    Process: 814 ExecStart=/opt/chassis/.venv/bin/python3 -m chassis worker (code=exited, status=203/EXEC)
+   Main PID: 814 (code=exited, status=203/EXEC)

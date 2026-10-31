@@ -15,8 +15,8 @@ def test_e2_error_reply(reply: str, expected: tuple[int, str]) -> None:
 
 
 def test_e3_station_sweep() -> None:
-    """E3: Mark this slow and check voltage-query text for channels 1, 2, 3."""
-    raise NotImplementedError("E3: mark the sweep slow and check each command")
+    """E3: Mark slow; check channels 1, 2, 3 and reject channels 0 and -1."""
+    raise NotImplementedError("E3: mark slow, check commands, and reject invalid channels")
 
 
 def test_e4_overload_quirk() -> None:

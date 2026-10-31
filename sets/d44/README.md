@@ -83,7 +83,7 @@ print(plays[0]["hosts"])  # diagnostics
 
 - `creates: PATH` skips a command when that path already exists.
 - `removes: PATH` skips a command when that path is absent.
-- `changed_when` controls whether Ansible reports a task as changed; `changed_when: false` is useful for a read-only instrument query. This controls reporting and does not itself prevent side effects.
+- `changed_when` controls whether Ansible reports a task as changed. Use `changed_when: false` for a **read-only** check: a command that queries the station without changing it. This controls reporting and does not itself prevent side effects.
 
 **Signature:** `def idempotent_tasks(playbook_path: str | Path) -> list[str]`
 
@@ -92,13 +92,13 @@ print(plays[0]["hosts"])  # diagnostics
 1. Read the path as UTF-8 (a standard text encoding) and load it with `yaml.safe_load`. An empty/comment-only document, or `[]`, returns `[]`.
 2. Otherwise the input is a list of play mappings. Inspect each play's direct `tasks` list, in document order. A missing `tasks` key means an empty list. Tasks are mappings with string `name` values. Each task has at most one action module.
 3. Consider only `ansible.builtin.command` and `ansible.builtin.shell`. Their value is either a command string or a parameter mapping with `cmd`. Ignore other modules. Only these fully qualified names are in scope.
-4. A considered task is guarded if **any** of these keys is present: `creates` or `removes` in the module's parameter mapping, `creates` or `removes` in the task's `args` mapping, or `changed_when` at task level. Check key presence, not truthiness: `changed_when: false` still counts. Missing `args` means an empty mapping.
+4. A considered task is guarded if `creates` or `removes` is present in the module's parameter mapping or the task's `args` mapping, **or** task-level `changed_when` loads as the boolean `False` (YAML `false`). For `creates`/`removes`, check key presence, not the path's value. Missing `args` means an empty mapping. Other `changed_when` values, including `true`, condition expressions, `[]`, quoted `"false"`, `0`, and `null` (YAML's empty value, loaded as Python `None`), do not guard a task; without a file guard, keep it on the review list.
 5. Return unguarded task names in play/task order. Preserve duplicate names. Don't inherit guards from another task or the play. `register` stores a result, `when` decides whether a task runs, and `chdir` selects a directory; none counts as a guard here.
 6. Let file-reading errors (`OSError`, including `FileNotFoundError`) and invalid YAML errors (`yaml.YAMLError`) propagate to the caller. You don't need to validate other document shapes or evaluate commands, paths, or conditions.
 
-**Example:** a task named `Read serial number` using `ansible.builtin.command: station-id` with no guard contributes `"Read serial number"`. Add task-level `changed_when: false` and it contributes nothing.
+**Example:** a task named `Read serial number` using `ansible.builtin.command: station-id` with no guard returns `["Read serial number"]` when it is the only task. Add task-level `changed_when: false` and the result is `[]`. A task named `Initialize station` using `ansible.builtin.command: station-init` with `changed_when: true` returns `["Initialize station"]`; adding `args: {creates: /opt/chassis/ready}` makes the result `[]`.
 
-**Watch out:** This is a small review rule, not a proof that a deployment is idempotent. It accepts any present `changed_when` value, even `true`. Inputs use direct tasks only: no roles, nested task blocks, handlers (tasks triggered by changes), task includes, short module aliases, or inline `creates=...`/`removes=...` inside command strings. All guarded paths use explicit YAML keys. Tests use temporary playbooks, so E4 can pass before E2 is finished.
+**Watch out:** This is a small review rule, not a proof that a deployment is idempotent. Use `changed_when: false` only for read-only checks; it does not make a mutating command safe to repeat. The checker does not determine what a command does. Inputs use direct tasks only: no roles, nested task blocks, handlers (tasks triggered by changes), task includes, short module aliases, or inline `creates=...`/`removes=...` inside command strings. All guarded paths use explicit YAML keys. Tests use temporary playbooks, so E4 can pass before E2 is finished.
 
 **Reread:** Ansible Intro to playbooks, “Desired state and idempotency”; Getting started, “Creating a playbook.”
 

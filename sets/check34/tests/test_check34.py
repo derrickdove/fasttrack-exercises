@@ -1,8 +1,13 @@
-from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 import math
 from pathlib import Path
+import socket
 import struct
+import subprocess
+import sys
+from threading import Event, Thread
+from typing import cast
 import time
 import zlib
 
@@ -10,25 +15,53 @@ import pytest
 
 import starter.check34 as learner
 from starter.check34 import (
-    GapTracker, Limit, Measurement, Packet, Result, WindowAlarm,
-    acquire_voltage, blocked_tools, check_all, guarded_read, load_limits, parse_packet,
+    GapTracker, Limit, Measurement, Packet, Result, UdpListener,
+    acquire_voltage, run_tool, check_all, exchange_lines, guarded_read, load_limits, parse_packet,
 )
 
 
-def test_e1_sorted_unique_blockers() -> None:
-    exits = [("scope", 0), ("psu", 1), ("dmm", -15), ("psu", 0), ("dmm", 2)]
-    assert blocked_tools(exits) == ["dmm", "psu"], "any failed attempt blocks that tool"
-    assert exits[0] == ("scope", 0), "do not mutate the input"
+@pytest.mark.parametrize("code", [0, 7])
+def test_e1_real_process_output_and_exit(code: int) -> None:
+    script = "import sys; print('ready'); print('warning', file=sys.stderr); sys.exit(int(sys.argv[1]))"
+    assert run_tool([sys.executable, "-c", script, str(code)], 5.0) == (code, "ready\n", "warning\n")
 
 
-def test_e1_empty_and_success() -> None:
-    assert blocked_tools([]) == []
-    assert blocked_tools([("psu", 0), ("psu", 0)]) == []
+def test_e1_literal_arguments_and_no_input_mutation() -> None:
+    args = [sys.executable, "-c", "import sys; print(sys.argv[1])", "rail 5; echo $(literal)"]
+    before = args.copy()
+    assert run_tool(args, 5.0) == (0, "rail 5; echo $(literal)\n", "")
+    assert args == before
 
 
-@pytest.mark.parametrize("code", [-9, 1, 2, 143])
-def test_e1_all_nonzero_codes_block(code: int) -> None:
-    assert blocked_tools([("telemetry", code)]) == ["telemetry"]
+def test_e1_utf8_and_empty_output() -> None:
+    assert run_tool([sys.executable, "-c", r"import sys; sys.stdout.buffer.write(b'rail \xc2\xb5V')"], 5.0) == (0, "rail \u00b5V", "")
+    assert run_tool([sys.executable, "-c", "pass"], 5.0) == (0, "", "")
+
+
+def test_e1_timeout_reaps_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    real_popen = subprocess.Popen
+    children: list[subprocess.Popen[str]] = []
+
+    def tracked_popen(*args, **kwargs):
+        child = real_popen(*args, **kwargs)
+        children.append(child)
+        return child
+
+    monkeypatch.setattr(subprocess, "Popen", tracked_popen)
+    try:
+        with pytest.raises(subprocess.TimeoutExpired):
+            run_tool([sys.executable, "-c", "import threading; threading.Event().wait(30)"], 0.2)
+        assert children and all(child.poll() is not None for child in children), "timeout must kill and wait for the child"
+    finally:
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=2.0)
+
+
+def test_e1_launch_error_propagates(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        run_tool([str(tmp_path / "missing-station-tool")], 5.0)
 
 
 def _correct_trip(value: float, low: float) -> bool:
@@ -220,49 +253,109 @@ def test_e5_empty_and_no_input_mutation() -> None:
     assert limits == {"rail": Limit(0, 3, "V")}
 
 
-def test_e6_warmup_and_eviction() -> None:
-    alarm = WindowAlarm(3, 2.0)
-    assert [alarm.add(value) for value in [1, 2, 3, 4, 0]] == [None, None, False, True, True]
-    assert isinstance(alarm.values, deque), "use a deque for the station window"
-    assert list(alarm.values) == [3, 4, 0]
-    assert alarm.values.maxlen == 3
-    assert (alarm.size, alarm.threshold) == (3, 2.0)
+@contextmanager
+def _tcp_peer(chunks: list[bytes], hold: bool = False) -> Iterator[tuple[socket.socket, list[bytes]]]:
+    """Real loopback server; stop coordination needs no scheduling sleeps."""
+    release = Event()
+    requests: list[bytes] = []
+    errors: list[BaseException] = []
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        server.settimeout(2.0)
+
+        def serve() -> None:
+            try:
+                connection, _address = server.accept()
+                with connection:
+                    connection.settimeout(2.0)
+                    request = b""
+                    while b"\n" not in request:
+                        data = connection.recv(4096)
+                        if not data:
+                            return  # A starter stub can exit before sending.
+                        request += data
+                    requests.append(request)
+                    for chunk in chunks:
+                        connection.sendall(chunk)
+                    if hold:
+                        release.wait(timeout=2.0)
+            except BaseException as error:
+                errors.append(error)
+
+        worker = Thread(target=serve, name="check34-tcp-fake")
+        worker.start()
+        try:
+            with socket.create_connection(server.getsockname(), timeout=2.0) as client:
+                yield client, requests
+        finally:
+            release.set()
+            worker.join(timeout=3.0)
+            assert not worker.is_alive(), "fake server thread must be joined"
+            assert not errors, f"fake server failed: {errors}"
 
 
-def test_e6_size_one_and_instances() -> None:
-    first, second = WindowAlarm(1, 0), WindowAlarm(2, 0)
-    assert first.add(0) is False
-    assert first.add(1) is True
-    assert second.add(1) is None
-    assert list(first.values) == [1]
+class ScriptedConnection:
+    """Force receive boundaries, which TCP itself is free to regroup."""
+    def __init__(self, chunks: list[bytes], error: OSError | None = None) -> None:
+        self.chunks = chunks.copy()
+        self.error = error
+        self.sent: list[bytes] = []
+
+    def sendall(self, data: bytes) -> None:
+        self.sent.append(data)
+
+    def recv(self, size: int) -> bytes:
+        if self.error is not None:
+            raise self.error
+        assert self.chunks, "stop receiving once the requested replies are complete"
+        chunk = self.chunks.pop(0)
+        assert len(chunk) <= size
+        return chunk
 
 
-@pytest.mark.parametrize("size,threshold", [(0, 1), (-1, 1), (1, math.nan), (1, math.inf)])
-def test_e6_invalid_configuration(size: int, threshold: float) -> None:
-    with pytest.raises(ValueError):
-        WindowAlarm(size, threshold)
+def test_e6_real_tcp_request_and_replies() -> None:
+    with _tcp_peer([b"5.", b"125\nOK\n"]) as (connection, requests):
+        assert exchange_lines(connection, "MEAS:VOLT?", 2) == ["5.125", "OK"]
+        assert requests == [b"MEAS:VOLT?\n"], "send the command with exactly one newline"
+        assert connection.fileno() != -1, "the caller owns this socket"
+        assert connection.gettimeout() == 2.0, "preserve the supplied timeout"
 
 
-@pytest.mark.parametrize("bad", [math.nan, math.inf, -math.inf])
-def test_e6_bad_reading_leaves_window_unchanged(bad: float) -> None:
-    alarm = WindowAlarm(2, 1)
-    assert alarm.add(1) is None
-    with pytest.raises(ValueError):
-        alarm.add(bad)
-    assert list(alarm.values) == [1]
-    assert alarm.add(1) is False
+@pytest.mark.parametrize("chunks,expected", [
+    ([b"5.", b"125", b"\nO", b"K\n"], ["5.125", "OK"]),
+    ([b"5.125\nOK\n"], ["5.125", "OK"]),
+    ([b"\n 5.0 \n"], ["", " 5.0 "]),
+    ([b"READY\n"], ["READY"]),
+])
+def test_e6_deterministic_split_and_coalesced_reads(chunks: list[bytes], expected: list[str]) -> None:
+    peer = ScriptedConnection(chunks)
+    assert exchange_lines(cast(socket.socket, peer), "READ?", len(expected)) == expected
+    assert peer.sent == [b"READ?\n"]
 
 
-def test_e6_fast_enough() -> None:
-    alarm = WindowAlarm(20_000, 1.0)
-    started = time.perf_counter()
-    last = None
-    for _ in range(200_000):
-        last = alarm.add(1.0)
-    elapsed = time.perf_counter() - started
-    assert last is False
-    assert len(alarm.values) == 20_000
-    assert elapsed <= 2.0, f"200,000 updates took {elapsed:.3f}s; keep a running sum"
+@pytest.mark.parametrize("chunks", [[], [b"partial"], [b"first\nunfinished"]])
+def test_e6_early_eof_is_error(chunks: list[bytes]) -> None:
+    with _tcp_peer(chunks) as (connection, _requests):
+        with pytest.raises(ConnectionError):
+            exchange_lines(connection, "READ?", 2)
+
+
+@pytest.mark.parametrize("chunks", [[], [b"partial"], [b"first\n"]])
+def test_e6_silent_or_stalled_reply_times_out(chunks: list[bytes]) -> None:
+    with _tcp_peer(chunks, hold=True) as (connection, _requests):
+        connection.settimeout(0.1)
+        with pytest.raises(TimeoutError):
+            exchange_lines(connection, "READ?", 2)
+        assert connection.fileno() != -1, "leave cleanup to the caller even after timeout"
+
+
+def test_e6_other_socket_error_propagates() -> None:
+    error = OSError("instrument disconnected")
+    peer = ScriptedConnection([], error)
+    with pytest.raises(OSError) as caught:
+        exchange_lines(cast(socket.socket, peer), "READ?", 1)
+    assert caught.value is error
 
 
 def _operation(calls: list[str], name: str, error: BaseException | None = None) -> Callable[[], None]:
@@ -448,85 +541,112 @@ def test_e9_half_range_is_late_and_gap_lists_are_independent() -> None:
 
 
 
-class FakeAlarmClock:
-    def __init__(self, now: int = 0) -> None:
-        self.now = now
-
-    def __call__(self) -> int:
-        return self.now
-
-
-def test_e10_same_millisecond_burst() -> None:
-    clock = FakeAlarmClock()
-    throttle = learner.AlarmThrottle(clock, 100, 2)
-    assert len(throttle) == 0, "each throttle starts empty"
-    assert throttle.allow() is True
-    assert throttle.allow() is True, "separate alarms at the same time each use a slot"
-    assert throttle.allow() is False
-    assert throttle.allow() is False
-    assert len(throttle) == 2, "denied alarms must not be stored"
+@contextmanager
+def _udp_listener() -> Iterator[UdpListener]:
+    listener = UdpListener()
+    try:
+        yield listener
+    finally:
+        try:
+            listener.stop()
+        finally:
+            # Harness fallback also cleans up an unfinished learner stop method.
+            listener._stopping.set()
+            listener._thread.join(timeout=2.0)
+            assert not listener._thread.is_alive(), "listener thread must be joined"
+            listener._socket.close()
 
 
-def test_e10_sliding_expiry_and_denied_alarms() -> None:
-    clock = FakeAlarmClock()
-    throttle = learner.AlarmThrottle(clock, 100, 2)
-    for now, expected in [(0, True), (40, True), (99, False), (100, True),
-                          (139, False), (140, True), (199, False), (200, True)]:
-        clock.now = now
-        assert throttle.allow() is expected, f"unexpected decision at {now} ms"
-    assert len(throttle) == 2, "only allowed alarms younger than 100 ms remain"
+def test_e10_receives_whole_datagrams_including_empty() -> None:
+    with _udp_listener() as listener:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
+            sender.settimeout(2.0)
+            for packet in [b"rail=5.0", b"", b"\x00\xff\n", b"x" * 4096]:
+                sender.sendto(packet, listener.address)
+                assert listener.packets.get(timeout=2.0) == packet, "one queue item per datagram, including empty bytes"
 
 
-def test_e10_one_millisecond_window_idle_jump_and_instances() -> None:
-    clock = FakeAlarmClock(-10)
-    first = learner.AlarmThrottle(clock, 1, 1)
-    second = learner.AlarmThrottle(clock, 1, 1)
-    assert first.allow() is True
-    assert first.allow() is False
-    assert second.allow() is True, "instances must not share alarm history"
-    clock.now = -9
-    assert first.allow() is True, "an alarm expires exactly one window later"
-    assert first.allow() is False
-    clock.now = 1_000_000
-    assert first.allow() is True, "a long idle gap releases capacity"
-    assert len(first) == 1
+def test_e10_timeout_keeps_listener_running() -> None:
+    with _udp_listener() as listener:
+        assert listener.idle.wait(timeout=2.0), "receive timeout should return None"
+        assert listener._thread.is_alive(), "a quiet instrument is not a stopped listener"
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
+            sender.settimeout(2.0)
+            sender.sendto(b"after idle", listener.address)
+        assert listener.packets.get(timeout=2.0) == b"after idle"
 
 
-@pytest.mark.parametrize("field", ["window_ms", "max_alarms"])
-@pytest.mark.parametrize("bad", [0, -1, True, False, 1.0, 1.5, "1", None, math.nan, math.inf])
-def test_e10_invalid_configuration(field: str, bad: object) -> None:
-    with pytest.raises(ValueError):
-        if field == "window_ms":
-            learner.AlarmThrottle(FakeAlarmClock(), bad, 1)
-        else:
-            learner.AlarmThrottle(FakeAlarmClock(), 1, bad)
+def test_e10_idle_stop_joins_closes_and_is_repeatable() -> None:
+    with _udp_listener() as listener:
+        started = time.perf_counter()
+        listener.stop()
+        assert time.perf_counter() - started < 1.5, "stop must have a bounded join"
+        assert not listener._thread.is_alive()
+        assert listener._socket.fileno() == -1, "worker cleanup closes the socket"
+        assert listener.stop() is None
+
+    class StuckThread:
+        def __init__(self) -> None:
+            self.join_timeout: float | None = None
+
+        def join(self, timeout: float | None = None) -> None:
+            self.join_timeout = timeout
+
+        def is_alive(self) -> bool:
+            return True
+
+    # Script a stuck worker without leaving a real thread running.
+    stuck = UdpListener.__new__(UdpListener)
+    worker = StuckThread()
+    stuck._thread = cast(Thread, worker)
+    stuck._stopping = Event()
+    stuck.error = None
+    with pytest.raises(TimeoutError):
+        stuck.stop()
+    assert stuck._stopping.is_set(), "request stop before waiting"
+    assert worker.join_timeout == 1.0, "join must have a one-second timeout"
 
 
-def test_e10_storage_bounded_and_all_expired_alarms_removed() -> None:
-    clock = FakeAlarmClock()
-    throttle = learner.AlarmThrottle(clock, 100, 3)
-    for index in range(20_000):
-        assert throttle.allow() is (index < 3)
-        assert len(throttle) == min(index + 1, 3), "storage must never exceed max_alarms"
-    clock.now = 100
-    assert len(throttle) == 3, "len reports stored times; allow performs expiry"
-    assert throttle.allow() is True
-    assert len(throttle) == 1, "remove every expired alarm before recording a new one"
-    assert throttle.allow() is True
-    assert throttle.allow() is True
-    assert throttle.allow() is False
-    assert len(throttle) == 3
+def test_e10_instances_stop_independently() -> None:
+    with _udp_listener() as first, _udp_listener() as second:
+        first.stop()
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
+            sender.settimeout(2.0)
+            sender.sendto(b"second station", second.address)
+        assert second.packets.get(timeout=2.0) == b"second station"
+        assert second._thread.is_alive()
 
 
-def test_e10_fast_enough() -> None:
-    clock = FakeAlarmClock()
-    throttle = learner.AlarmThrottle(clock, 20_000, 20_000)
-    started = time.perf_counter()
-    allowed = 0
-    for now in range(200_000):
-        clock.now = now
-        allowed += throttle.allow()
-    elapsed = time.perf_counter() - started
-    assert allowed == 200_000, "expiry must free one slot per millisecond once full"
-    assert len(throttle) == 20_000
-    assert elapsed < 2.0, f"200,000 allow calls took {elapsed:.3f}s; expire from a deque's left"
+def test_e10_receive_does_not_hide_other_errors() -> None:
+    error = OSError("receiver failed")
+
+    class BrokenSocket:
+        def recvfrom(self, size: int) -> tuple[bytes, tuple[str, int]]:
+            raise error
+
+    listener = UdpListener.__new__(UdpListener)
+    listener._socket = cast(socket.socket, BrokenSocket())
+    with pytest.raises(OSError) as caught:
+        listener.receive_once()
+    assert caught.value is error
+
+
+def test_e10_stop_surfaces_background_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    error = OSError("background receive failed")
+    receive_attempted = Event()
+
+    def fail_receive(self: UdpListener) -> bytes | None:
+        receive_attempted.set()
+        raise error
+
+    monkeypatch.setattr(UdpListener, "receive_once", fail_receive)
+    with _udp_listener() as listener:
+        try:
+            assert receive_attempted.wait(timeout=2.0), "worker must attempt receive before stop"
+            with pytest.raises(OSError) as caught:
+                listener.stop()
+            assert caught.value is error
+            assert not listener._thread.is_alive()
+            assert listener._socket.fileno() == -1
+        finally:
+            listener.error = None  # Allow the harness's repeated stop to finish.

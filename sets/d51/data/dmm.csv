@@ -1,0 +1,3 @@
+evidence_id,case,window_start_ms,window_end_ms,mean_V,uncertainty_V
+D01,case_a,-50.0,50.0,4.999,0.010
+D02,case_b,-50.0,50.0,4.997,0.010

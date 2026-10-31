@@ -1,14 +1,14 @@
 # d40 — Git branches, code review and CI
 
-**Time:** about 45 minutes · **Read first:** GitHub Actions: [Building and testing Python](https://docs.github.com/en/actions/tutorials/build-and-test-code/python); *The Pragmatic Programmer*, topic “Test to Code” (your book); *Pro Git*, “Basic Branching and Merging” and “Contributing to a Project” · **You edit:** `starter/review_fix.py` and `starter/ci.yml`
+**Time:** about 70 minutes (including the 5-minute Git checklist) · **Read first:** GitHub Actions: [Building and testing Python](https://docs.github.com/en/actions/tutorials/build-and-test-code/python); *Pro Git*, “Basic Branching and Merging” and “Contributing to a Project” · **You edit:** `starter/review_fix.py`, `starter/ci.yml`, and `starter/driver_review.py`
 
 ## What you're building
 
-A chassis test station compares measured bus voltages (voltages on shared electrical supply lines) with allowed limits. You will address two review comments, describe automated checks for the change, and validate the team's branch names. A **code review** is another developer checking a proposed change before it becomes shared station software.
+A chassis test station compares measured bus voltages (voltages on shared electrical supply lines) with allowed limits. You will address two review comments, describe automated checks for the change, and review an unfamiliar instrument driver change. E4 replaces the "Test to Code" reread with practice finding defects and evaluating a proposed repair. A **code review** is another developer checking a proposed change before it becomes shared station software.
 
 ## How this works
 
-1. Replace the `raise NotImplementedError(...)` lines in `starter/review_fix.py`. E1 and E2 include the proposed buggy bodies in their docstrings (text attached to a function); copy each body out and fix it. For E3, replace the entire placeholder in `starter/ci.yml`. Don't edit `tests/`.
+1. Replace the `raise NotImplementedError(...)` lines in `starter/review_fix.py`. E1 and E2 include the proposed buggy bodies in their docstrings (text attached to a function); copy each body out and fix it. For E3, replace the entire placeholder in `starter/ci.yml`. For E4, fill in `review_answers()` in `starter/driver_review.py`; read both files in `data/` without applying them. Don't edit `tests/` or `data/`.
 2. Press **Ctrl+Shift+B → Test: d40** (or run `bash tools/run.sh d40` / `tools\run.ps1 d40`). At first you'll see `Exercises: 0 / 4 passed`, all reported as `NotImplementedError`; this includes the untouched YAML placeholder. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
@@ -79,19 +79,84 @@ Return `True` exactly when `value` is finite and `low <= value <= high`; otherwi
 
 **Reread:** GitHub Actions, “Building and testing Python”: “Specifying a Python version”, “Installing dependencies”, and “Testing your code”.
 
-### E4 — Validate a station-work branch (easy, ~7 min)
+### E4 — Review an unfamiliar driver diff (medium, ~32 min)
 
-**Goal:** Implement the team's branch naming convention for reviewed station changes.
+**Goal:** Find three defects in `data/proposed.diff`, request a **regression test** (a test that catches the defect if it returns) for each, then decide which defects `data/repair.diff` fixes. Do the first review before opening the repair. Spend about 15 minutes on the first review, 10 on the repair, and 7 recording and checking your answers. No hardware or driver execution is needed.
 
-**Signature:** `def branch_name_ok(name: str) -> bool`
+**Signature:** `def review_answers() -> list[ReviewFinding]` in `starter/driver_review.py`.
 
-Return `True` only for the complete form `feature/<ticket>-<slug>` or `fix/<ticket>-<slug>`. A **ticket** is a work-item identifier: exactly uppercase `CTS-` followed by one or more ASCII digits `0`–`9`; leading zeros are allowed. A **slug** is a short description made of one or more lowercase ASCII letters or digits, optionally separated into groups by single hyphens. No leading, trailing, or consecutive hyphens in the slug. **ASCII** here means the English letters `a`–`z` and digits `0`–`9`, rather than other alphabets or digit forms.
+#### Diff primer
 
-**Example:** `branch_name_ok("feature/CTS-34-bus-limits")` → `True`; `branch_name_ok("fix/CTS-34-Bus")` → `False`.
+A **driver** translates software requests into instrument commands. A **diff** shows a proposed file change: `---` names the old file, `+++` the new file, `-` removes a line, `+` adds a line, and a leading space keeps a line as context. `/dev/null` means the file did not previously exist. A **hunk** is a group of changed lines; `@@ -old_start,old_count +new_start,new_count @@` gives its positions. These markers are diff notation, not commands to run.
 
-**Watch out:** Match the whole string, including its end. Do not trim spaces or newlines. Reject empty text, extra slashes, underscores, and any other prefix. `re.fullmatch` from Python's `re` module can match a **regular expression**, a pattern describing allowed text; ordinary string checks are also fine.
+Both diffs concern `drivers/bus_probe.py`, an imaginary file supplied only inside these diffs. `proposed.diff` adds it; `repair.diff` changes that proposed version. For your findings, count **new-side line numbers in proposed.diff**: start at the hunk's `+` start number and count each added or context line, including blank lines. Do not count header, hunk-marker, or removed lines. Remove the diff's `b/` prefix from the file path. Always use the original proposed version's line numbers, even when assessing the repair.
 
-**Reread:** *The Pragmatic Programmer*, “Test to Code”, for testing both accepted and rejected names; *Pro Git*, “Basic Branching and Merging” for branch creation and “Contributing to a Project” for a focused contribution and review.
+#### Station contract
+
+**SCPI** (Standard Commands for Programmable Instruments) is a text command language. This supply accepts `VOLT <number>` to set volts, `OUTP 1` to enable its electrical output, `OUTP 0` to disable it, and `MEAS:VOLT?` to request a voltage reading. A question mark marks a query, a command that returns a reply. `write()` sends a command; `query()` sends a command and returns reply text. `float()` converts numeric reply text and raises `ValueError` for nonnumeric text.
+
+A **session** is the existing connection to the supply. `Session`, the supplied `Protocol`, describes the attributes and methods it provides. A `Protocol` is a type-hint interface: it names what an object must support. The caller owns this session and closes it later. Assume a valid, finite voltage within the supply's range, newline handling already configured, an initially disabled output, no concurrent callers, and output-off writes that succeed. Review only the following requirements:
+
+- A **timeout** bounds how long an instrument operation may wait. Here `resource.timeout` is in milliseconds (one thousandth of a second each); `None` disables that bound. Every operation must have a positive timeout of at most 2000 ms, set before the first command.
+- A successful write only means the command was sent. A supply may reject a voltage setting while retaining its previous voltage. Its **error queue** stores such instrument errors. `SYST:ERR?` removes and returns the oldest error as `code,"message"`; code `0` means no error remains. After configuring voltage, check this reply before enabling output. Any nonzero code must raise an exception and prevent output enable and a successful measurement return. Do not assume the queue is empty.
+- After attempting to enable output, attempt output-off on success and on every exception path, then let the original exception reach the caller. An **exception path** is the sequence of statements taken when an operation fails. A Python `finally` block runs when its `try` block exits, including by return or exception.
+
+For each violated requirement, choose one **anchor**, the line responsible for the defect. Anchor a bad setting at its assignment; a missing instrument-error check at the voltage-setting write that needs the check; and exception cleanup at the original output-off write. Report exactly these three defects, with distinct anchors, and no style suggestions.
+
+#### Return contract
+
+Replace the stub with a return of a list containing three dictionaries, in any order. `ReviewFinding` is a supplied **TypedDict**, a type hint describing a dictionary's keys and value types; return ordinary dictionaries. Each finding must have exactly these keys:
+
+| Key | Value |
+| --- | --- |
+| `file` | The new file path without `b/`, using `/` separators. |
+| `line` | The anchor's positive integer line number in the original proposed new file. |
+| `consequence` | One letter A-D from the consequence choices below. |
+| `regression_test` | One letter A-D from the requested-test choices below. |
+| `repair_fixed` | `True` if the supplied repair fully meets this defect's requirement; otherwise `False`. |
+| `repair_reason` | One letter A-D from the repair-evidence choices below. |
+| `comment` | At least 12 words separated by spaces, tabs, or newlines in your own words: explain the consequence, test input or injected failure and expected behavior, and evidence for your repair verdict. |
+
+Option letters select complete statements, not just keywords. The tests grade the locations and option choices together and check the comment structurally; they do not understand prose. Your comment is for a human reviewer, so make it specific enough to defend. Do not put a driver implementation in this function.
+
+#### Review choices
+
+**Consequence - what can the proposed driver do wrong?**
+
+- **A:** Report a measurement at a previous voltage after the supply rejects the new voltage setting.
+- **B:** Close the caller's session before the caller can reuse it.
+- **C:** Wait indefinitely when the instrument stops answering.
+- **D:** Leave the supply output enabled after a query or conversion exception.
+
+<details><summary>Why it matters on the job</summary>
+A review should connect a changed statement to an observable station failure.
+</details>
+
+**Requested regression test - which stimulus and assertion expose this defect?** A **fake session** is a test object that records commands and returns scripted replies or raises scripted exceptions; it does not contact hardware. A **stimulus** is the input or failure injected by a test. **Propagation** means letting an exception reach the caller.
+
+- **A:** Make the measurement query raise, then separately return nonnumeric text; assert output-off is attempted after output-enable on both paths and the original exception propagates. Also check output-off before a normal return.
+- **B:** Use a fake session that records its timeout at each operation and simulates a silent instrument by raising immediately; assert a positive timeout no greater than 2000 ms was set before any command. Never actually wait for silence.
+- **C:** Check that the driver closes the caller-owned session before returning the measurement.
+- **D:** Script a nonzero `SYST:ERR?` reply after voltage configuration; assert no output-enable or successful measurement return occurs and an exception propagates. Also script a zero error and assert normal measurement can proceed.
+
+<details><summary>Why it matters on the job</summary>
+A requested test needs both the failure stimulus and the behavior that would prove a correction.
+</details>
+
+**Repair evidence - what in repair.diff supports your verdict?**
+
+- **A:** Output-off is in `finally` around output-enable and measurement, covering both query and conversion exceptions.
+- **B:** The error query's returned reply is discarded, so a nonzero instrument error still does not prevent output-enable.
+- **C:** Sending an error query guarantees any rejected voltage setting was automatically reapplied successfully.
+- **D:** A 1000 ms timeout is assigned before any command, bounding a silent instrument operation.
+
+<details><summary>Why it matters on the job</summary>
+A repair needs the same scrutiny as the original change before it is accepted.
+</details>
+
+**Watch out:** A query appearing in the repair does not by itself show that its reply changes which statements run. Check success, query failure, and conversion failure separately. The automated feedback names Q1-Q3 in ascending anchor order and points back here without printing answer keys.
+
+**Reread:** E4's "Diff primer", "Station contract", and "Review choices"; *Pro Git*, "Contributing to a Project", for inspecting and discussing a focused change.
 
 ## Hands-on git checklist (~5 min; not scored)
 

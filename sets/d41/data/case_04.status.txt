@@ -1,0 +1,5 @@
+* chassis-demo.service - Chassis test station
+     Loaded: loaded (/etc/systemd/system/chassis-demo.service; enabled)
+     Active: failed (Result: exit-code)
+    Process: 1186 ExecStart=/srv/station/bin/python3 -m chassis worker (code=exited, status=1/FAILURE)
+   Main PID: 1186 (code=exited, status=1/FAILURE)

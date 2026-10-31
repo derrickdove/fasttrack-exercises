@@ -44,7 +44,11 @@ def log_status(logger: logging.Logger, channel: str, status: str) -> None:
 
 # Earlier-week retention exercises.
 def load_limit_bands(path: str | Path) -> dict[str, tuple[float, float]]:
-    """E6: Read channel,low,high CSV; reject reversed limits; later rows win."""
+    """E6: Read CSV bands; reject duplicates, non-finite and reversed bounds.
+
+    Duplicate channels raise ValueError naming the repeated record's line N,
+    using DictReader.line_num (header and empty lines count).
+    """
     raise NotImplementedError("E6: read CSV rows and store each channel's numeric limits")
 
 

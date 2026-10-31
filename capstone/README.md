@@ -1,16 +1,22 @@
 # Build a mini chassis tester
 
+**Time:** about 1845 minutes across the plan; daily estimates are below.
+
 A chassis tester is software that connects to instruments and checks a piece of hardware, such as an electronics chassis. Over the 54-day plan you will build `chassis`, a Python package (a folder of related Python modules, each stored in a `.py` file) that does this job in small blocks.
 
 This project follows the work of a test-station software engineer. You will write drivers (code that sends commands to instruments), Themis-style checking (comparing measurements with allowed limits and reporting PASS, FAIL, or ERROR), telemetry (measurements sent over a network), operator tools (commands and a status page for the person running a test), and deployment files (instructions for installing and running the software on a station). Each block adds one part to the same package.
 
 ## How to work
 
+Use Bash (the Linux command shell) on Linux or WSL (Windows Subsystem for Linux, which runs Linux on Windows) for your daily loop.
+
 1. On day 4, open a terminal in this `capstone/` folder and run `git init` to make your own repository: a local history of your project. The supplied `pyproject.toml` describes the package and its Python/tool settings; `chassis/__init__.py` marks the package. Keep both. Run `git add .` and `git commit -m "Start chassis tester"` to save your starting point. This repository lives inside the exercises clone; run your project git commands from `capstone/`.
 2. Use a branch for each feature. A branch is a separate line of work that you can merge (combine) into your main branch when it works. For example, `git switch -c limit-files` starts one; after committing the finished feature, switch back to your main branch and run `git merge limit-files`. The tracker's branch workflow starts on day 6.
-3. Write your code in `chassis/` and your own tests in `tests/` (that is, `capstone/tests/` from the exercises root). A test is a small function that checks an example with `assert`, which raises an error if its condition is false. Use pytest, the test runner installed with the exercises. From this `capstone/` folder, run `..\.venv\Scripts\python -m pytest` on Windows or `../.venv/bin/python -m pytest` on Linux/Mac; your tests can import `from chassis.models import Limit`, for example.
+3. Write your code in `chassis/` and your own tests in `tests/` (that is, `capstone/tests/` from the exercises root). A test is a small function that checks an example with `assert`, which raises an error if its condition is false. Use pytest, the test runner installed with the exercises. From this `capstone/` folder, run `../.venv/bin/python -m pytest` on WSL/Linux (or Mac) or `..\.venv\Scripts\python -m pytest` on Windows; your tests can import `from chassis.models import Limit`, for example.
 4. Run the supplied gate after each feature and at the end of the block. A gate is a suite of checks for the public interfaces listed below; don't edit `gates/` to make your code pass. Later gates also run all earlier blocks. `Checks: N / M passed` tells you how many individual checks passed. A missing-module error is expected until you create the named files.
 5. Commit working changes and report all pass / partial / stuck in the tracker. Keep your own tests as you add later blocks.
+
+Within the first five minutes of each existing slot, run `pwd` to show the current folder and `git status --short` to list changed files from inside `capstone/`. Run the current gate from the exercises root with `bash tools/run.sh b4`, for example. On capstone-only days, run `(cd capstone && ../.venv/bin/python -m pytest)` from the exercises root; `cd` changes folders, `&&` runs the next command only if that succeeds, and parentheses keep the folder change inside that command. After editing, rerun the tests and run `git diff` inside `capstone/` to inspect your changes. This uses the existing task time.
 
 ## Block 1 - models and limit files (days 4-6, gate b1 on day 14)
 
@@ -91,7 +97,7 @@ Raise `LimitFileError` for a bad header, a row with the wrong number of columns,
 
 Run: Ctrl+Shift+B → Gate: b1
 
-From a terminal at the exercises root: `tools\run.ps1 b1` on Windows or `bash tools/run.sh b1` on Linux/Mac. The gate runs your `chassis` package; your own tests stay in `capstone/tests/`.
+From a terminal at the exercises root: `bash tools/run.sh b1` on WSL/Linux (or Mac), or `tools\run.ps1 b1` on Windows. The gate runs your `chassis` package; your own tests stay in `capstone/tests/`.
 
 ## Block 2 - result checking and reports (days 9-15, gate b2 on day 21)
 
@@ -197,7 +203,7 @@ Empty input gives just `OVERALL: ERROR (0 pass, 0 fail, 0 error)`. A final newli
 
 ### Suggested order
 
-- **Day 9 (~40 minutes): Add type hints everywhere and make mypy --strict clean.** Start your Block 2 feature branch. Check your Block 1 functions and fields, then run `..\.venv\Scripts\python -m mypy --strict chassis` from `capstone/` on Windows (`../.venv/bin/python -m mypy --strict chassis` on Linux/Mac). Keep this check clean as you add the new modules.
+- **Day 9 (~40 minutes): Add type hints everywhere and make mypy --strict clean.** Start your Block 2 feature branch. Check your Block 1 functions and fields, then run `../.venv/bin/python -m mypy --strict chassis` from `capstone/` on WSL/Linux (or Mac), or `..\.venv\Scripts\python -m mypy --strict chassis` on Windows. Keep this check clean as you add the new modules.
 - **Day 10 (~55 minutes): themis.check() for one measurement against one limit.** Add `CheckResult` and `check`. Write your own pytest tests for a normal reading, both inclusive endpoints, each failure bound, a unit mismatch, and NaN.
 - **Day 11 (~55 minutes): check_all() for a whole test with missing and unexpected measurements.** Match names with dictionaries, detect duplicates before overwriting any reading, and sort the two groups of names. Test missing readings, unexpected readings, repeated names, and an iterator as input.
 - **Day 12 (~50 minutes): Parametrized tests for themis (every bound and status case).** Group related examples with `pytest.mark.parametrize`. Include one-sided limits, zero bounds, equal bounds, FAIL, and ERROR. Use fixtures in your own tests for shared setup; gate helpers belong to the supplied gate, not your package.
@@ -207,7 +213,7 @@ Empty input gives just `OVERALL: ERROR (0 pass, 0 fail, 0 error)`. A final newli
 
 Run: Ctrl+Shift+B → Gate: b2
 
-From a terminal at the exercises root: `tools\run.ps1 b2` on Windows or `bash tools/run.sh b2` on Linux/Mac. Your own tests still run separately from `capstone/tests/`.
+From a terminal at the exercises root: `bash tools/run.sh b2` on WSL/Linux (or Mac), or `tools\run.ps1 b2` on Windows. Your own tests still run separately from `capstone/tests/`.
 
 ## Block 3 - instrument drivers (days 17-24, gate b3 on day 28)
 
@@ -358,7 +364,7 @@ Create `chassis/instruments/__init__.py` and re-export `InstrumentError`, `Trans
 
 Run: Ctrl+Shift+B → Gate: b3
 
-From a terminal at the exercises root: `tools\run.ps1 b3` on Windows or `bash tools/run.sh b3` on Linux/Mac. Your own tests still run separately from `capstone/tests/`.
+From a terminal at the exercises root: `bash tools/run.sh b3` on WSL/Linux (or Mac), or `tools\run.ps1 b3` on Windows. Your own tests still run separately from `capstone/tests/`.
 
 ## Block 4 - telemetry (days 25-32, gate b4 on day 35)
 
@@ -474,8 +480,8 @@ with TelemetryListener("127.0.0.1", 0, lambda packet: print(packet.seq)) as list
 ### Suggested order
 
 - **Day 25 (~30 minutes): Read this brief and sketch the telemetry packet layout by hand.** Start your Block 4 branch. Draw each field's offset, size, and type, including two readings and the CRC; calculate the total length. Practise UDP separately in the day's exercise.
-- **Day 26 (~60 minutes): `build_packet()` and `parse_packet()` with full validation.** Add `PacketError` and `Packet`, use `struct` and `zlib`, and check a known byte example in both directions. Add each required rejection and try zero readings and boundary channel numbers.
-- **Day 27 (~60 minutes): `SequenceTracker`.** First handle consecutive numbers and gaps, then wraparound, recent duplicates, and delayed arrivals that repair gaps without moving the forward position back. Write small examples that inspect the public counters and `missing`.
+- **Day 26 (~60 minutes): `build_packet()` and `parse_packet()` with full validation.** Spend ~30 minutes starting from your own working d26 packet builder and parser, copying them into `chassis/telemetry.py` and adapting names and return records to `PacketError`, `Packet`, and the interfaces above. Spend ~30 minutes writing your own tests in `capstone/tests/`: use independent byte examples assembled from the layout above, without calling your builder to create parser inputs or expected bytes. Check building and parsing separately, every required rejection, zero readings, and boundary channel numbers.
+- **Day 27 (~70 minutes): `SequenceTracker`.** Spend ~30 minutes starting from your own working d27 gap tracker, copying it into `chassis/telemetry.py` and adapting names and any records to the interface above. Spend ~30 minutes writing your own tests in `capstone/tests/`, choosing inputs and expected results independently of that implementation. Cover consecutive numbers, gaps, wraparound, recent duplicates, and delayed arrivals that repair gaps without moving the forward position back. Inspect the returned gaps, public counters, and `missing`, including a duplicate of a delayed repair.
 - **Day 29 (~55 minutes): Your own telemetry tests for packets, CRC, and gaps at wraparound.** Keep tests in `capstone/tests/`. Include independently packed bytes so an encoder and decoder with the same bug cannot hide each other's mistake. Change a byte to break the CRC, and give duplicate channels a valid CRC to test that separate check.
 - **Day 30 (~50 minutes): Replay a capture through your parser and SequenceTracker.** Save a short capture as fixed packet bytes in a test, including a sequence gap, a duplicate, and a delayed packet. Parse each packet in capture order and pass its sequence to the tracker. Assert decoded readings, counters, and the final missing set; replay needs no socket or listener.
 - **Day 32 (~60 minutes): TelemetryListener: UDP thread, Event, timeout, clean stop(), and tests.** Bind to loopback with port 0, receive and parse datagrams, update the tracker, and call `on_packet`. Use a queue with a timeout to observe callbacks. Implement Event-based shutdown and the context manager; test idle shutdown, a body exception, and bad packets followed by a good one, with and without `on_error`. Always stop listeners and join threads in cleanup. Rerun your tests and `mypy --strict chassis`, then commit and merge.
@@ -483,7 +489,7 @@ with TelemetryListener("127.0.0.1", 0, lambda packet: print(packet.seq)) as list
 
 Run: Ctrl+Shift+B → Gate: b4
 
-From a terminal at the exercises root: `tools\run.ps1 b4` on Windows or `bash tools/run.sh b4` on Linux/Mac. The gate uses local UDP only; no instruments or internet are needed. Your own tests still run separately from `capstone/tests/`.
+From a terminal at the exercises root: `bash tools/run.sh b4` on WSL/Linux (or Mac), or `tools\run.ps1 b4` on Windows. The gate uses local UDP only; no instruments or internet are needed. Your own tests still run separately from `capstone/tests/`.
 
 ## Block 5 - test executor and operator CLI (days 33-40, gate b5 on day 42)
 
@@ -492,10 +498,10 @@ Build an executor that runs chassis test steps in order and always cleans up the
 ### Words you need
 
 - An executor coordinates work: it calls each step's functions, collects readings, and records how the run ended.
-- A state is the run's current stage or outcome. A state machine is a set of named states and transitions (moves from one state to another); here a normal run starts IDLE, moves through SETUP and RUNNING, then ends PASS, FAIL, or ERROR. ABORTED means the operator interrupted it.
+- A state is the run's current stage or outcome. A state machine is a set of named states and transitions (moves from one state to another); here a normal run starts IDLE, moves through SETUP and RUNNING, then ends PASS, FAIL, or ERROR. ABORTED means the operator interrupted it and cleanup succeeded.
 - Setup prepares a step, for example by enabling a power supply. Teardown cleans it up, for example by disabling that output. Reverse order means the last step started is the first step cleaned up.
 - A callable is something you can call like a function. `Callable[[], list[Measurement]]` takes no arguments and returns a list of measurements; `Callable[[], None]` takes no arguments and returns nothing. Store the function itself in `TestStep`, not its return value.
-- `KeyboardInterrupt` is the exception Python normally raises for Ctrl+C. It is separate from ordinary `Exception`, so catch it explicitly to return ABORTED and still clean up.
+- `KeyboardInterrupt` is the exception Python normally raises for Ctrl+C. It is separate from ordinary `Exception`, so catch it explicitly and still clean up. Return ABORTED only if cleanup succeeds.
 - A log is a list of text messages describing what happened. The arrow in `IDLE->SETUP` records a state transition.
 - CLI means command-line interface: an operator types a command and options in a terminal. `argparse`, Python's standard-library argument parser, reads those options; `argv` is the list of command words after the program name.
 - An exit code is a small integer a process returns to the operating system. A process is a running program; scripts use its exit code to decide whether work succeeded. `main` returns the code; `__main__.py` passes it to `SystemExit` when the process ends.
@@ -546,11 +552,12 @@ first setup, first run, second setup, second run, second teardown, first teardow
 The specification also says "setup, then run, then teardown" for each step; its more explicit guarantee puts teardowns **at the end in reverse order**, as shown above. Keep that order on successful runs, errors, and aborts.
 
 - An exception in setup or run ends forward execution immediately: skip the remaining steps and return ERROR after cleanup.
-- A `KeyboardInterrupt` in setup or run ends forward execution and returns ABORTED after cleanup; do not re-raise it.
-- A teardown exception changes a run that would have passed or failed to ERROR. Still attempt the remaining teardown callbacks. Preserve ABORTED when an ordinary teardown exception occurs during an abort.
-- Keep state transitions in `log` as `"IDLE->SETUP"`, `"SETUP->RUNNING"`, and similar moves using the enum member names. Also record step events as `"step <name>: <event>"`. Exact event wording and intermediate transitions for multiple steps are not prescribed; make the state history consistent with the final state.
+- A `KeyboardInterrupt` in setup or run ends forward execution. Do not re-raise it; return ABORTED if cleanup succeeds.
+- Any teardown that raises `Exception` or `KeyboardInterrupt` makes the final state ERROR, overriding PASS, FAIL, ERROR, or ABORTED selected earlier. Do not re-raise these cleanup failures; still attempt every remaining teardown callback.
+- Keep state transitions in `log` as `"IDLE->SETUP"`, `"SETUP->RUNNING"`, and similar moves using the enum member names. Also record step events as `"step <name>: <event>"`. Intermediate transitions for multiple steps are not prescribed; make the state history consistent with the final state.
+- Record an abort from setup or run as a step event whose `<event>` starts with `abort:`. Record each teardown that raises `Exception` or `KeyboardInterrupt` as a step event whose `<event>` starts with `cleanup failed:`. Use the affected step's name in each record, even when cleanup changes the final state to ERROR. These markers (fixed pieces of text identifying an event) are required exactly as written; any text after them is up to you and may be empty. Other event wording is not prescribed. Keep the checked results from measurements already collected.
 
-The specification does not define the exact result list after setup/run throws. The reference checks readings collected before the failure, retaining useful partial results, and gives ERROR or ABORTED priority over their overall status. It treats a `KeyboardInterrupt` during teardown as ABORTED and continues cleanup. The gate does not require these unspecified result details or a particular policy for interrupts during teardown.
+After setup or run raises an exception, check the readings collected before it so useful partial results remain available. Choose the final state after all cleanup attempts: a cleanup failure takes priority over an earlier abort or the checked results. An abort followed by failed cleanup therefore returns ERROR, with the abort still recorded in the log.
 
 Create `chassis/cli.py` with:
 
@@ -598,15 +605,15 @@ Use your exercise environment's Python path if `python` does not select it. No a
 
 - **Day 33 (~50 minutes): `executor.py`: `RunState` and `TestStep`.** Start your Block 5 branch. Add the enum and records, including `RunResult`, then sketch the normal state transitions. Write a tiny step that returns a `Measurement` without using hardware.
 - **Day 34: No capstone task.** The tracker reserves today for the minimum-ready timed check and notes about your three weakest areas. Use those notes to choose which daily sets to revisit this week.
-- **Day 37 (~60 minutes): `run_sequence()` with guaranteed teardown.** First run two successful steps, then add the reverse cleanup list and exception handling. Write your own tests for a failing setup, a failing run, Ctrl+C represented by raising `KeyboardInterrupt`, and a teardown failure that must not prevent other cleanup. Check the callback order and final state.
+- **Day 37 (~60 minutes): `run_sequence()` with guaranteed teardown.** First run two successful steps, then add the reverse cleanup list and exception handling. Write your own tests for a failing setup, a failing run, Ctrl+C represented by raising `KeyboardInterrupt`, and a teardown failure that must not prevent other cleanup. Replace 5 minutes of successful-run practice with an abort followed by failed cleanup: check that the final state is ERROR, the abort remains in the log, earlier readings remain in the results, and all remaining cleanup runs. Check the callback order and final state.
 - **Day 38 (~60 minutes): Operator CLI: `chassis check` with exit codes 0/1/2/3.** Add `main`, parse the required paths, load both files, reuse checking and text reporting, and return the right integer. Test PASS, FAIL, ERROR, and invalid input separately; capture stdout and stderr with pytest's `capsys` fixture.
 - **Day 39 (~55 minutes): `python -m chassis`, JSON report from the CLI, and CLI tests.** Add `__main__.py`, the optional report and station arguments, and metadata. Test paths with spaces, read a generated JSON report back, and use `subprocess.run` with a timeout to check the actual module command and process exit code.
-- **Day 40 (~55 minutes): Push to GitHub, add CI (pytest + mypy), open your first PR.** Push your capstone repository and branch, add a GitHub Actions workflow that installs the tools and runs your own pytest tests and `mypy --strict chassis`, then open a PR. Review your diff before merging. From now on, use a PR for each capstone change and require CI to pass; the gate checks program behavior, not your GitHub account or workflow files.
+- **Day 40 (~55 minutes): Push to GitHub, add CI (pytest + mypy), open your first PR.** Push your capstone repository and branch, add a GitHub Actions workflow (a file describing automated jobs) that installs the tools and runs `python -m pytest --junitxml=report.xml` and `python -m mypy --strict chassis` from your capstone repository root, then open a PR. The pytest option writes a JUnit XML test report, a structured text file of test outcomes, as practised in d13's JUnit lab. Add an `actions/upload-artifact` step to save `report.xml` as a downloadable artifact (a file retained with the workflow run); set its `path` to `report.xml` and `if: always()` so the report is uploaded even when tests fail. Download it from a workflow run and inspect its test outcomes. Review your diff before merging. From now on, use a PR for each capstone change and require CI to pass; the gate checks program behavior, not your GitHub account or workflow files.
 - **Day 42 (~10 minutes): Run gate b5 on your capstone.** Save your files and fix failing checks. This gate reruns b1 through b5, so models, limits, checking, reports, drivers, and telemetry must keep working.
 
 Run: Ctrl+Shift+B → Gate: b5
 
-From a terminal at the exercises root: `tools\run.ps1 b5` on Windows or `bash tools/run.sh b5` on Linux/Mac. Your own tests still run separately from `capstone/tests/`; the gate uses saved CSV files and local processes, with no hardware or internet needed.
+From a terminal at the exercises root: `bash tools/run.sh b5` on WSL/Linux (or Mac), or `tools\run.ps1 b5` on Windows. Your own tests still run separately from `capstone/tests/`; the gate uses saved CSV files and local processes, with no hardware or internet needed.
 
 
 ## Block 6 - station config, operator status page, and deployment (days 41-50, gate b6 on day 51)
@@ -625,7 +632,7 @@ Describe a station's instruments and hardware assignments in a checked configura
 - FastAPI is the installed Python framework that connects endpoint functions to HTTP requests. `app = FastAPI()` creates the application; `@app.get("/status")` registers a function for that path. An API lets other software read these responses; this block's status page returns JSON, without requiring an HTML design.
 - `TestClient` from `fastapi.testclient` calls an app inside your tests, without opening a network port or starting a server. A module-level value lives in the imported module and can be shared by its functions.
 - Deployment means installing and starting software on its target machine. systemd is Linux's service manager; a unit file describes how to start a program. A service is a program systemd manages, and `ExecStart` is its startup command.
-- Root is Linux's administrator account. A non-root `User` gives this program an ordinary account. Restart policy says when systemd should retry after the program exits.
+- Root is Linux's administrator account. A non-root `User` gives this program an ordinary account. Restart policy says when systemd should retry after the program exits. `Type=oneshot` runs a job that finishes after its work; systemd waits for it to exit. `Restart=no` disables automatic retries.
 - Docker builds an image, a packaged copy of a program and its tools, using a Dockerfile. A container is a running instance of that image. `FROM` selects the base image, `WORKDIR` sets its working folder, `COPY` adds files, `RUN` installs tools during the build, `USER` selects the runtime account, and `CMD` or `ENTRYPOINT` sets the startup command.
 - Ansible applies a list of installation tasks to remote machines. A playbook is a YAML file containing plays; each play selects hosts and tasks. An inventory lists the hosts in named groups. `become: true` allows installation tasks to use administrator privileges.
 - An Ansible module performs one task: `copy` transfers a file, `template` transfers a file after filling placeholders, `pip` installs Python packages, `command` runs a command, and `systemd`/`systemd_service` manages a service. `daemon_reload` tells systemd to reread unit files; `enabled` starts it on future boots, and `state: started` starts it now.
@@ -724,18 +731,18 @@ Reuse Block 2's JSON report shape when publishing a test report. A report loaded
 
 Add these deployment files, relative to `capstone/`:
 
-- `deploy/chassis-telemetry.service`: an INI-style systemd unit with `[Unit]`, `[Service]`, and `[Install]` sections. `[Unit]` needs a `Description`, `After=network-online.target`, and `Wants=network-online.target`. `[Service]` needs `Type=simple`, an `ExecStart` running `python -m chassis` with any arguments, `Restart=on-failure`, a `RestartSec` retry delay, and a non-root `User=`. `[Install]` needs `WantedBy=multi-user.target`. Additional dependencies are allowed, on the same line or in repeated `After`, `Wants`, or `WantedBy` lines. Use a real account and paths appropriate to your example station.
+- `deploy/chassis-telemetry.service`: an INI-style systemd unit with `[Unit]`, `[Service]`, and `[Install]` sections. `[Unit]` needs a `Description`, `After=network-online.target`, and `Wants=network-online.target`. `[Service]` needs `Type=oneshot`, an `ExecStart` running `python -m chassis check` with the saved-file arguments from Block 5, `Restart=no`, and a non-root `User=`. `[Install]` needs `WantedBy=multi-user.target`. Additional dependencies are allowed, on the same line or in repeated `After`, `Wants`, or `WantedBy` lines. Use a real account and paths appropriate to your example station.
 - `Dockerfile`: use `FROM python:3.12-slim` (another Python 3.12 slim tag is fine), a `WORKDIR`, a `COPY` of the project, a `RUN` using `pip install`, and `CMD` or `ENTRYPOINT` invoking `python -m chassis`. `python -m pip install` is also valid. Include a `USER` line selecting a non-root runtime account. Either shell commands or JSON argument lists can express the startup command.
 - `deploy/ansible/playbook.yml`: write exactly one play with `hosts: test_stations` and `become: true`. Include tasks using `ansible.builtin.copy` or `ansible.builtin.template` to install `chassis-telemetry.service`: set `dest` to the unit file (for example `/etc/systemd/system/chassis-telemetry.service`), or to a directory ending in `/` with `src` naming `chassis-telemetry.service`. Copying only the project folder does not satisfy unit installation. The copy/template arguments may be a YAML mapping, `key=value` text, or task-level `args`. Include `ansible.builtin.pip` or `ansible.builtin.command` for installation. Tasks may be nested inside `block`, `rescue`, or `always` lists; a block groups tasks, while rescue and always list error-handling and cleanup tasks. A task using `ansible.builtin.systemd` or `ansible.builtin.systemd_service` must set `enabled: true`, `state: started`, and `daemon_reload: true`.
 - `deploy/ansible/inventory.ini`: include a `[test_stations]` group with at least one host. Example addresses can be placeholders; document what the technician must change.
 
-The gate reads these files; it never runs Docker, systemd, or Ansible. Despite the required unit filename, there is no specified telemetry subcommand: the existing `check` command with example input files is a valid startup choice. That command finishes after a check; a continuously running station service is beyond this block. No particular directory layout on the target, account name, or retry delay is required.
+The gate reads these files; it never runs Docker, systemd, or Ansible. Despite the required unit filename, there is no specified telemetry subcommand: run the existing `check` command with saved input files. That command finishes after one check: PASS exits 0, a UUT FAIL exits 1, and a checking ERROR exits 2. A UUT FAIL is a valid test outcome; restarting on that exit would re-check the same saved files forever. Use `Type=oneshot` with `Restart=no`, so each explicit start checks the files once. No `RestartSec` delay is needed because automatic retries are disabled. `Restart=on-failure` belongs on a long-running service such as the status web app, where an unexpected exit should restart the process; running that app as a service is beyond this block. No particular directory layout on the target or account name is required.
 
 ### Suggested order
 
 - **Day 41 (~60 minutes): `config.py`: station config in TOML, validated.** Start your Block 6 branch and PR. Add the records, load a small station file, and check the required errors. Keep error messages useful to an operator. Write your own tests in `capstone/tests/` using temporary files.
 - **Day 43 (~50 minutes): `web.py`: `/status` and `/results/latest`.** Add the app, setters, and endpoints. Test default status, updated status, missing report, and replacing a report with `TestClient`. Read a Block 2 JSON report into a dictionary and publish it to check that the modules fit together.
-- **Day 45 (~55 minutes): systemd unit, Dockerfile, Ansible playbook and inventory.** Write the four files above. Choose the account, install folder, and startup command consistently. Check the unit sections, Docker instructions, and YAML indentation; running a container or deploying to a real station is not needed for the gate.
+- **Day 45 (~55 minutes): systemd unit, Dockerfile, Ansible playbook and inventory.** Spend ~47 minutes writing the four files above. Choose the account, install folder, and startup command consistently. Check the unit sections, Docker instructions, and YAML indentation. Spend ~8 minutes running the startup check command directly with saved measurements that produce PASS, FAIL, and ERROR. Compare the exit codes with 0, 1, and 2, then explain why FAIL must not trigger a retry of the same files. Use the Python path for your local environment; running a container or deploying to a real station is not needed for the gate.
 - **Day 46 (~50 minutes): `setup_order()` and config tests for shared channels and wrong kinds.** Implement the fixed two-group sort. Test scrambled input order, unused instruments, an empty station, each invalid reference, and a shared PSU channel. Also show that separate channels and sharing a DMM are valid.
 - **Day 48 (~45 minutes): Technical-debt pass: names, duplicated code, interfaces.** Make small cleanup commits in one PR, review the diff, and keep CI green. Reuse existing checking and reporting functions, preserve the listed public names, and run your own pytest tests and `mypy --strict chassis`.
 - **Day 50 (~45 minutes): Operator README: install, configure, run, read the report.** Write instructions in your capstone repository for a technician. Give the Python/tool installation steps, a sample TOML configuration, the exact saved-file check command, report location, exit codes, and the meaning of PASS/FAIL/ERROR. Explain which deployment addresses and paths to edit, and that the status API needs the app and publication calls in the same process. Walk through the instructions from a fresh terminal.
@@ -743,7 +750,7 @@ The gate reads these files; it never runs Docker, systemd, or Ansible. Despite t
 
 Run: Ctrl+Shift+B → Gate: b6
 
-From a terminal at the exercises root: `tools\run.ps1 b6` on Windows or `bash tools/run.sh b6` on Linux/Mac. Your own tests still run separately from `capstone/tests/`; no hardware, internet, Linux service manager, or Docker installation is needed for the gate.
+From a terminal at the exercises root: `bash tools/run.sh b6` on WSL/Linux (or Mac), or `tools\run.ps1 b6` on Windows. Your own tests still run separately from `capstone/tests/`; no hardware, internet, Linux service manager, or Docker installation is needed for the gate.
 
 ## Final repairs, demonstration, and gates (days 52-53)
 

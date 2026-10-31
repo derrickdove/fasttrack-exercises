@@ -1,4 +1,3 @@
-from itertools import product
 from time import perf_counter
 
 import pytest
@@ -7,8 +6,8 @@ from starter.channels import (
     channel_stats,
     duplicate_serials,
     group_by_channel,
-    is_valid_loop,
     missing_channels,
+    validate_power_sequence,
 )
 
 
@@ -157,79 +156,64 @@ def test_e4_input_and_calls_are_independent():
 
 
 @pytest.mark.parametrize(
-    ("commands", "expected"),
+    "commands",
     [
-        ("F", False),
-        ("LRF", False),
-        ("L", True),
-        ("FLLF", True),
-        ("LF", True),
-        ("FFRFFRFFRFFR", True),
-        ("FRF", True),
+        [],
+        ["ON", "MEAS:VOLT", "OFF"],
+        ["ON", "MEAS:VOLT", "MEAS:CURR", "OFF"],
+        ["OFF", "OFF"],
+        ["ON", "OFF", "ON", "MEAS:CURR", "OFF"],
     ],
 )
-def test_e5_readme_examples(commands, expected):
-    got = is_valid_loop(commands)
-    assert got is expected, f"for commands {commands!r}, expected {expected}, got {got!r}"
+def test_e5_valid_and_empty_scripts(commands):
+    got = validate_power_sequence(commands)
+    assert got == [], f"for valid script {commands!r}, expected no problems, got {got!r}"
 
 
-def _brute_force_loop(commands):
-    x, y = 0, 0
-    dx, dy = 0, 1
-    for _ in range(4):
-        for command in commands:
-            if command == "L":
-                dx, dy = -dy, dx
-            elif command == "R":
-                dx, dy = dy, -dx
-            else:
-                x += dx
-                y += dy
-    return (x, y) == (0, 0)
+@pytest.mark.parametrize("command", ["MEAS:VOLT", "MEAS:CURR"])
+def test_e5_measurement_while_off(command):
+    commands = [command, "ON", command, "OFF", command]
+    expected = ["0: measurement while output is off", "4: measurement while output is off"]
+    got = validate_power_sequence(commands)
+    assert got == expected, f"Measurements require power; expected {expected!r}, got {got!r}"
 
 
-def test_e5_all_short_command_strings():
-    for length in range(1, 5):
-        for letters in product("LRF", repeat=length):
-            commands = "".join(letters)
-            expected = _brute_force_loop(commands)
-            got = is_valid_loop(commands)
-            assert got is expected, f"four-pass simulation for {commands!r}: expected {expected}, got {got!r}"
+@pytest.mark.parametrize("command", ["RESET", "on", "OFF ", "", "MEAS:TEMP", "MEAS:VOLT\n"])
+def test_e5_unknown_commands_leave_power_unchanged(command):
+    commands = [command, "ON", command, "MEAS:CURR", "OFF"]
+    expected = ["0: unknown command", "2: unknown command"]
+    got = validate_power_sequence(commands)
+    assert got == expected, f"Match commands exactly and preserve power; got {got!r}"
 
 
-def test_e5_empty_commands_rejected():
-    with pytest.raises(ValueError):
-        is_valid_loop("")
+def test_e5_on_while_already_on():
+    commands = ["ON", "ON", "ON", "MEAS:VOLT", "OFF"]
+    expected = ["1: ON while already on", "2: ON while already on"]
+    got = validate_power_sequence(commands)
+    assert got == expected, f"Report every repeated ON and keep power on; got {got!r}"
 
 
-@pytest.mark.parametrize(
-    ("commands", "bad_character"),
-    [
-        ("l", "l"),
-        ("r", "r"),
-        ("f", "f"),
-        ("FX", "X"),
-        ("L?", "?"),
-        ("FLLF!", "!"),
-        ("RRRR0", "0"),
-        ("FR F", " "),
-        ("FR\n", "\n"),
-        ("FR\t", "\t"),
-    ],
-)
-def test_e5_bad_character_named(commands, bad_character):
-    with pytest.raises(ValueError) as caught:
-        is_valid_loop(commands)
-    message = str(caught.value)
-    assert bad_character in message or repr(bad_character)[1:-1] in message, (
-        f"Name the invalid character {bad_character!r} in the ValueError message, got {message!r}"
+@pytest.mark.parametrize("commands", [["ON"], ["ON", "MEAS:VOLT"], ["ON", "OFF", "ON"]])
+def test_e5_script_ends_powered_on(commands):
+    got = validate_power_sequence(commands)
+    assert got == ["end: output is still on"], f"Report the final powered-on state; got {got!r}"
+
+
+def test_e5_several_problems_in_order_and_independent_calls():
+    commands = ["MEAS:CURR", "ON", "ON", "RESET", "OFF", "MEAS:VOLT", "ON"]
+    original = commands.copy()
+    expected = [
+        "0: measurement while output is off",
+        "2: ON while already on",
+        "3: unknown command",
+        "5: measurement while output is off",
+        "end: output is still on",
+    ]
+    got = validate_power_sequence(commands)
+    assert got == expected, f"Collect all problems in script order, then the final problem; got {got!r}"
+    assert commands == original, "Do not change or reorder the supplied command list"
+    got.append("caller note")
+    assert validate_power_sequence(commands) == expected, "Each call needs a fresh result list"
+    assert validate_power_sequence(["MEAS:VOLT"]) == ["0: measurement while output is off"], (
+        "Every call starts with the output off"
     )
-
-
-def test_e5_fast_enough():
-    commands = "FR" * 5_000
-    started = perf_counter()
-    got = is_valid_loop(commands)
-    elapsed = perf_counter() - started
-    assert got is True, "The 10,000-character command string repeats a bounded square path"
-    assert elapsed < 1.0, f"Loop check took {elapsed:.3f}s; simulate at most four passes (limit 1s)"

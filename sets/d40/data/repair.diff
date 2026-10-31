@@ -1,0 +1,29 @@
+--- a/drivers/bus_probe.py
++++ b/drivers/bus_probe.py
+@@ -1,19 +1,21 @@
+ """One voltage measurement using a caller-owned instrument session."""
+ from typing import Protocol
+ 
+ 
+ class Session(Protocol):
+     timeout: int | None
+ 
+     def write(self, command: str) -> None: ...
+ 
+     def query(self, command: str) -> str: ...
+ 
+ 
+ def measure_bus(resource: Session, volts: float) -> float:
+-    resource.timeout = None
++    resource.timeout = 1000
+     resource.write(f"VOLT {volts:.3f}")
+-    resource.write("OUTP 1")
+-    reading = float(resource.query("MEAS:VOLT?"))
+-    resource.write("OUTP 0")
+-    return reading
++    resource.query("SYST:ERR?")
++    try:
++        resource.write("OUTP 1")
++        return float(resource.query("MEAS:VOLT?"))
++    finally:
++        resource.write("OUTP 0")

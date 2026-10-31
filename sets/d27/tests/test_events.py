@@ -1,4 +1,3 @@
-from time import perf_counter
 import tracemalloc
 
 import pytest
@@ -74,45 +73,53 @@ def test_e5_invalid_window(invalid: int) -> None:
     assert counter.count_last(0) == 1, "invalid windows must not record or remove current events"
 
 
-def test_e5_bounded_history_after_long_run() -> None:
+def test_e5_bounded_history_across_expiry_windows() -> None:
+    clock = FakeClock(20_000)
+    counter = EventCounter(clock)
+    for number in range(40):
+        clock.now = 20_000 + number * 1_000
+        counter.record()
+        expected = min(number + 1, 11)
+        assert len(counter) == expected, "retain only the inclusive 10,000 ms history"
+        assert counter.count_last(10_000) == expected
+        assert counter.count_last(0) == 1, "each new timestamp has one drop"
+    clock.now += 10_001
+    counter.record()
+    assert len(counter) == counter.count_last(10_000) == 1, "a large time jump must clear expired history"
+
     clock = FakeClock()
     counter = EventCounter(clock)
     tracemalloc.start()
     try:
+        warm_bytes = 0
         for number in range(200_000):
             clock.now = number // 3
             counter.record()
-            if number % 10_000 == 0 or number == 199_999:
-                expected = number - max(0, 3 * (clock.now - 10_000)) + 1
-                assert len(counter) == expected, "retain exactly the events in the last 10,000 ms"
-                assert len(counter) <= 30_003, "storage must not grow with the whole station run"
-            if number == 49_999:
-                warm_bytes = tracemalloc.get_traced_memory()[0]
+            if number == 49_999 or number == 199_999:
+                assert len(counter) == 30_002, "both memory samples must have the same live window"
+                if number == 49_999:
+                    warm_bytes = tracemalloc.get_traced_memory()[0]
         growth = tracemalloc.get_traced_memory()[0] - warm_bytes
-        # Both samples have 30,002 live events. Allow ample compaction slack;
-        # retaining all 150,000 additional timestamps grows by over 5 MB.
+        # Allow ample storage slack for the same 30,002 live events.
+        # Keeping all 150,000 additional timestamps grows by over 5 MB.
         assert growth <= 2_000_000, (
             f"storage grew by {growth:,} bytes with the same live window; "
-            "discard expired timestamps from auxiliary storage too"
+            "discard expired timestamps from extra storage too"
         )
     finally:
         tracemalloc.stop()
-    clock.now += 1_000_000
-    counter.record()
-    assert len(counter) == counter.count_last(10_000) == 1, "a large time jump must clear all expired history"
 
 
-def test_e5_fast_enough() -> None:
-    clock = FakeClock()
+def test_e5_arbitrary_windows_follow_injected_clock() -> None:
+    clock = FakeClock(70_000)
     counter = EventCounter(clock)
-    started = perf_counter()
-    for number in range(200_000):
-        clock.now = number // 4
+    for timestamp in [70_000, 70_003, 70_003, 70_008, 70_010]:
+        clock.now = timestamp
         counter.record()
-    for number in range(200_000):
-        ms = (number * 37) % 10_001
-        assert counter.count_last(ms) == 4 * (ms + 1), "queries may request windows in any order"
-        if number % 1_000 == 0:
-            assert perf_counter() - started <= 2.0, "avoid scanning every stored event on each query"
-    elapsed = perf_counter() - started
-    assert elapsed <= 2.0, f"200,000 records and 200,000 queries took {elapsed:.3f}s; use a fast window lookup"
+    for ms, expected in [(0, 1), (10_000, 5), (2, 2), (7, 4), (1, 1), (10, 5), (0, 1)]:
+        assert counter.count_last(ms) == expected, f"window {ms} ms should contain {expected} drops"
+    clock.now = 70_013
+    assert counter.count_last(2) == 0, "queries must read the injected clock after it advances"
+    assert counter.count_last(3) == 1
+    assert counter.count_last(10) == 4, "include both drops at the lower boundary"
+    assert len(counter) == 5, "short queries must preserve events for wider queries"

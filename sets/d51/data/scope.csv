@@ -1,0 +1,15 @@
+evidence_id,case,t_ms,load_V
+A01,case_a,-10.0,5.000
+A02,case_a,0.0,4.999
+A03,case_a,1.8,5.001
+A04,case_a,2.0,5.000
+A05,case_a,2.2,4.999
+A06,case_a,2.4,5.000
+A07,case_a,10.0,5.000
+B01,case_b,-10.0,5.000
+B02,case_b,0.0,4.980
+B03,case_b,1.8,4.999
+B04,case_b,2.0,4.200
+B05,case_b,2.2,4.180
+B06,case_b,2.4,4.980
+B07,case_b,10.0,5.000

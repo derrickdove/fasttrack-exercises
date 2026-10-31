@@ -74,19 +74,19 @@ If sending a command or waiting for its complete reply times out, raise the buil
 
 **Reread:** socket docs, `socket.settimeout` and “Notes on socket timeouts”; Socket Programming HOWTO, “Using a Socket”.
 
-### E4 — Pipeline a station measurement batch (medium, ~12 min)
+### E4 — Query a station measurement batch in order (medium, ~12 min)
 
-**Goal:** Ask for several measurements without waiting between commands.
+**Goal:** Collect several measurements, completing each query before sending the next.
 
 **Signature:** `query_many(cmds: list[str]) -> list[str]`.
 
-Pipelining means sending every command before starting to read any replies. Use E2's command encoding and reply rules. Return one reply for each command, in the same order, preserving duplicate commands and leaving the input list unchanged. `[]` returns `[]` without sending or reading. Later `query` or `query_many` calls must still work on the same connection.
+Send the first query and read its complete LF-terminated reply before sending the next query. Repeat for every command, using E2's command encoding and reply rules. Return one reply for each command, in the same order, preserving duplicate commands and leaving the input list unchanged. `[]` returns `[]` without sending or reading. Later `query` or `query_many` calls must still work on the same connection.
 
 Carry E3's error handling forward: a send timeout names the command being sent; a read timeout names the command whose reply is currently awaited. Raise the error rather than return a partial list.
 
-**Example:** `bench.query_many(["MEAS:VOLT?", "MEAS:CURR?"])` sends both lines first. Receiving `b"28.0\n0.25\n"` returns `["28.0", "0.25"]`.
+**Example:** `bench.query_many(["MEAS:VOLT?", "MEAS:CURR?"])` sends `b"MEAS:VOLT?\n"`, reads `b"28.0\n"`, then sends `b"MEAS:CURR?\n"` and reads `b"0.25\n"`. It returns `["28.0", "0.25"]`.
 
-**Watch out:** Calling `query` once per command is sequential, so it fails when an instrument waits for the entire batch before replying. Reuse a reply-reading helper, and preserve extra bytes when a receive contains several replies.
+**Watch out:** Most instruments expect one query at a time. Pipelining (sending more queries before reading earlier replies) is a device-specific feature; only use it when the instrument explicitly supports it. Calling `query` once per command gives this batch the required order.
 
 **Reread:** Socket Programming HOWTO, “Using a Socket”, especially its warning that a receive can include the start of the following message.
 

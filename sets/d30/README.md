@@ -108,3 +108,32 @@ Require exactly `17 + 5 * count` bytes, correct sync, unique channel IDs within 
 **Example:** For the supplied file and port 5005, return `[(40, 2), (42, 0), (43, 1)]`.
 
 **Watch out:** Check length before indexing fields, then check CRC before trusting the packet. **Reread:** Libpcap File Format, Packet Data (application bytes must be interpreted separately); supplemental Wireshark Capturing chapter, capture concepts. The telemetry layout above is the complete application-specific contract.
+
+## Terminal drill (WSL2 Ubuntu, ~10 min)
+
+This drill is ungraded; its minutes come from the day's readings. Use two Ubuntu terminals in the repo root, with the Linux `.venv` already created by the test runner and `tcpdump` installed. `tcpdump` captures or displays network packets. **Loopback** (`lo`) sends traffic back to this computer; `127.0.0.1` is its IPv4 address.
+
+In terminal A, start a capture and wait until it says it is listening:
+
+```bash
+sudo tcpdump -i lo -nn -s 0 -c 1 -w /tmp/fasttrack-lo.pcap 'udp dst port 5005'
+```
+
+`sudo` runs the capture with administrator privileges. `-i lo` selects loopback; `-nn` keeps addresses and ports numeric; `-s 0` stores full packets; `-c 1` stops after one matching packet; `-w` saves it to a file. The quoted filter selects UDP packets with destination port 5005. `/tmp` holds temporary files.
+
+In terminal B, send one **datagram** (one UDP message):
+
+```bash
+.venv/bin/python -c 'import socket; socket.socket(socket.AF_INET,socket.SOCK_DGRAM).sendto(b"probe", ("127.0.0.1", 5005))'
+```
+
+`-c` runs the following Python code; `AF_INET` selects IPv4 and `SOCK_DGRAM` selects UDP. No receiver is needed to capture this outgoing probe. After terminal A exits, read the saved packet there, then inspect the supplied fixture (the fixed sample file used by this set):
+
+```bash
+tcpdump -nn -r /tmp/fasttrack-lo.pcap
+tcpdump -nn -r sets/d30/data/telemetry.pcap 'udp dst port 5005'
+```
+
+`-r` reads a saved capture. Relate the fixture's source and destination addresses to E3's IPv4 header, and its ports and UDP length to E3's 8-byte UDP header. Its first matching packet goes from `192.0.2.10.40000` to `192.0.2.20.5005` with 27 payload bytes: E4's `17 + 5 * 2` bytes for two channels. The displayed addresses and length describe network headers; E4 separately checks the telemetry bytes and CRC.
+
+Keep `/tmp/fasttrack-lo.pcap` for inspection with `tcpdump`, rather than substituting it for the fixture. Loopback has no physical Ethernet framing (the outer header used on a wired network); capture software may supply a synthetic Ethernet header or another linktype. E3 assumes linktype 1 and Ethernet offsets, so it cannot interpret other linktypes. Even if a synthetic Ethernet header lets E3 extract the probe, `b"probe"` is not valid telemetry: it lacks E4's sync marker, fields and CRC. E4 will not accept it as a telemetry packet.

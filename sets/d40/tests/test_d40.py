@@ -5,7 +5,8 @@ from typing import Any
 import pytest
 import yaml
 
-from starter.review_fix import branch_name_ok, failed_channels, within_limits
+from starter.review_fix import failed_channels, within_limits
+from starter.driver_review import review_answers
 
 
 @pytest.mark.parametrize("value, expected", [(24.0, True), (21.0, False), (27.0, False)])
@@ -161,23 +162,69 @@ def test_e3_pytest_and_mypy_after_install(steps: list[dict[str, Any]]) -> None:
     )
 
 
-@pytest.mark.parametrize("name", ["feature/CTS-34-bus-limits", "fix/CTS-7-boundary", "fix/CTS-001-bus2"])
-def test_e4_valid_station_branches(name: str) -> None:
-    assert branch_name_ok(name) is True, f"Expected valid station branch: {name!r}"
+# Keep keyed answers out of traceback source lines and assertion introspection.
+_REVIEW_KEYS = {
+    "Q1": ("drivers/bus_probe.py", 14, "C", "B", True, "D"),
+    "Q2": ("drivers/bus_probe.py", 15, "A", "D", False, "B"),
+    "Q3": ("drivers/bus_probe.py", 18, "D", "A", True, "A"),
+}
+_REVIEW_FIELDS = {
+    "file", "line", "consequence", "regression_test", "repair_fixed", "repair_reason", "comment",
+}
 
 
-@pytest.mark.parametrize("name", ["main", "review/CTS-34-bus", "feature/cts-34-bus", "fix/CTS-x-bus",
-                                  "fix/CTS--bus", "fix/CTS-34", "fix/CTS-34-bus/extra"])
-def test_e4_prefix_and_ticket(name: str) -> None:
-    assert branch_name_ok(name) is False, f"Reject invalid prefix or ticket: {name!r}"
+@pytest.fixture
+def review() -> list[dict[str, Any]]:
+    answers = review_answers()
+    if not isinstance(answers, list) or len(answers) != 3:
+        pytest.fail("E4: return three findings; reread E4 Return contract", pytrace=False)
+    locations = set()
+    for finding in answers:
+        if not isinstance(finding, dict) or set(finding) != _REVIEW_FIELDS:
+            pytest.fail("E4: use every specified field; reread E4 Return contract", pytrace=False)
+        if not isinstance(finding["file"], str) or not finding["file"].strip():
+            pytest.fail("E4: supply a file path; reread E4 Return contract", pytrace=False)
+        if type(finding["line"]) is not int or finding["line"] < 1:
+            pytest.fail("E4: use a positive integer line; reread E4 Diff primer", pytrace=False)
+        location = (finding["file"], finding["line"])
+        if location in locations:
+            pytest.fail("E4: use distinct defect locations; reread E4 Return contract", pytrace=False)
+        locations.add(location)
+        for field in ("consequence", "regression_test", "repair_reason"):
+            if not isinstance(finding[field], str) or finding[field] not in ("A", "B", "C", "D"):
+                pytest.fail("E4: choose one A-D letter per option field; reread E4 Review choices", pytrace=False)
+        if type(finding["repair_fixed"]) is not bool:
+            pytest.fail("E4: repair_fixed must be a bool; reread E4 Return contract", pytrace=False)
+        if not isinstance(finding["comment"], str) or len(finding["comment"].split()) < 12:
+            pytest.fail("E4: explain your review in at least 12 words; reread E4 Return contract", pytrace=False)
+    return answers
 
 
-@pytest.mark.parametrize("slug", ["", "Bus", "bus_limit", "bus limit", "-bus", "bus-", "bus--limit", "büs"])
-def test_e4_slug_rules(slug: str) -> None:
-    name = f"feature/CTS-34-{slug}"
-    assert branch_name_ok(name) is False, f"Reject invalid slug: {slug!r}"
+def _check_review(review: list[dict[str, Any]], question: str) -> None:
+    expected = _REVIEW_KEYS[question]
+    matched = next((finding for finding in review
+                    if (finding["file"], finding["line"]) == expected[:2]), None)
+    if matched is None:
+        pytest.fail(f"{question}: reread E4 Diff primer and Station contract; recheck defect anchors", pytrace=False)
+    actual = tuple(matched[field] for field in
+                   ("file", "line", "consequence", "regression_test", "repair_fixed", "repair_reason"))
+    if actual != expected:
+        pytest.fail(f"{question}: reread E4 Station contract and Review choices; trace both diffs again", pytrace=False)
 
 
-@pytest.mark.parametrize("name", [" fix/CTS-34-bus", "fix/CTS-34-bus ", "fix/CTS-34-bus\n", "fix/CTS-٣٤-bus"])
-def test_e4_full_ascii_name(name: str) -> None:
-    assert branch_name_ok(name) is False, f"Validate the complete ASCII name without stripping: {name!r}"
+def test_e4_review_structure(review: list[dict[str, Any]]) -> None:
+    # The fixture checks fields, types, unique anchors, and comment length.
+    if not review:
+        pytest.fail("E4: reread E4 Return contract", pytrace=False)
+
+
+def test_e4_q1_review(review: list[dict[str, Any]]) -> None:
+    _check_review(review, "Q1")
+
+
+def test_e4_q2_review(review: list[dict[str, Any]]) -> None:
+    _check_review(review, "Q2")
+
+
+def test_e4_q3_review(review: list[dict[str, Any]]) -> None:
+    _check_review(review, "Q3")

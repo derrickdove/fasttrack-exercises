@@ -3,12 +3,12 @@ from __future__ import annotations
 from collections.abc import Iterator
 from queue import Empty, Queue
 import socket
-from threading import Barrier, Event, Lock, Thread, current_thread
+from threading import Event, Lock, Thread, current_thread
 from time import perf_counter
 
 import pytest
 
-from starter.workers import Listener, Producer, drain, run_pipeline
+from starter.workers import Listener, Producer, PSUReader, drain, run_pipeline
 
 
 def test_e1_reads_until_source_exhausted() -> None:
@@ -261,6 +261,145 @@ def test_e3_stop_before_start_closes_socket(udp_socket: ObservedSocket) -> None:
     with pytest.raises(RuntimeError):
         listener.start()
 
+
+def test_e4_selects_then_queries_once_and_preserves_voltage() -> None:
+    calls: list[object] = []
+    voltage = 28.125
+
+    def select(channel: str) -> None:
+        calls.append(("select", channel))
+
+    def query() -> float:
+        calls.append("query")
+        return voltage
+
+    reader = PSUReader(select, query)
+    assert calls == [], "construction must not perform instrument operations"
+    assert reader.measure_voltage("CH3") == voltage, "return the measured voltage unchanged"
+    assert calls == [("select", "CH3"), "query"], "select once, then query once"
+    assert reader.lock.acquire(timeout=0.2), "release the lock after a successful reading"
+    reader.lock.release()
+
+
+def test_e4_shared_psu_keeps_selection_and_query_indivisible(monkeypatch: pytest.MonkeyPatch) -> None:
+    first_selected = Event()
+    competing_attempt = Event()
+    continuous_holds: Queue[bool] = Queue()
+    seen: Queue[Thread] = Queue()
+
+    class ObservedLock:
+        """Report contention before entering a real lock; never infer it from time."""
+
+        def __init__(self) -> None:
+            self.actual = Lock()
+            self.releases = 0
+
+        def __enter__(self) -> None:
+            if first_selected.is_set():
+                competing_attempt.set()
+            assert self.actual.acquire(timeout=5), "transaction lock was never released"
+
+        def __exit__(self, *args: object) -> None:
+            self.releases += 1
+            self.actual.release()
+
+    lock = ObservedLock()
+
+    class CoordinatedPSU:
+        def __init__(self) -> None:
+            self.selected = ""
+            self.releases_at_select = 0
+
+        def select(self, channel: str) -> None:
+            self.selected = channel
+            self.releases_at_select = lock.releases
+            if channel == "CH1":
+                first_selected.set()
+                # With the lock, CH2 signals before blocking on acquisition.
+                # Without it, CH2 changes the selected channel before signalling.
+                assert competing_attempt.wait(timeout=5), "CH2 never attempted its transaction"
+            else:
+                competing_attempt.set()
+
+        def query(self) -> float:
+            continuous_holds.put_nowait(
+                lock.actual.locked() and lock.releases == self.releases_at_select
+            )
+            return {"CH1": 28.1, "CH2": 5.0}[self.selected]
+
+    psu = CoordinatedPSU()
+    reader = PSUReader(psu.select, psu.query)
+    monkeypatch.setattr(reader, "lock", lock)
+
+    def check(channel: str) -> float:
+        seen.put_nowait(current_thread())
+        if channel == "CH2":
+            assert first_selected.wait(timeout=5), "CH1 never selected its channel"
+        try:
+            return reader.measure_voltage(channel)
+        finally:
+            if channel == "CH1":
+                # Also release test coordination when the learner stub raises.
+                first_selected.set()
+                competing_attempt.set()
+
+    readings = run_pipeline(["CH1", "CH2"], 2, check)
+    assert readings == [28.1, 5.0], f"shared PSU returned wrong-channel readings: {readings}"
+    assert all(continuous_holds.get_nowait() for _ in range(2)), "hold the same lock across both calls"
+    assert all(not seen.get_nowait().is_alive() for _ in range(2)), "join every worker"
+
+
+def test_e4_independent_instruments_query_in_parallel() -> None:
+    entered = [Event(), Event()]
+    seen: Queue[Thread] = Queue()
+    calls: list[list[str]] = [[], []]
+
+    def make_reader(index: int) -> PSUReader:
+        def select(channel: str) -> None:
+            calls[index].append(channel)
+
+        def query() -> float:
+            seen.put_nowait(current_thread())
+            entered[index].set()
+            assert entered[1 - index].wait(timeout=5), "independent PSU queries must overlap"
+            return [28.1, 5.0][index]
+
+        return PSUReader(select, query)
+
+    readers = [make_reader(0), make_reader(1)]
+    assert readers[0].lock is not readers[1].lock, "each instrument needs its own lock"
+    readings = run_pipeline(readers, 2, lambda reader: reader.measure_voltage("CH1"))
+    assert readings == [28.1, 5.0]
+    assert calls == [["CH1"], ["CH1"]]
+    workers = [seen.get_nowait() for _ in range(2)]
+    assert len(set(workers)) == 2, "use separate workers for the two waiting instruments"
+    assert all(not thread.is_alive() for thread in workers), "join every worker"
+
+
+@pytest.mark.parametrize("failed_operation", ["select", "query"])
+def test_e4_instrument_failure_releases_lock_without_retry(failed_operation: str) -> None:
+    failure = ValueError("PSU communication failed")
+    calls: list[str] = []
+
+    def select(channel: str) -> None:
+        calls.append("select")
+        if failed_operation == "select":
+            raise failure
+
+    def query() -> float:
+        calls.append("query")
+        raise failure
+
+    reader = PSUReader(select, query)
+    with pytest.raises(ValueError) as caught:
+        reader.measure_voltage("CH1")
+    assert caught.value is failure, "preserve the original instrument exception"
+    expected = ["select"] if failed_operation == "select" else ["select", "query"]
+    assert calls == expected, "do not retry or query after failed selection"
+    assert reader.lock.acquire(timeout=0.2), "release the lock even when an operation raises"
+    reader.lock.release()
+
+
 @pytest.mark.parametrize("workers", [1, 2, 8])
 def test_e4_preserves_duplicate_and_none_inputs(workers: int) -> None:
     values = ["CH1", None, "CH1", "CH2"]
@@ -275,63 +414,6 @@ def test_e4_preserves_duplicate_and_none_inputs(workers: int) -> None:
     assert observed.count("CH1") == 2 and observed.count(None) == 1 and observed.count("CH2") == 1
     with pytest.raises(Empty):
         calls.get_nowait()
-
-
-@pytest.mark.parametrize("workers", [0, -2])
-def test_e4_rejects_worker_count_before_consuming_input(workers: int) -> None:
-    def readings() -> Iterator[str]:
-        pytest.fail("validate workers before consuming the input")
-        yield "CH1"
-
-    with pytest.raises(ValueError):
-        run_pipeline(readings(), workers, str)
-    with pytest.raises(ValueError):
-        run_pipeline([], workers, str)
-
-
-def test_e4_empty_input_starts_no_workers(monkeypatch: pytest.MonkeyPatch) -> None:
-    def unexpected_start(self: Thread) -> None:
-        pytest.fail("empty input must not start threads")
-
-    def unexpected_check(item: object) -> object:
-        pytest.fail("empty input must not call fn")
-
-    monkeypatch.setattr(Thread, "start", unexpected_start)
-    assert run_pipeline(iter([]), 3, unexpected_check) == []
-
-
-def test_e4_uses_requested_pool_and_joins_all_workers() -> None:
-    rendezvous = Barrier(3)
-    seen: set[Thread] = set()
-    guard = Lock()
-
-    def check(channel: int) -> int:
-        with guard:
-            seen.add(current_thread())
-        # A sequential implementation cannot get three checks to this point.
-        rendezvous.wait(timeout=0.2)
-        return channel * 10
-
-    assert run_pipeline(range(6), 3, check) == [0, 10, 20, 30, 40, 50]
-    assert len(seen) == 3, f"expected three worker threads, saw {len(seen)}"
-    assert current_thread() not in seen, "fn belongs in the worker pool"
-    assert all(not thread.is_alive() for thread in seen), "workers must stop before returning"
-
-
-def test_e4_returns_input_order_despite_reverse_completion() -> None:
-    second_done = Event()
-    completions: Queue[int] = Queue()
-
-    def check(channel: int) -> str:
-        if channel == 0:
-            assert second_done.wait(timeout=0.2), "two workers must overlap"
-        completions.put_nowait(channel)
-        if channel == 1:
-            second_done.set()
-        return f"CH{channel}:PASS"
-
-    assert run_pipeline([0, 1], 2, check) == ["CH0:PASS", "CH1:PASS"]
-    assert [completions.get_nowait(), completions.get_nowait()] == [1, 0]
 
 
 @pytest.mark.parametrize("workers", [1, 3])

@@ -11,7 +11,7 @@ import textwrap
 import pytest
 
 from starter.fakes import FakeInstrument
-from starter.fixtures_learner import Reading
+from starter.fixtures_learner import Reading, powered_psu as powered_psu_fixture
 
 
 @pytest.fixture(scope="module")
@@ -121,6 +121,28 @@ def test_e3_cleanup_after_test_outcome(
     writes = json.loads(log.read_text(encoding="utf-8"))
     assert writes == ["OUTP ON", "MEAS:START", "OUTP OFF"], (
         f"Teardown must disable output even after a failed assertion; got {writes!r}"
+    )
+
+
+def test_e3_cleanup_after_enable_error(powered_psu: FakeInstrument) -> None:
+    # Request the fixture so unfinished starters fail with NotImplementedError.
+    assert isinstance(powered_psu, FakeInstrument), "Yield the power supply to the test"
+    enable_error = RuntimeError("Output enable failed after recording the command")
+
+    class EnableErrorInstrument(FakeInstrument):
+        def write(self, command: str) -> None:
+            super().write(command)
+            if command == "OUTP ON":
+                raise enable_error
+
+    probe = EnableErrorInstrument({})
+    # Drive setup directly to check the identity of the propagated exception.
+    setup = powered_psu_fixture.__wrapped__(probe)
+    with pytest.raises(RuntimeError) as caught:
+        next(setup)
+    assert caught.value is enable_error, "Propagate the original enable error unchanged"
+    assert probe.writes == ["OUTP ON", "OUTP OFF"], (
+        f"Attempt OFF even when enabling output raises; got {probe.writes!r}"
     )
 
 

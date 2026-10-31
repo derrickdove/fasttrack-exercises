@@ -1,20 +1,20 @@
 # d41 — systemd services and config files
 
-**Time:** about 45 minutes · **Read first:** [systemd.service: what a unit file says](https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html), [systemd.unit](https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html), [journalctl](https://www.freedesktop.org/software/systemd/man/latest/journalctl.html), [tomllib](https://docs.python.org/3/library/tomllib.html) and [configparser](https://docs.python.org/3/library/configparser.html) · **You edit:** `starter/chassis-demo.service` and `starter/units.py`
+**Time:** about 60 minutes (45 graded + 15 live drill) · **Read first:** [systemd.service: what a unit file says](https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html), [systemd.unit](https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html), [journalctl](https://www.freedesktop.org/software/systemd/man/latest/journalctl.html), [tomllib](https://docs.python.org/3/library/tomllib.html) and [configparser](https://docs.python.org/3/library/configparser.html) · **You edit:** `starter/chassis-demo.service` and `starter/units.py`
 
 ## What you're building
 
-A chassis test station needs a predictable way to start its Python process and load its instrument settings. You will describe that process in a service file, preserve repeated settings while reading files, and give the operator useful configuration errors. These checks read local files on Windows or Linux; they never install or start a service.
+A chassis test station needs a predictable way to start its Python process and load its instrument settings. You will describe that process in a service file, diagnose saved service failures, and give the operator useful configuration errors. Graded checks read local files on Windows or Linux. The live drill at the end runs a real service in Ubuntu Linux through **WSL2** (Windows Subsystem for Linux, version 2).
 
 ## How this works
 
-1. For E1, replace the entire placeholder in `starter/chassis-demo.service`. For E2–E4, replace the `raise NotImplementedError(...)` lines in `starter/units.py`. Don't edit `tests/`.
-2. Press Ctrl+Shift+B → **Test: d41** (or run `bash tools/run.sh d41` / `tools\run.ps1 d41`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise. The E1 placeholder marker makes its file-only exercise report `NotImplementedError` until you replace it.
+1. For E1, replace the entire placeholder in `starter/chassis-demo.service`. For E2–E3, replace the `raise NotImplementedError(...)` lines in `starter/units.py`. The unit parser and policy checklist are complete scaffolding (supplied working code); leave them as supplied. Don't edit `tests/` or `data/`.
+2. Press Ctrl+Shift+B → **Test: d41** (or run `bash tools/run.sh d41` / `tools\run.ps1 d41`). At first you'll see `Exercises: 0 / 3 passed`. Rerun after each exercise. The E1 placeholder marker makes its file-only exercise report `NotImplementedError` until you replace it.
 3. Report all pass / partial / stuck in the tracker.
 
 **systemd** is a Linux manager that starts and supervises processes. A **service** is a process it manages. A **unit file** describes something systemd manages; a `.service` file describes a service. A **section** is a group headed by `[Name]`; a **directive** is a `Key=value` setting within it. A **target** groups units into a startup milestone. The **root** user (numeric user ID `0`) has unrestricted system privileges; a station process should use a separate account.
 
-**Parsing** turns file text into Python values. **Validation** checks those values against a contract. Python's `configparser` reads section/key files, but by default changes key names to lowercase and cannot preserve all repeated assignments. E1 uses `ConfigParser(strict=False)` with case preserved, interpolation disabled, and `=` as the delimiter (the character separating key and value); repeated keys then keep only their last value. E2 writes a small parser to keep every value. **Interpolation** means replacing special placeholders inside values; our parser treats values as literal text instead.
+**Parsing** turns file text into Python values. **Validation** checks those values against a contract. Python's `configparser` reads section/key files, but by default changes key names to lowercase and cannot preserve all repeated assignments. E1 uses `ConfigParser(strict=False)` with case preserved, interpolation disabled, and `=` as the delimiter (the character separating key and value); repeated keys then keep only their last value. The supplied `parse_unit` helper keeps every value. **Interpolation** means replacing special placeholders inside values; our parser treats values as literal text instead.
 
 A **nested dictionary** is a dictionary containing other dictionaries. A `list[str]` is a list of strings; repeated directives become lists. `setdefault(key, default)` inserts the default only when the key is absent, then returns the stored value:
 
@@ -49,60 +49,45 @@ commands.setdefault("Query", []).append("SYST:ERR?")
 
 `After` orders this service after the named unit; `Wants` asks systemd to start that unit too. `network-online.target` marks network readiness according to the station's network setup. `Type=simple` means systemd starts the process directly. `ExecStart` gives the command, and `-m chassis` runs the Python module named `chassis`. `Restart=on-failure` retries after a process failure; `RestartSec` delays that retry. `WantedBy=multi-user.target` connects an enabled service to the usual non-graphical operating state. **Enabling** a service means arranging for its startup at boot.
 
-**Watch out:** Use exact section/key capitalization. Write each required directive once. Use an unquoted absolute Linux path with no spaces, such as `/opt/station/bin/python3`; it need not exist on this computer. Extra arguments are split on whitespace; quoted commands and shell wrappers are outside this exercise. Extra settings are allowed. The tests inspect the file structurally, without requiring the account or chassis package to exist. On a real station, `journalctl -u chassis-demo.service` displays the service's **journal**, its collected log messages; you do not need to run this command here.
+**Watch out:** Use exact section/key capitalization. Write each required directive once. Use an unquoted absolute Linux path with no spaces, such as `/opt/station/bin/python3`; it need not exist on this computer. Extra arguments are split on whitespace; quoted commands and shell wrappers are outside this exercise. Extra settings are allowed. The tests inspect the file structurally, without requiring the account or chassis package to exist. On a real station, `journalctl -u chassis-demo.service` displays the service's **journal**, its collected log messages. E2 uses saved journal output; the live drill reads a running service's journal.
 
 **Reread:** systemd.service, `Type=`, `ExecStart=`, `Restart=`, `RestartSec=`; systemd.unit, `Description=`, `Wants=`, `After=`, and `[Install]`; journalctl, `-u` / `--unit=`. `User=` is an execution setting linked from systemd.service.
 
-### E2 — Preserve repeated directives (medium, ~12 min)
+### E2 — Diagnose the recorded failures (medium, ~24 min)
 
-**Goal:** Read a UTF-8 unit file (UTF-8 is the text-to-bytes encoding) into section names, then keys, then lists of values.
+**Goal:** Read the saved service failures in `data/`, decide what went wrong, and record each cause and repair in a structured answer: a dictionary with named fields. Write the diagnoses you reach by reading these recordings.
 
-**Signature:** `def parse_unit(path: str | Path) -> dict[str, dict[str, list[str]]]`
+**Signature:** `def diagnose_service() -> dict[str, dict[str, str]]`
 
-**Example:** File text `[Service]\nEnvironment=MODE=demo\nEnvironment=RACK=7\n` → `{"Service": {"Environment": ["MODE=demo", "RACK=7"]}}`. Here `\n` represents a newline.
+The recordings have neutral **case IDs** (labels identifying recordings): `case_01`, `case_02`, `case_03`, and `case_04`. Each has a `<case ID>.status.txt` file containing a `systemctl status chassis-demo.service --no-pager` excerpt and a matching `.journal.txt` file containing a `journalctl -u chassis-demo.service --no-pager` excerpt. Read both files for every case, including the additional `case_04` recording. All files are supplied; no running Linux service is needed.
 
-Contract:
+Return one outer dictionary with exactly those four case IDs as keys. Each value must be a dictionary with exactly `"cause"` and `"fix"` as keys and one allowed string below in each field. Write the answers directly in this function after reading the files; the function takes no arguments and must not read files, parse logs, run commands, or change permissions.
 
-- Accept a string path or `pathlib.Path`. Strip surrounding whitespace on every line. Skip blank lines and whole-line comments starting with `#` or `;` after stripping.
-- A stripped line beginning with `[` and ending with `]` is a section heading. Strip the name inside the brackets; it must not be empty. Preserve capitalization. Repeated section headings reuse the same dictionary. Keep empty sections.
-- Every other non-comment line must have a current section and contain `=`. Split at the first `=` only; strip surrounding whitespace from key and value. The key must not be empty. Append the value to that key's list, preserving assignment order. An empty value is still an entry: `[""]`.
-- Keep all characters inside values, including additional `=`, `%`, `#`, and `;`. There are no inline comments, placeholder substitutions, or special reset behavior for empty values.
-- A comment-only or empty file returns `{}`. An invalid line raises `ValueError` whose message contains `line N`, with the physical line number starting at 1 (including comments and blanks). A missing file propagates `FileNotFoundError`.
+**Evidence vocabulary:** `systemctl status` reports the service state and how its process ended. An **exit status** is the numeric result of a process: zero normally means success; nonzero means failure. `status=203/EXEC` means systemd could not execute the startup command; it does not identify the reason by itself. `status=1/FAILURE` means a process exited with status 1. `Permission denied` means an attempted operation was refused by access controls; read the surrounding lines to learn which operation and path were involved. **Execute access** allows running a file; **search access** on a directory allows traversing it to reach a file. A **traceback** lists the Python calls leading to an **exception**, an error that interrupts execution. A Python traceback in the journal shows that Python ran; its final exception message describes the error. A generic failure report may leave the cause unresolved.
 
-**Watch out:** This is a single-line subset of unit syntax. It does not join continued lines or interpret commands and systemd placeholders. `configparser(strict=False)` loses earlier repeated values, so use line iteration and dictionaries for E2. No dependency on E1 is needed.
+**Allowed `cause` values** (use these exact spellings):
 
-**Reread:** configparser, "Supported INI File Structure", "Customizing Parser Behaviour" (`strict`, `optionxform`, `interpolation`); systemd.unit, the unit-file syntax introduction. **INI** means the section/key text format described by configparser.
+- `missing_executable`
+- `permission`
+- `application_exception`
+- `unknown`
 
-### E3 — Give the operator a deployment checklist (medium, ~12 min)
+**Allowed `fix` values** (use these exact strings):
 
-**Goal:** Check the parsed dictionary without starting the service or changing the dictionary. Return every problem in the order below, at most one problem per row. Tests supply dictionaries directly, so E3 does not depend on E2.
+- `Correct ExecStart to an existing executable path.`
+- `Grant the service user execute access to the executable and search access to its parent directories.`
+- `Set station.name to a string in the station TOML file.`
+- `Inspect the full service journal before changing the unit.`
 
-**Signature:** `def validate_unit(parsed: dict[str, dict[str, list[str]]]) -> list[str]`
+Choose the cause and fix justified by each complete recording. Some excerpts may not establish a specific cause; do not invent missing evidence. The grader checks your diagnoses, including the additional recording, and reports which case needs review without printing its expected answer.
 
-**Example:** An otherwise valid unit with `User=["root"]` and no `Restart` → `["Restart missing", "User is root"]`.
+**Example:** `sorted(diagnose_service())` returns `["case_01", "case_02", "case_03", "case_04"]`; `sorted` lists the dictionary's keys in order. The diagnoses belong inside the four corresponding values.
 
-Input has E2's dictionary/list/string shape. Missing sections and keys are allowed. For `After`, `Wants`, and `WantedBy`, combine tokens (words separated by whitespace) from **all** values and check for an exact target token. For every other required key use only its final value, stripped; an absent key, empty list, or blank final value counts as missing. Ignore extra sections and keys.
+**Watch out:** Case IDs do not describe causes. Read the evidence before choosing answers. All four cases count toward E2; a correct dictionary shape alone does not pass. Keep the service's separate account when proposing repairs.
 
-| Check, in this order | Problem string |
-| --- | --- |
-| Final `Unit.Description` is missing | `Description missing` |
-| `Unit.After` lacks the network target | `After must include network-online.target` |
-| `Unit.Wants` lacks the network target | `Wants must include network-online.target` |
-| Final `Service.Type` is not `simple`, including missing | `Type must be simple` |
-| Final `Service.ExecStart` fails E1's command rule, including missing | `ExecStart must run an absolute python -m chassis command` |
-| Final `Service.Restart` is missing | `Restart missing` |
-| Otherwise, `Service.Restart` is not `on-failure` | `Restart must be on-failure` |
-| Final `Service.RestartSec` is missing | `RestartSec missing` |
-| Otherwise, `int(value)` fails or is at most zero | `RestartSec must be positive whole seconds` |
-| Final `Service.User` is missing | `User missing` |
-| Otherwise, `Service.User` is `root` or `0` | `User is root` |
-| `Install.WantedBy` lacks the boot target | `WantedBy must include multi-user.target` |
+**Reread:** systemd.service, `ExecStart=`; journalctl, `-u` / `--unit=`. Compare each status excerpt with its matching journal before recording your diagnosis.
 
-**Watch out:** Return `[]` when all checks pass. Whole seconds here use Python's `int` conversion: reject `0.5` and `3s`. This checklist deliberately covers fewer choices than systemd supports. It does not interpret empty assignments as dependency resets, verify accounts, or check paths on disk. Do not mutate (change) the input dictionary or its lists.
-
-**Reread:** systemd.service, `Type=`, `ExecStart=`, `Restart=`, and `RestartSec=`; systemd.unit, `Wants=`, `After=`, `[Install]`.
-
-### E4 — Load instrument settings with useful errors (medium, ~13 min)
+### E3 — Load instrument settings with useful errors (medium, ~13 min)
 
 **Goal:** Load TOML with `tomllib` and check a small station schema. A **schema** describes required keys and the types of their values. This exercise uses the station/instrument portion of the deployment configuration.
 
@@ -134,3 +119,87 @@ Return the complete parsed dictionary, preserving unknown keys, values, and inst
 **Watch out:** Missing keys must produce your useful `ValueError`, rather than an accidental `KeyError`. If several settings are wrong, follow the validation order above. A TOML boolean like `true` is not a string.
 
 **Reread:** tomllib, `load`, the example, and the conversion table (TOML table → `dict`, array → `list`, string → `str`).
+
+## Supplied tools (complete; no learner edits)
+
+These helpers keep the file-reading and policy work available for reference. Their contracts are below; E2 diagnoses runtime evidence instead of implementing them.
+
+### `parse_unit` — preserve repeated directives (supplied)
+
+**Goal:** Read a UTF-8 unit file (UTF-8 is the text-to-bytes encoding) into section names, then keys, then lists of values.
+
+**Signature:** `def parse_unit(path: str | Path) -> dict[str, dict[str, list[str]]]`
+
+**Example:** File text `[Service]\nEnvironment=MODE=demo\nEnvironment=RACK=7\n` → `{"Service": {"Environment": ["MODE=demo", "RACK=7"]}}`. Here `\n` represents a newline.
+
+Contract:
+
+- Accept a string path or `pathlib.Path`. Strip surrounding whitespace on every line. Skip blank lines and whole-line comments starting with `#` or `;` after stripping.
+- A stripped line beginning with `[` and ending with `]` is a section heading. Strip the name inside the brackets; it must not be empty. Preserve capitalization. Repeated section headings reuse the same dictionary. Keep empty sections.
+- Every other non-comment line must have a current section and contain `=`. Split at the first `=` only; strip surrounding whitespace from key and value. The key must not be empty. Append the value to that key's list, preserving assignment order. An empty value is still an entry: `[""]`.
+- Keep all characters inside values, including additional `=`, `%`, `#`, and `;`. There are no inline comments, placeholder substitutions, or special reset behavior for empty values.
+- A comment-only or empty file returns `{}`. An invalid line raises `ValueError` whose message contains `line N`, with the physical line number starting at 1 (including comments and blanks). A missing file propagates `FileNotFoundError`.
+
+**Watch out:** This is a single-line subset of unit syntax. It does not join continued lines or interpret commands and systemd placeholders. `configparser(strict=False)` loses earlier repeated values, so this supplied helper uses line iteration and dictionaries. It does not depend on E1.
+
+**Reread:** configparser, "Supported INI File Structure", "Customizing Parser Behaviour" (`strict`, `optionxform`, `interpolation`); systemd.unit, the unit-file syntax introduction. **INI** means the section/key text format described by configparser.
+
+### `validate_unit` — deployment checklist (supplied)
+
+**Goal:** Check the parsed dictionary without starting the service or changing the dictionary. Return every problem in the order below, at most one problem per row. This supplied helper accepts dictionaries directly; it does not call `parse_unit`.
+
+**Signature:** `def validate_unit(parsed: dict[str, dict[str, list[str]]]) -> list[str]`
+
+**Example:** An otherwise valid unit with `User=["root"]` and no `Restart` → `["Restart missing", "User is root"]`.
+
+Input has `parse_unit`'s dictionary/list/string shape. Missing sections and keys are allowed. For `After`, `Wants`, and `WantedBy`, combine tokens (words separated by whitespace) from **all** values and check for an exact target token. For every other required key use only its final value, stripped; an absent key, empty list, or blank final value counts as missing. Ignore extra sections and keys.
+
+| Check, in this order | Problem string |
+| --- | --- |
+| Final `Unit.Description` is missing | `Description missing` |
+| `Unit.After` lacks the network target | `After must include network-online.target` |
+| `Unit.Wants` lacks the network target | `Wants must include network-online.target` |
+| Final `Service.Type` is not `simple`, including missing | `Type must be simple` |
+| Final `Service.ExecStart` fails E1's command rule, including missing | `ExecStart must run an absolute python -m chassis command` |
+| Final `Service.Restart` is missing | `Restart missing` |
+| Otherwise, `Service.Restart` is not `on-failure` | `Restart must be on-failure` |
+| Final `Service.RestartSec` is missing | `RestartSec missing` |
+| Otherwise, `int(value)` fails or is at most zero | `RestartSec must be positive whole seconds` |
+| Final `Service.User` is missing | `User missing` |
+| Otherwise, `Service.User` is `root` or `0` | `User is root` |
+| `Install.WantedBy` lacks the boot target | `WantedBy must include multi-user.target` |
+
+**Watch out:** Return `[]` when all checks pass. Whole seconds here use Python's `int` conversion: reject `0.5` and `3s`. This checklist deliberately covers fewer choices than systemd supports. It does not interpret empty assignments as dependency resets, verify accounts, or check paths on disk. Do not mutate (change) the input dictionary or its lists.
+
+**Reread:** systemd.service, `Type=`, `ExecStart=`, `Restart=`, and `RestartSec=`; systemd.unit, `Wants=`, `After=`, `[Install]`.
+
+## Live drill (WSL2 Ubuntu, ~15 min)
+
+This drill is ungraded. **WSL2** (Windows Subsystem for Linux, version 2) runs Ubuntu Linux on Windows. Use its Ubuntu terminal. Codespaces cannot run this drill: the course's Codespaces environment has no systemd user session. Complete the graded exercises there if needed, then use WSL2 Ubuntu for this drill.
+
+Your **user manager** is the systemd instance that manages services for your logged-in account. First check that systemd is running as process 1, the first Linux process:
+
+```bash
+ps -p 1 -o comm=
+systemctl --user status --no-pager
+```
+
+The first command must print `systemd`; the second must reach your user manager. If it does not, revisit the WSL2 setup: use `sudoedit /etc/wsl.conf` (edit the system configuration with administrator permission) and ensure its existing or newly added `[boot]` section contains `systemd=true`, preserving other settings. From Windows PowerShell run `wsl --shutdown` (this stops all WSL sessions, so save your work first), reopen Ubuntu, and repeat the checks. If the user manager still cannot be reached, stop here and resolve the setup before running the drill.
+
+A **user service** runs under your logged-in account's manager. A **transient** service is created for the current session with a command instead of an installed unit file. `--user` selects that manager. Run:
+
+```bash
+systemd-run --user --unit=fasttrack-demo --property=Restart=on-failure /bin/sh -c 'echo station-start; sleep 300'
+systemctl --user status fasttrack-demo --no-pager
+systemctl --user kill -s SIGKILL fasttrack-demo
+systemctl --user show fasttrack-demo -p NRestarts -p MainPID
+journalctl --user -u fasttrack-demo -n 20 --no-pager
+systemctl --user stop fasttrack-demo
+systemctl --user is-active fasttrack-demo
+```
+
+`/bin/sh -c` runs the quoted shell commands: print a startup message, then wait 300 seconds. In the first status output, find `active (running)` and record its process ID. **SIGKILL** is a signal that forcibly terminates a process without letting it clean up. The `kill` command simulates a crash. `Restart=on-failure` should launch a replacement process. `NRestarts` counts automatic restarts; `MainPID` is the current main process ID. If you inspect it before the restart finishes, repeat the `show` command until the count increases and a new nonzero ID appears. The journal should show the failure and another `station-start` message; `-n 20` selects the last 20 entries and `--no-pager` prints directly to the terminal.
+
+Always run the `stop` command when finished, even if an observation differs. A deliberate stop does not trigger this restart policy. The final `is-active` check should report `inactive` or `unknown` (a stopped transient unit can be removed); its nonzero exit status is expected. Explain to yourself which evidence proves the crash restarted and which proves the deliberate stop held.
+
+This session-only user service needs no E1 `User=` setting or boot target: it already runs as you. E1 describes a system service, managed for the whole machine with a separate service account and a boot-time installation policy. The drill's shell process is a safe stand-in for a long-running station worker.

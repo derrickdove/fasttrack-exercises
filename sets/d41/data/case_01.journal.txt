@@ -1,0 +1,5 @@
+Oct 30 09:00:00 rack7 systemd[1]: Started chassis-demo.service - Chassis test station.
+Oct 30 09:00:00 rack7 (python3)[814]: chassis-demo.service: Failed to locate executable /opt/chassis/.venv/bin/python3: No such file or directory
+Oct 30 09:00:00 rack7 (python3)[814]: chassis-demo.service: Failed at step EXEC spawning /opt/chassis/.venv/bin/python3: No such file or directory
+Oct 30 09:00:00 rack7 systemd[1]: chassis-demo.service: Main process exited, code=exited, status=203/EXEC
+Oct 30 09:00:00 rack7 systemd[1]: chassis-demo.service: Failed with result 'exit-code'.

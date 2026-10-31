@@ -1,16 +1,16 @@
 # d51 — Debugging across the hardware–software boundary
 
-**Time:** about 65 minutes · **Read first:** SparkFun, [How to Use a Multimeter](https://learn.sparkfun.com/tutorials/how-to-use-a-multimeter/all), *How to Use an Oscilloscope*, and *How to Read a Datasheet* (apply that reading to the invented excerpt below); *The Pragmatic Programmer*, topic **Debugging** — your book; Python, [time.perf_counter](https://docs.python.org/3/library/time.html#time.perf_counter). · **You edit:** `starter/flaky_driver.py` and `starter/notes.md`.
+**Time:** about 65 minutes · **Read first:** SparkFun, [How to Use a Multimeter](https://learn.sparkfun.com/tutorials/how-to-use-a-multimeter/all), *How to Use an Oscilloscope*, and *How to Read a Datasheet* (apply that reading to the invented excerpt below); *The Pragmatic Programmer*, topic **Debugging** — your book; Python, [time.perf_counter](https://docs.python.org/3/library/time.html#time.perf_counter). · **You edit:** `starter/flaky_driver.py`, `starter/timing.py`, and `starter/notes.md`.
 
 ## What you're building
 
-A chassis test station powers connected equipment (the load), reads its supply voltage, and watches a stream of numbered measurements. Operators have reported four failures at the boundary between physical equipment and the software that controls it. Repair each small function using the operator report, the supplied legacy-code excerpt, and the equipment contract; no physical equipment is required.
+A chassis test station powers connected equipment (the load), reads its supply voltage, and watches a stream of numbered measurements. Operators have reported four failures at the boundary between physical equipment and the software that controls it. Repair each small function using the operator report, the supplied legacy-code excerpt, and the equipment contract. Then diagnose two separate captured bench cases from independent measurements; no physical equipment is required.
 
 ## How this works
 
-1. Replace the four `raise NotImplementedError(...)` lines in `starter/flaky_driver.py`. Each function's docstring (its embedded description) includes the old, buggy code for diagnosis; those excerpts are deliberately not executable so every exercise starts unfinished. Don't edit `tests/`.
+1. Replace the four `raise NotImplementedError(...)` lines in `starter/flaky_driver.py`. Each function's docstring (its embedded description) includes the old, buggy code for diagnosis; those excerpts are deliberately not executable so every exercise starts unfinished. E5 and E6 have their remaining stubs in `starter/timing.py`; leave its supplied statistics helper unchanged. Don't edit `tests/`.
 2. Press **Ctrl+Shift+B → Test: d51** (or run `bash tools/run.sh d51` / `tools\run.ps1 d51`). At first you'll see `Exercises: 0 / 6 passed`. Rerun after each exercise.
-3. Fill the short evidence table in `starter/notes.md` as you go. It is a manual notebook, not an extra graded exercise. Report **all pass / partial / stuck** in the tracker.
+3. Fill the short evidence table in `starter/notes.md` as you go. The notebook supports your repairs; E6 grades your diagnosis in `starter/timing.py` against the captured evidence in `data/`. Report **all pass / partial / stuck** in the tracker.
 
 A **driver** translates software requests into equipment commands. A **datasheet** states an instrument's supported ranges, accuracy, and interface rules. A **multimeter** measures quantities such as steady voltage; an **oscilloscope** displays voltage over time, using a **trigger** (a condition that starts a capture) to catch a brief event. Neither a passing software test nor a correct display alone proves the physical voltage is correct: compare independent evidence.
 
@@ -70,7 +70,7 @@ the accuracy expression gives ±0.0045 V. A 1000-fold discrepancy is far larger.
 The command table tells you the exact spelling and response type; the timeout
 row describes what happens when there is no reply. Real transports add message
 termination and enforce the deadline; this set supplies callbacks instead.
-These tests use no sleeps and do not simulate settling or physical measurement accuracy.
+These tests use no sleeps and do not simulate settling or physical measurement accuracy. E6 instead asks you to interpret supplied measurements with stated uncertainty (the possible measurement error).
 
 ## Exercises
 
@@ -177,11 +177,15 @@ E4 does not call E1–E3; the supplied sample callback owns measurement details.
 and checking assumptions about control flow; SparkFun, *How to Use an Oscilloscope*,
 observing the output over time to check the physical effect of a software command.
 
-### E5 — Measure the slowest station step (medium, ~12 min)
+### E5 — Measure the slowest station step (medium, ~5 min)
 
 **Goal:** Summarize how long a test step takes and check its deadline (the latest
-allowed completion time). For E5 and E6, edit the new `starter/timing.py` file;
-the four earlier repairs and their notebook still work as described above.
+allowed completion time). Edit `starter/timing.py`. The complete
+`summarize_durations(durations_ms)` helper sorts a copy and calculates all four
+statistics below. Your remaining work is to collect per-call durations in
+`measure`, return `summarize_durations(durations)`, and implement
+`meets_deadline`. Do not reimplement the median or percentile calculation.
+The helper is supplied scaffolding (working code you keep).
 
 **Signature:**
 
@@ -246,81 +250,79 @@ Do not time the whole batch and divide: that loses individual slow calls.
 **Reread:** *The Pragmatic Programmer*, topic **Debugging**, reproducing a failure
 and checking assumptions; Python, `time.perf_counter`, elapsed-time measurement.
 
-### E6 — Choose where speed work belongs (medium, ~8 min)
+### E6 — Diagnose captured bench evidence (medium, ~15 min)
 
-**Goal:** Choose a language and an optimization (a change to reduce execution time
-or resource use) using timing evidence from the station.
+**Goal:** Decide whether each reported anomaly (an unexpected observation) is a
+software conversion defect or a real supply transient, then choose a measurement
+that can distinguish them. A **conversion defect** changes a raw reading into
+the wrong reported units or value. A **transient** is a brief physical voltage
+change. A **scope** is short for oscilloscope; a **trace** records its
+voltage measurements over time.
 
-**Signature:** `def speed_answers() -> dict[str, str]`
+**Signature:** `def diagnose_captures() -> dict[str, dict[str, str]]`
 
-**Contract:** Return exactly the keys `"Q1"`, `"Q2"`, and `"Q3"`, each mapped to
-the uppercase letter of your chosen option (`"A"`, `"B"`, `"C"`, or `"D"`).
-One answer per question; do not return the option text.
+Read the three small files in `data/` as evidence; you do not need to write a
+file parser. They are invented captures from two separate station runs,
+`case_a` and `case_b`. Neither run uses your E1 repair. Each load needs
+4.750 through 5.250 V, including during switching. Only these two candidate
+faults are under consideration; choose the fault supported by the captures.
 
-**Example:** `sorted(speed_answers())` returns `["Q1", "Q2", "Q3"]`.
-`sorted` returns the keys in alphabetical order here; choose the answer values yourself.
+- `serial.log` records serial communication (text exchanged with an instrument)
+  and the production report. `reply` is the exact raw reply; `reported_V` is
+  the value the report claims is in volts. Each line has an evidence ID such
+  as `S01`, a label you can cite. `t_ms=0` is the load-switch event (the load
+  changes how much current it draws). Serial readings are 10 ms apart.
+- `dmm.csv` is a **CSV** (comma-separated values) file: each line is a row,
+  and commas separate its fields. It contains independent **DMM** (digital
+  multimeter) readings at the load terminals, the connection points where the
+  load receives power. Each
+  `mean_V` is a 100 ms average over the stated start/end window, with possible
+  error `uncertainty_V`. The meter did not record the minimum voltage.
+- `scope.csv` contains selected rows from independent scope captures at the
+  same load terminals, with voltage uncertainty of 0.020 V. All captures use
+  the same event-relative clock as the serial log. The scope sampled every
+  0.2 ms; selected rows preserve the event value and the lowest voltage in
+  each capture. A separate event signal triggered each capture, so a stable
+  voltage trace was recorded too. Times and voltages are in ms and V.
+  A **probe** connects a measuring instrument to the voltage being checked.
 
-Use the **Debugging** and `time.perf_counter` readings to reason through the
-scenarios below.
+**Contract:** Return exactly `"case_a"` and `"case_b"`, each mapped to a
+separate dictionary with exactly these six string fields. Values are
+case-sensitive, with no extra whitespace. Use the vocabulary below so grading
+checks your decision rather than your wording.
 
-**Language choice:** To **profile** code is to measure where its execution time
-goes. **Compiled code** is translated into machine instructions before it runs;
-C and C++ are commonly used this way.
+| Field | What to return |
+| --- | --- |
+| `fault` | `"software_conversion_defect"` or `"real_supply_transient"`. Compare raw units and reported values with independent voltage evidence. |
+| `serial_evidence` | The evidence ID of this case's serial line at `t_ms=0`. |
+| `dmm_evidence` | This case's DMM row ID. Consider what its averaging window can hide. |
+| `scope_evidence` | If diagnosing conversion, cite the scope row at `t_ms=0`. If diagnosing a transient, cite either row outside the load's allowed voltage range. |
+| `next_measurement` | One measurement-plan name from the table below. Choose the plan most directly testing your diagnosis. |
+| `disposition` | One action name from the final table. A disposition is the decision about what happens to the station or result next. |
 
-**Q1.** A new station step has a response-time requirement but no timing measurements
-yet. Which approach should guide the choice between Python and C/C++?
+| Measurement-plan name | Procedure and distinguishing observation |
+| --- | --- |
+| `"replay_and_probe"` | Pass the suspect raw reply through the production conversion and compare the reported volts with an independent load-voltage probe during a repeat event. A scaling defect makes the report disagree with the raw units and probe; a real voltage change appears on the probe too. |
+| `"trigger_load_dip"` | Repeat the load switch with the scope at the load, triggering when voltage falls below 4.750 V; retain raw replies and reported values on the same timeline. A real dip repeats on the independent scope; a conversion-only defect cannot create that physical dip. |
+| `"repeat_slow_dmm"` | Take another 100 ms average without a scope capture or conversion check. |
 
-- A. Start in C/C++ because equipment-control software always needs compiled code.
-- B. Start in Python; measure against the requirement and profile before deciding to change language.
-- C. Start in Python and accept it if the average is below the deadline, regardless of slower calls.
-- D. Pick whichever language has the shortest source file; code size predicts response time.
+| Action name | Disposition |
+| --- | --- |
+| `"hold_for_conversion_fix"` | Hold the result; repair reporting and repeat the comparison before accepting it. |
+| `"disable_and_investigate_power"` | Disable output, hold the station, and investigate power delivery before another approved powered test. |
+| `"release_as_pass"` | Accept the result and continue normal station operation. |
 
-<details>
-<summary>Why it matters on the job</summary>
-Language decisions affect both station maintenance and whether a step meets its requirements.
-</details>
+**Example:** `sorted(diagnose_captures())` returns `["case_a", "case_b"]`.
+The reference produces this shape; infer each field value from the captures.
+No free-text explanation or additional keys are required. E6 is independent of
+E1-E5, so you can diagnose the evidence before completing any repair.
 
-**A slow loop:** A **hot loop** is a repeated section that accounts for much of
-the runtime. To **vectorize** means to express work on many values as a library
-operation instead of a Python loop. A **C-backed library** exposes operations
-to Python but executes the underlying computation in compiled C or C++.
-This quiz needs no new library installation.
+**Watch out:** A DMM average near 5 V does not exclude a short dip. A report
+spike alone does not prove that voltage reached the load. A stable capture
+only describes its recorded interval and resolution; it does not guarantee
+all future behavior. Keep suspect results on hold while confirming the cause.
+The grader gives rereading hints without printing the keyed answer values.
 
-**Q2.** Measurements show that one Python loop processing captured readings misses
-the step's deadline. What is the next useful approach?
-
-- A. Rewrite the entire station application in C++ before measuring any smaller change.
-- B. Remove the timeout so the loop can always finish successfully.
-- C. Profile and measure the loop, then try a C-backed operation or move only that piece to C/C++ and measure again.
-- D. Run several copies of the unchanged loop at once; that always makes a single result arrive sooner.
-
-<details>
-<summary>Why it matters on the job</summary>
-A targeted speed change needs evidence that it solves the delay and preserves the measurement result.
-</details>
-
-**Timing evidence:** The **operating system (OS)** manages programs and hardware;
-**scheduling** is its choice of which work gets processor time. **Jitter** is
-variation in timing between runs. **Target hardware** is the actual station computer
-and equipment; **under load** means running its expected competing work too.
-
-**Q3.** A step meets its deadline in repeated runs on a busy Windows laptop. Why
-is that insufficient proof of the worst case on the station?
-
-- A. OS scheduling and jitter vary with hardware and competing work; measure on the target station under load.
-- B. A busy laptop is automatically more demanding than every station, so it already proves the bound.
-- C. `perf_counter` removes scheduling delays, so only the number of Python statements matters.
-- D. More laptop repetitions eventually guarantee a worst-case bound for any station computer.
-
-<details>
-<summary>Why it matters on the job</summary>
-Timing evidence must support the conditions under which the station will actually operate.
-</details>
-
-**Watch out:** Passing timing tests on one computer is evidence about those
-runs. Keep the requirement, the measured result, and the measurement conditions
-clear when explaining a language or optimization decision.
-
-**Reread:** *The Pragmatic Programmer*, topic **Debugging**, checking assumptions
-and isolating the cause; Python, `time.perf_counter`; the E6 notes **Language
-choice**, **A slow loop**, and **Timing evidence** above.
+**Reread:** *The Pragmatic Programmer*, topic **Debugging**, isolating causes;
+SparkFun, *How to Use a Multimeter*, steady measurements; *How to Use an
+Oscilloscope*, time scale and triggering; the E6 capture conditions above.

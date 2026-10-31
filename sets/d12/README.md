@@ -68,7 +68,7 @@ The body must call `parse_number(reply)` and assert that it equals `expected`; d
 
 **Reread:** pytest How to parametrize, section “@pytest.mark.parametrize: parametrizing test functions.”
 
-### E2 — Searchable instrument errors (easy, ~12 min)
+### E2 — Searchable instrument errors (easy, ~10 min)
 
 **Goal:** Parametrize one error-queue test so an operator can find the failing reply format by its id. An error queue is the instrument's stored list of problems; code zero means it has no error to report.
 
@@ -93,19 +93,19 @@ The body must call `parse_error(reply)` and assert equality with the entire `exp
 
 **Reread:** pytest How to parametrize, examples using `ids` and `pytest.param`; Missing Semester Data Wrangling, the `grep`, `sed`, and `awk` examples for finding and extracting useful log text.
 
-### E3 — Select the quick station run (medium, ~10 min)
+### E3 — Select the quick station run (medium, ~12 min)
 
 **Goal:** Label the station sweep so an operator can omit it during a quick run. A sweep checks several instrument channels in sequence.
 
 **Signature:** `def test_e3_station_sweep() -> None`
 
-Add `@pytest.mark.slow`. Inside this single test, call `build_query` for channels `1`, `2`, and `3` and assert each complete command equals its expected string. A loop is appropriate here. Include the space before `(@...)` and the final newline.
+Add `@pytest.mark.slow`. Inside this single test, call `build_query` for channels `1`, `2`, and `3` and assert each complete command equals its expected string. A loop is appropriate here. Include the space before `(@...)` and the final newline. Also call `build_query` for channels `0` and `-1`, each inside `with pytest.raises(ValueError):`. You may loop over these invalid channels, but put the `with` block inside that loop so both calls run.
 
 **Example:** `build_query(2)` → `"MEAS:VOLT? (@2)\n"`.
 
 The set's `pytest.ini` already registers `slow`. Our checks run pytest with `-m "not slow"` and verify that only your sweep is deselected, while other tests remain selected. You do not need to launch subprocesses yourself.
 
-**Watch out:** Put the marker only on this function, not on the whole module. Do not sleep or connect to hardware: this model stands in for a slow physical sweep and finishes immediately. The assertions must catch a driver that always queries channel 1.
+**Watch out:** Put the marker only on this function, not on the whole module. Do not sleep or connect to hardware: this model stands in for a slow physical sweep and finishes immediately. Your checks must catch a driver that always queries channel 1 and a driver that accepts zero or negative channels instead of raising `ValueError`. Check both invalid channels; accepting either one is a bug.
 
 **Reread:** pytest How to mark test functions, “Registering marks” and “Marking test functions and selecting them for a run.”
 

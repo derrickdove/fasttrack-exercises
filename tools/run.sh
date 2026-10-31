@@ -26,9 +26,22 @@ else
   for folder in gates/b[1-6]/; do [[ ! -d "$folder" ]] || echo "  $(basename "$folder")"; done
   exit 1
 fi
+PLATFORM="$(uname -s)"
+PYTHON="$ROOT/.venv/bin/python"
+if [[ "$PLATFORM" == Linux* ]]; then
+  if [[ ! -f "$PYTHON" && -f "$ROOT/.venv/Scripts/python.exe" ]]; then
+    echo 'This .venv was created on Windows and cannot be used on Linux.'
+    echo 'Make a fresh Linux clone under ~/src, or delete .venv and run this command again.'
+    exit 1
+  fi
+elif [[ ! -f "$PYTHON" && -f "$ROOT/.venv/Scripts/python.exe" ]]; then
+  # Git Bash can reuse the Windows venv created by run.ps1.
+  PYTHON="$ROOT/.venv/Scripts/python.exe"
+fi
 # C++ sets use the shared compiler/report hook, without Python package setup.
 if compgen -G "sets/$ID/tests/*.cpp" >/dev/null; then
-  for candidate in "${FT_PYTHON:-}" "$ROOT/.venv/bin/python" "$ROOT/.venv/Scripts/python.exe" python3 python; do
+  for candidate in "${FT_PYTHON:-}" "$PYTHON" python3 python; do
+    [[ "$PLATFORM" != Linux* || "$candidate" != */Scripts/python.exe ]] || continue
     [[ -n "$candidate" ]] || continue
     command -v "$candidate" >/dev/null 2>&1 || continue
     if "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)' 2>/dev/null; then
@@ -39,9 +52,6 @@ if compgen -G "sets/$ID/tests/*.cpp" >/dev/null; then
   echo 'Python 3.12+ was not found. Install Python or set FT_PYTHON to its executable.'
   exit 1
 fi
-PYTHON="$ROOT/.venv/bin/python"
-# Git Bash can reuse the Windows venv created by run.ps1.
-[[ ! -f "$ROOT/.venv/Scripts/python.exe" ]] || PYTHON="$ROOT/.venv/Scripts/python.exe"
 if [[ ! -f "$PYTHON" ]]; then
   echo 'Creating .venv (your local Python environment) ...'
   found=false
@@ -57,7 +67,9 @@ if [[ ! -f "$PYTHON" ]]; then
     echo 'Python 3.12+ was not found. Install Python, then reopen VS Code.'
     exit 1
   fi
-  [[ ! -f "$ROOT/.venv/Scripts/python.exe" ]] || PYTHON="$ROOT/.venv/Scripts/python.exe"
+  if [[ "$PLATFORM" != Linux* && ! -f "$PYTHON" && -f "$ROOT/.venv/Scripts/python.exe" ]]; then
+    PYTHON="$ROOT/.venv/Scripts/python.exe"
+  fi
 fi
 if ! "$PYTHON" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)'; then
   echo 'This .venv needs Python 3.12+. Delete .venv and run again with Python 3.12+ installed.'

@@ -103,6 +103,7 @@ def test_keyboard_interrupt_aborts_without_reraising_and_cleans_up(executor, rec
         prefix.append("abort:run")
     assert events == prefix + ["abort:teardown", "power:teardown"]
     assert result.state == executor.RunState.ABORTED
+    assert any(line.startswith("step abort: abort:") for line in result.log), "record the abort marker"
 
 
 @pytest.mark.parametrize("value", [24.0, 31.0], ids=["would-pass", "would-fail"])
@@ -113,24 +114,37 @@ def test_teardown_exception_changes_pass_or_fail_to_error(executor, recorded_ste
     assert result.state == executor.RunState.ERROR
     assert events == ["read:setup", "read:run", "read:teardown"]
     assert len(result.results) == 1, "keep the measurement result when cleanup fails"
+    assert any(line.startswith("step read: cleanup failed:") for line in result.log), "record the cleanup failure marker"
 
 
-@pytest.mark.parametrize("failure,expected", [(None, "ERROR"), (RuntimeError("read failed"), "ERROR"),
-                                              (KeyboardInterrupt(), "ABORTED")],
-                         ids=["normal-run", "run-error", "abort"])
+@pytest.mark.parametrize("failure,phase", [(None, "run"), (RuntimeError("read failed"), "run"),
+                                           (KeyboardInterrupt(), "run"), (KeyboardInterrupt(), "setup")],
+                         ids=["normal-run", "run-error", "run-abort", "setup-abort"])
+@pytest.mark.parametrize("cleanup_error", [RuntimeError("cleanup failed"), KeyboardInterrupt()],
+                         ids=["cleanup-error", "cleanup-interrupt"])
 def test_one_teardown_failure_does_not_prevent_remaining_cleanup(
-    executor, recorded_step, failure, expected,
+    executor, recorded_step, models, themis, failure, phase, cleanup_error,
 ):
     events = []
-    steps = [recorded_step("power", events), recorded_step("bad_cleanup", events, fail_at="teardown")]
+    steps = [recorded_step("power", events),
+             recorded_step("bad_cleanup", events, fail_at="teardown", error=cleanup_error)]
     if failure is not None:
-        steps.append(recorded_step("last", events, fail_at="run", error=failure))
+        steps.append(recorded_step("last", events, fail_at=phase, error=failure))
     result = executor.run_sequence(steps, {})
     cleanup = [event for event in events if event.endswith(":teardown")]
     assert cleanup == (["last:teardown"] if failure is not None else []) + [
         "bad_cleanup:teardown", "power:teardown",
     ]
-    assert result.state == executor.RunState[expected]
+    assert result.state == executor.RunState.ERROR, "any failed cleanup takes priority over an abort"
+    completed_readings = [models.Measurement("bus_voltage", 24.0, "V")] * 2
+    assert result.results == themis.check_all(completed_readings, {}), "keep readings collected before the abort"
+    assert any(line.startswith("step bad_cleanup: cleanup failed:") for line in result.log), (
+        "record the cleanup failure marker for both Exception and KeyboardInterrupt"
+    )
+    if isinstance(failure, KeyboardInterrupt):
+        assert any(line.startswith("step last: abort:") for line in result.log), (
+            "keep the operator abort marker in the log even when the final state is ERROR"
+        )
 
 
 def test_log_records_state_transitions_and_step_events(executor, recorded_step, bus_limits):
