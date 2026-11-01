@@ -1,6 +1,6 @@
 import pytest
 
-from starter.scpi import build, decode_reply, encode_command, is_query, short_form
+from starter.scpi import build, decode_reply, encode_command, is_query, short_form, safe_power_up
 
 
 @pytest.mark.parametrize("cmd, expected", [
@@ -174,3 +174,170 @@ def test_e4_shortening_keeps_query_meaning() -> None:
     command = header + " (@1,2)"
     assert command == "MEAS:VOLT:DC? (@1,2)", f"unexpected meter request: {command!r}"
     assert is_query(command) is True, "shortened meter request still requires a reply"
+
+
+class ScriptedTransport:
+    """Check each call against a script; never connect to real hardware."""
+
+    def __init__(self, script: list[tuple[str, str, str | BaseException | None]]) -> None:
+        self.script = script
+        self.calls: list[tuple[str, str]] = []
+
+    def _step(self, method: str, command: str) -> str | None:
+        index = len(self.calls)
+        self.calls.append((method, command))
+        assert index < len(self.script), f"unexpected extra call: {method}({command!r})"
+        expected_method, expected_command, result = self.script[index]
+        assert (method, command) == (expected_method, expected_command), (
+            f"step {index + 1}: expected {expected_method}({expected_command!r}), "
+            f"got {method}({command!r})"
+        )
+        if isinstance(result, BaseException):
+            raise result
+        return result
+
+    def write(self, command: str) -> None:
+        assert self._step("write", command) is None, "write() does not return a reply"
+
+    def query(self, command: str) -> str:
+        reply = self._step("query", command)
+        assert isinstance(reply, str), "a scripted query needs a text reply"
+        return reply
+
+
+def power_up_script(
+    volts: float = 5.0,
+    amps: float = 0.2,
+    identity: str = "FastTrack,PSU-30,SN0042,1.0",
+    completion: str = "1",
+    error: str = '0,"No error"',
+) -> list[tuple[str, str, str | BaseException | None]]:
+    return [
+        ("query", "*IDN?", identity),
+        ("write", "*RST", None),
+        ("write", "*CLS", None),
+        ("write", "OUTP OFF", None),
+        ("write", "CURR " + str(amps), None),
+        ("write", "VOLT " + str(volts), None),
+        ("query", "*OPC?", completion),
+        ("query", "SYST:ERR?", error),
+        ("write", "OUTP ON", None),
+    ]
+
+
+@pytest.mark.parametrize("volts, amps, identity", [
+    (5.0, 0.2, "FastTrack,PSU-30,SN0042,1.0"),
+    (12.5, 1.25, "FastTrack,PSU-30,SN9000,2.3"),
+    (0.0, 0.0, "FastTrack,PSU-30,SN0001,1.2"),
+])
+def test_e5_safe_sequence_and_query_replies(volts: float, amps: float, identity: str) -> None:
+    transport = ScriptedTransport(power_up_script(volts, amps, identity))
+    replies = safe_power_up(transport, volts, amps)
+    assert replies == [identity, "1", '0,"No error"'], "return only query replies, in order"
+    assert len(transport.calls) == len(transport.script), "finish every step, including OUTP ON"
+
+
+@pytest.mark.parametrize("identity", [
+    "OtherCo,PSU-30,SN0042,1.0",
+    "FastTrack,DMM-10,SN0042,1.0",
+    "FastTrack,PSU-300,SN0042,1.0",
+    "FastTrack,PSU-30",
+    "",
+])
+def test_e5_rejects_identity_before_writing(identity: str) -> None:
+    transport = ScriptedTransport([("query", "*IDN?", identity)])
+    with pytest.raises(RuntimeError) as caught:
+        safe_power_up(transport, 5.0, 0.2)
+    if isinstance(caught.value, NotImplementedError):
+        raise caught.value
+    assert str(caught.value) == f"unexpected identity: {identity.strip()}"
+    assert transport.calls == [("query", "*IDN?")], "identity failure must send no settings"
+
+
+@pytest.mark.parametrize("completion", ["0", "BUSY", ""])
+def test_e5_requires_completed_operations(completion: str) -> None:
+    transport = ScriptedTransport(power_up_script(completion=completion)[:7])
+    with pytest.raises(RuntimeError) as caught:
+        safe_power_up(transport, 5.0, 0.2)
+    if isinstance(caught.value, NotImplementedError):
+        raise caught.value
+    assert str(caught.value) == f"operation did not complete: {completion.strip()}"
+    assert len(transport.calls) == 7, "stop before the error query or enabling output"
+    assert ("write", "OUTP ON") not in transport.calls
+
+
+@pytest.mark.parametrize("error", [
+    '-100,"Unknown command"',
+    '-222,"Data out of range"',
+    '-200,"Limit, rejected"',
+    '  -350,"Queue overflow"  ',
+])
+def test_e5_first_error_keeps_output_off_and_preserves_diagnostic(error: str) -> None:
+    script = power_up_script(error=error)[:8]
+    script.extend([("query", "SYST:ERR?", '0,"No error"'), ("write", "OUTP ON", None)])
+    transport = ScriptedTransport(script)
+    with pytest.raises(RuntimeError) as caught:
+        safe_power_up(transport, 5.0, 0.2)
+    if isinstance(caught.value, NotImplementedError):
+        raise caught.value
+    assert str(caught.value) == error.strip(), "include the first error's code and full message"
+    assert len(transport.calls) == 8, "raise immediately without reading another queue entry"
+    assert ("write", "OUTP ON") not in transport.calls, "an instrument error must prevent power-on"
+
+
+def test_e5_checks_stripped_replies_but_returns_original_text() -> None:
+    identity = "  FastTrack,PSU-30,SN0042,1.0\n"
+    completion = " 1\n"
+    error = ' 0,"No error"\n'
+    transport = ScriptedTransport(power_up_script(identity=identity, completion=completion, error=error))
+    assert safe_power_up(transport, 5.0, 0.2) == [identity, completion, error]
+    assert len(transport.calls) == 9, "empty error queue permits the final output-on command"
+
+
+@pytest.mark.parametrize("index, failure, cleanup_failure", [
+    (4, OSError("link lost"), None),
+    (6, TimeoutError("no reply"), None),
+    (6, KeyboardInterrupt("query interrupted"), None),
+    (8, OSError("enable reply lost"), None),
+    (8, OSError("enable reply lost"), TimeoutError("disable reply lost")),
+    (8, KeyboardInterrupt("enable interrupted"), None),
+    (8, KeyboardInterrupt("enable interrupted"), TimeoutError("disable reply lost")),
+    (8, OSError("enable reply lost"), KeyboardInterrupt("disable interrupted")),
+    (8, KeyboardInterrupt("enable interrupted"), KeyboardInterrupt("disable interrupted")),
+])
+def test_e5_transport_failure_stops_sequence_or_disables_output(
+    index: int, failure: BaseException, cleanup_failure: BaseException | None,
+) -> None:
+    class StatefulTransport(ScriptedTransport):
+        output_on = False
+
+        def write(self, command: str) -> None:
+            if command == "OUTP ON":
+                self.output_on = True  # ON takes effect before its write raises.
+            super().write(command)
+            if command in ("*RST", "OUTP OFF"):
+                self.output_on = False
+
+    script = power_up_script()
+    method, command, _ = script[index]
+    script[index] = (method, command, failure)
+    if index == 8:
+        script.append(("write", "OUTP OFF", cleanup_failure))
+    transport = StatefulTransport(script)
+    with pytest.raises(type(failure), match=str(failure)) as caught:
+        safe_power_up(transport, 5.0, 0.2)
+    assert caught.value is failure, "propagate the original exception, even if OFF also fails"
+    if index == 8:
+        assert transport.calls == [(method, command) for method, command, _ in script], (
+            "after ON fails, attempt OFF exactly once and send nothing else"
+        )
+        assert transport.output_on is (cleanup_failure is not None), (
+            "OFF must disable the output that ON enabled, unless OFF itself fails"
+        )
+        if cleanup_failure is not None:
+            assert getattr(caught.value, "__notes__", []) == [
+                f"cleanup failed: OUTP OFF: {cleanup_failure!r}; output state unknown"
+            ], "the original failure must report failed OFF and the unknown output state"
+    else:
+        assert len(transport.calls) == index + 1, "propagate connection failures without more calls"
+        assert ("write", "OUTP ON") not in transport.calls

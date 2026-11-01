@@ -160,7 +160,9 @@ An empty receive `b""` means **EOF** (end of the stream: the server at the other
 
 Call `enable()` once, then `measure()` once if enable succeeded. Always attempt `disable()` exactly once, including if enable partially changed the hardware and then raised. On complete success return the measurement unchanged. There is no validation or retry in this wrapper.
 
-If enable or measure raises **any `BaseException`**, including `KeyboardInterrupt` from an operator stopping the test, attempt disable and re-raise the original exception object. A disable failure must not replace that original exception. If enable and measure both succeed but disable raises, propagate the disable exception unchanged. Stop calling later work after a failure; never run measure after an enable failure. The callbacks do not take arguments.
+Python 3.11+ exceptions provide `add_note(text)`, which attaches a message without replacing the exception. The exception's `__notes__` list stores these messages, which print below the traceback, the error report showing where an exception occurred.
+
+If enable or measure raises **any `BaseException`**, including `KeyboardInterrupt` from an operator stopping the test, attempt disable and re-raise the original exception object. A disable failure must not replace that original exception. If disable also fails, call `original.add_note(f'cleanup failed: disable: {cleanup_error!r}')` exactly once before re-raising, where `original` is the enable or measure exception and `cleanup_error` is the disable exception. The `!r` includes the cleanup error's `repr()` text, which shows its type and message. If enable and measure both succeed but disable raises, propagate the disable exception unchanged. Stop calling later work after a failure; never run measure after an enable failure. The callbacks do not take arguments.
 
 **Example:** If measure raises `TimeoutError("no reading")`, the order is enable, measure, disable; the caller receives that same timeout even if disable also fails.
 

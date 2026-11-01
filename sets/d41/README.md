@@ -38,16 +38,15 @@ commands.setdefault("Query", []).append("SYST:ERR?")
 | `Unit` | `Description` | Any nonempty description of the station |
 | `Unit` | `After` | Whitespace-separated target names including `network-online.target` |
 | `Unit` | `Wants` | Whitespace-separated target names including `network-online.target` |
-| `Service` | `Type` | `simple` |
-| `Service` | `ExecStart` | Absolute Linux path to `python` or `python3`, then `-m chassis`, then optional arguments |
-| `Service` | `Restart` | `on-failure` |
-| `Service` | `RestartSec` | A positive integer number of seconds, such as `3` |
+| `Service` | `Type` | `oneshot` |
+| `Service` | `ExecStart` | Absolute Linux path to `python` or `python3`, then `-m chassis check`, then optional arguments |
+| `Service` | `Restart` | `no` |
 | `Service` | `User` | Any nonempty account name other than `root` or `0` |
 | `Install` | `WantedBy` | Whitespace-separated target names including `multi-user.target` |
 
 **Example:** `Description=Rack 7 measurement worker` gives the service an operator-readable label. Choose the remaining lines from the checklist.
 
-`After` orders this service after the named unit; `Wants` asks systemd to start that unit too. `network-online.target` marks network readiness according to the station's network setup. `Type=simple` means systemd starts the process directly. `ExecStart` gives the command, and `-m chassis` runs the Python module named `chassis`. `Restart=on-failure` retries after a process failure; `RestartSec` delays that retry. `WantedBy=multi-user.target` connects an enabled service to the usual non-graphical operating state. **Enabling** a service means arranging for its startup at boot.
+`After` orders this service after the named unit; `Wants` asks systemd to start that unit too. `network-online.target` marks network readiness according to the station's network setup. `ExecStart` gives the command, and `-m chassis` runs the Python module named `chassis`. Its `check` command is a **one-shot** process: it checks saved measurement files once and exits (PASS: 0, FAIL: 1, ERROR: 2). `Type=oneshot` makes systemd wait for that command to finish; `Restart=no` prevents automatic retries, so a valid FAIL result does not re-check the same files forever. `Restart=on-failure` is appropriate for a long-running service that should recover from an unexpected exit; `RestartSec` sets the delay before that retry. `WantedBy=multi-user.target` connects an enabled service to the usual non-graphical operating state. **Enabling** a service means arranging for its startup at boot.
 
 **Watch out:** Use exact section/key capitalization. Write each required directive once. Use an unquoted absolute Linux path with no spaces, such as `/opt/station/bin/python3`; it need not exist on this computer. Extra arguments are split on whitespace; quoted commands and shell wrappers are outside this exercise. Extra settings are allowed. The tests inspect the file structurally, without requiring the account or chassis package to exist. On a real station, `journalctl -u chassis-demo.service` displays the service's **journal**, its collected log messages. E2 uses saved journal output; the live drill reads a running service's journal.
 
@@ -159,17 +158,15 @@ Input has `parse_unit`'s dictionary/list/string shape. Missing sections and keys
 | Final `Unit.Description` is missing | `Description missing` |
 | `Unit.After` lacks the network target | `After must include network-online.target` |
 | `Unit.Wants` lacks the network target | `Wants must include network-online.target` |
-| Final `Service.Type` is not `simple`, including missing | `Type must be simple` |
-| Final `Service.ExecStart` fails E1's command rule, including missing | `ExecStart must run an absolute python -m chassis command` |
+| Final `Service.Type` is not `oneshot`, including missing | `Type must be oneshot` |
+| Final `Service.ExecStart` fails E1's command rule, including missing | `ExecStart must run an absolute python -m chassis check command` |
 | Final `Service.Restart` is missing | `Restart missing` |
-| Otherwise, `Service.Restart` is not `on-failure` | `Restart must be on-failure` |
-| Final `Service.RestartSec` is missing | `RestartSec missing` |
-| Otherwise, `int(value)` fails or is at most zero | `RestartSec must be positive whole seconds` |
+| Otherwise, `Service.Restart` is not `no` | `Restart must be no` |
 | Final `Service.User` is missing | `User missing` |
 | Otherwise, `Service.User` is `root` or `0` | `User is root` |
 | `Install.WantedBy` lacks the boot target | `WantedBy must include multi-user.target` |
 
-**Watch out:** Return `[]` when all checks pass. Whole seconds here use Python's `int` conversion: reject `0.5` and `3s`. This checklist deliberately covers fewer choices than systemd supports. It does not interpret empty assignments as dependency resets, verify accounts, or check paths on disk. Do not mutate (change) the input dictionary or its lists.
+**Watch out:** Return `[]` when all checks pass. `RestartSec` is not required or checked because automatic retries are disabled. This checklist deliberately covers fewer choices than systemd supports. It does not interpret empty assignments as dependency resets, verify accounts, or check paths on disk. Do not mutate (change) the input dictionary or its lists.
 
 **Reread:** systemd.service, `Type=`, `ExecStart=`, `Restart=`, and `RestartSec=`; systemd.unit, `Wants=`, `After=`, `[Install]`.
 

@@ -9,6 +9,7 @@ from starter.windows import (
     first_spike,
     max_in_windows,
     rolling_mean,
+    speed_answers,
 )
 
 
@@ -283,3 +284,49 @@ def test_e4_fast_enough() -> None:
     elapsed = perf_counter() - start
     assert got == unique, "all 100,000 serials must appear once in discovery order"
     assert elapsed <= 2.0, f"dedupe_keep_order took {elapsed:.3f}s; use set membership (limit 2s)"
+
+
+_SPEED_ANSWERS = {"Q1": "B", "Q2": "D", "Q3": "A", "Q4": "C"}
+
+
+def test_e5_q1_loop_execution() -> None:
+    answers = speed_answers()
+    if (
+        not isinstance(answers, dict)
+        or set(answers) != set(_SPEED_ANSWERS)
+        or answers.get("Q1") != _SPEED_ANSWERS["Q1"]
+    ):
+        pytest.fail(
+            "Q1: Return exactly Q1 through Q4; reread the Python glossary entries "
+            "CPython and bytecode, and E5's execution vocabulary.",
+            pytrace=False,
+        )
+
+
+def test_e5_q2_instrument_waits() -> None:
+    answers = speed_answers()
+    if not isinstance(answers, dict) or answers.get("Q2") != _SPEED_ANSWERS["Q2"]:
+        pytest.fail(
+            "Q2: Reread E5's vocabulary on I/O-bound work and developer time.",
+            pytrace=False,
+        )
+
+
+def test_e5_q3_worst_case_work() -> None:
+    answers = speed_answers()
+    if not isinstance(answers, dict) or answers.get("Q3") != _SPEED_ANSWERS["Q3"]:
+        pytest.fail(
+            "Q3: Reread A Common-Sense Guide to DSA, Big O chapters, "
+            "on counting work for different inputs.",
+            pytrace=False,
+        )
+
+
+def test_e5_q4_dict_lookup() -> None:
+    answers = speed_answers()
+    if not isinstance(answers, dict) or answers.get("Q4") != _SPEED_ANSWERS["Q4"]:
+        pytest.fail(
+            "Q4: Reread Python Design FAQ, How are dictionaries implemented in "
+            "CPython?, and the book's hash-table lookup discussion.",
+            pytrace=False,
+        )

@@ -35,6 +35,10 @@ with nullcontext("station A") as name:  # a context manager with no cleanup
 
 Python passes `__exit__` the exception class (`exc_type`), the exception object (`exc_value`), and its recorded call stack (`traceback`); all three are `None` on a normal exit. On exit, attempt to disable every listed channel in order, including duplicates. An empty sequence does nothing. Return `False` when cleanup completes. If a cleanup call raises, still attempt the remaining channels. If the block already raised, preserve that same exception object; otherwise raise the first cleanup exception. This also applies to interruption exceptions such as `KeyboardInterrupt`, which inherit from `BaseException` rather than `Exception`.
 
+On Python 3.11+, `original.add_note(text)` attaches a text note to an existing exception without replacing it. Notes are stored in `original.__notes__` and printed below its traceback.
+
+When the block already raised, add one note to that original exception for each failed cleanup call, in call order, keeping any existing notes. Use `f"cleanup failed: {operation}: {cleanup_error!r}"`, where `operation` is `f"output({channel}, False)"` and `cleanup_error` is the error from that call; `!r` inserts the error's `repr`, its Python representation including its type and message.
+
 **Example:** `with OutputGuard(psu, [2, 1]): ...` ends by calling `output(2, False)` then `output(1, False)`.
 
 **Watch out:** Do not enable outputs or suppress the block's error. This guard requests shutdown; an instrument that rejects an off command cannot be guaranteed to turn off.
@@ -81,7 +85,7 @@ The clock returns seconds and never moves backward; sleep advances time. Propaga
 
 The caller has already set this channel to 0 V and enabled its output. Use `psu.set_voltage(ch, voltage)`; do not read voltage or enable output. Inputs are finite numbers. Reject `target < 0` or `step <= 0` with `ValueError` before any device or settle calls. On valid input, write `min(previous + step, target)` until you reach the target. Call the zero-argument `settle()` after each successful write, including the final one. Never write a value above target. A zero target does nothing; a step larger than target writes target once. Return `None` and leave output enabled on success.
 
-If a voltage write or settle raises any `BaseException`, attempt `set_voltage(ch, 0.0)`, then `output(ch, False)`, then re-raise the original exception object. Attempt both cleanup operations even if either raises; their errors must not replace the original. Do not settle during cleanup. Invalid-input errors need no cleanup because no operation has started.
+If a voltage write or settle raises any `BaseException`, attempt `set_voltage(ch, 0.0)`, then `output(ch, False)`, then re-raise the original exception object. Attempt both cleanup operations even if either raises; their errors must not replace the original. As in E1, add one note to the original exception per failed cleanup call, in call order, keeping existing notes: use `f"cleanup failed: {operation}: {cleanup_error!r}"` with `operation` equal to `f"set_voltage({ch}, 0.0)"` or `f"output({ch}, False)"` for the failed call. Do not settle during cleanup. Invalid-input errors need no cleanup because no operation has started.
 
 **Example:** target `5`, step `2` writes `2`, `4`, `5`, with one settle call after each. If settling at `4` fails, the next commands are voltage `0` and output off.
 

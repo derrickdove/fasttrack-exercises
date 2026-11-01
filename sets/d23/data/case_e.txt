@@ -1,0 +1,38 @@
+Recorded case case_e - Ubuntu 24.04, IPv4 TCP connect
+Each command block is a snapshot taken immediately before the failed connection.
+Bench-interface IPv6 is disabled; loopback IPv6 remains enabled.
+The SCPI service, when present, uses TCP port 5025. SSH uses port 22.
+Approved station address: 172.22.9.10/24 (reserved), enp1s0.
+Approved instrument address: 172.22.9.80/24. A bench switch connects their cables.
+No gateway is required for this bench. No active connection rejection was observed.
+No cable/switch forwarding, packet-filter, or subsequent host-availability evidence was collected.
+The snapshots do not establish that the connection packets reached the service.
+[station Python connection attempt]
+socket.create_connection(("172.22.9.80", 5025), timeout=2.0)
+TimeoutError: timed out
+
+[station]
+$ ip -br addr
+lo               UNKNOWN        127.0.0.1/8 ::1/128
+enp1s0           UP             172.22.9.10/24
+
+$ ip route
+172.22.9.0/24 dev enp1s0 proto kernel scope link src 172.22.9.10
+
+$ ss -ltn
+State  Recv-Q Send-Q Local Address:Port Peer Address:Port Process
+LISTEN 0      4096         0.0.0.0:22        0.0.0.0:*
+
+[instrument]
+$ ip -br addr
+lo               UNKNOWN        127.0.0.1/8 ::1/128
+enp1s0           UP             172.22.9.80/24
+
+$ ip route
+172.22.9.0/24 dev enp1s0 proto kernel scope link src 172.22.9.80
+
+$ ss -ltn
+State  Recv-Q Send-Q Local Address:Port Peer Address:Port Process
+LISTEN 0      4096         0.0.0.0:22        0.0.0.0:*
+LISTEN 0      128          0.0.0.0:5025      0.0.0.0:*
+

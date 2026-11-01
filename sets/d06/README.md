@@ -1,6 +1,6 @@
 ﻿# d06 — Modeling results: classes, dataclasses and enums
 
-**Time:** about 45 minutes · **Read first:** [Python Tutorial §9.1–9.8: Classes](https://docs.python.org/3/tutorial/classes.html), [Pro Git 3.1–3.2: Branches in a Nutshell and Basic Branching and Merging](https://git-scm.com/book/en/v2/Git-Branching-Branches-in-a-Nutshell), [dataclasses: Data Classes](https://docs.python.org/3/library/dataclasses.html), and [enum: Enum](https://docs.python.org/3/library/enum.html#enum.Enum) · **You edit:** `starter/models.py`
+**Time:** about 45 minutes · **Read first:** [Python Tutorial §9.1–9.8: Classes](https://docs.python.org/3/tutorial/classes.html), [Pro Git 3.1–3.2: Branches in a Nutshell and Basic Branching and Merging](https://git-scm.com/book/en/v2/Git-Branching-Branches-in-a-Nutshell) (optional preview; scheduled on day 8), [dataclasses: Data Classes](https://docs.python.org/3/library/dataclasses.html), and [enum: Enum](https://docs.python.org/3/library/enum.html#enum.Enum) · **You edit:** `starter/models.py`
 
 ## What you're building
 
@@ -95,4 +95,4 @@ All four properties are read-only: callers may read them but may not assign to t
 
 **Watch out:** Adding `Reading("supply", 1000.0, "mV")` to that bank must fail without incrementing the count. Creating a fresh outer dictionary alone does not protect shared inner dictionaries.
 
-**Reread:** Python Tutorial §9.3.5, Class and Instance Variables, for independent state; §9.4, Random Remarks, for one object's methods using another object. Review Pro Git §3.2, Basic Branching and Merging, when combining your practice branch changes.
+**Reread:** Python Tutorial §9.3.5, Class and Instance Variables, for independent state; §9.4, Random Remarks, for one object's methods using another object. Optional preview: review Pro Git §3.2, Basic Branching and Merging (scheduled on day 8), when combining your practice branch changes.

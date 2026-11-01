@@ -232,7 +232,9 @@ def test_e3_dual_failure_keeps_original(
     output_spy: OutputSpy, stage: str, cleanup_type: type[BaseException]
 ) -> None:
     original = TimeoutError("original station failure")
-    output_spy.failures[False] = cleanup_type("cleanup failed too")
+    original.add_note("existing station context")
+    cleanup_error = cleanup_type("cleanup failed too")
+    output_spy.failures[False] = cleanup_error
     if stage == "enable":
         output_spy.failures[True] = original
 
@@ -243,6 +245,15 @@ def test_e3_dual_failure_keeps_original(
     with pytest.raises(TimeoutError) as caught:
         run_with_output(output_spy, measure)
     assert caught.value is original, "cleanup must not hide the cause of the failed step"
+    notes = caught.value.__notes__
+    assert len(notes) == 2, "preserve existing notes and add exactly one cleanup note"
+    note = notes[-1]
+    assert "cleanup failed" in note, "tell the operator that cleanup also failed"
+    assert "generator.output(False)" in note, "identify the failed output-off operation"
+    assert notes == [
+        "existing station context",
+        f"cleanup failed: generator.output(False): {cleanup_error!r}",
+    ], "append the cleanup exception's type and message without changing existing notes"
     expected = [True, False] if stage == "enable" else [True, "measure", False]
     assert output_spy.events == expected, "cleanup is attempted exactly once"
 

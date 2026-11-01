@@ -60,15 +60,19 @@ For this dynamically typed dictionary, reject booleans, floats, and numeric stri
 
 **Implement:** `read_voltage() -> float`, `set_voltage(volts: float) -> None`, `enable_output(on: bool) -> None`, and `close() -> None`; also implement `__enter__` and `__exit__` for `with` blocks. Use the supplied fields in these methods.
 
-The supplied `ResourceManagerLike` and `ResourceLike` protocols and `VisaTimeout(Exception)` are complete; do not implement them. A **resource manager** opens an instrument connection with `open_resource(name)`. Its returned **resource** has writable `timeout`, `read_termination`, and `write_termination` attributes, plus `write(cmd)`, `query(cmd) -> str`, and `close()` methods. A **termination** is the character marking the end of a command or reply. A read timeout is either the supplied `VisaTimeout` or a real `pyvisa.errors.VisaIOError` whose `error_code` equals `pyvisa.constants.StatusCode.error_timeout`. Other VISA error codes are not timeouts.
+The supplied `ResourceManagerLike` and `ResourceLike` protocols and `VisaTimeout(Exception)` are complete; do not implement them. A **resource manager** opens an instrument connection with `open_resource(name)`. Its returned **resource** has writable `timeout`, `read_termination`, and `write_termination` attributes, plus `write(cmd)`, `query(cmd) -> str`, `clear() -> None`, and `close()` methods. A **termination** is the character marking the end of a command or reply. A read timeout is either the supplied `VisaTimeout` or a real `pyvisa.errors.VisaIOError` whose `error_code` equals `pyvisa.constants.StatusCode.error_timeout`. Other VISA error codes are not timeouts.
 
 - Supplied `from_config`: accept only `ip`, `timeout_ms`, and `max_voltage`. Require `ip` to be a nonempty string and use it unchanged. `timeout_ms` is optional, defaults to 2000, and must be a positive integer; reject booleans, floats, and numeric strings. A millisecond is 1/1000 second. Require `max_voltage` to be a positive finite `int` or `float`; reject booleans and numeric strings. A missing required key, unknown key, or invalid value raises `ValueError` naming that key. Validate everything before opening anything, without changing the dictionary.
 - The supplied setup then calls `rm.open_resource(f"TCPIP::{ip}::INSTR")`. This **VISA resource string** identifies an instrument reached over TCP/IP through PyVISA. Set the resource's `timeout` to `timeout_ms` and both terminations to `"\n"` (one newline character). If setting the timeout or either termination raises, the supplied setup attempts to close the opened resource exactly once and propagates the original setup exception, even if close also raises. Do not send commands while configuring it. The tests supply the manager; do not create your own manager, threads, sleeps, or network connection.
-- `read_voltage`: query `"MEAS:VOLT?"`, a SCPI command (Standard Commands for Programmable Instruments) asking for measured voltage. Convert the numeric reply with `float` and return volts; there is no unit suffix. Retry exactly once on either timeout described above, using the same command. A second timeout propagates. A non-numeric reply raises `ValueError` without retrying; other query exceptions propagate without retrying.
-- `set_voltage`: require a finite value, then round it to three decimal places using `f"{volts:.3f}"`. The rounded value must be from zero through `max_voltage`, inclusive; otherwise raise `ValueError` before any write. Write exactly `f"VOLT {volts:.3f}"`. Check the rounded value, not the original input: with `max_voltage=12.3456`, `set_voltage(12.3456)` must raise because it would command `12.346`; with `max_voltage=12.5`, `set_voltage(12.5001)` writes `"VOLT 12.500"`. A tiny negative input that formats as `"-0.000"` is zero and is allowed.
+- `read_voltage`: query `"MEAS:VOLT?"`, a SCPI command (Standard Commands for Programmable Instruments) asking for measured voltage. Convert the numeric reply with `float` and return volts; there is no unit suffix. Retry exactly once on either timeout described above, using the same resource and command, but first call `self.resource.clear()` exactly once. If clear raises, propagate that error without retrying the query. A second timeout propagates without another clear or retry. A non-numeric reply raises `ValueError` without retrying; other query exceptions propagate without retrying. Do not clear after a successful query or a non-timeout error.
+- `set_voltage`: first require a finite request with `0 <= volts <= max_voltage`, before rounding. Then format it to three decimal places using `f"{volts:.3f}"`; the numeric value of that text must also be no greater than `max_voltage`. If either check fails, raise `ValueError` before any write. Otherwise write exactly `f"VOLT {volts:.3f}"`. With `max_voltage=12.3456`, `set_voltage(12.3456)` must raise because it would command `12.346`. With `max_voltage=12.5`, `set_voltage(12.5001)` must raise with nothing written, even though it formats as `"12.500"`. A tiny negative request such as `-0.0001` must also raise with nothing written, even though it formats as `"-0.000"`.
 - `enable_output`: require exactly a `bool`; write `"OUTP 1"` for `True` and `"OUTP 0"` for `False`. Anything else, including integers 0 and 1, raises `TypeError` before any write. Type hints do not enforce runtime checks, and `bool` is a subclass of `int` in Python.
-- Context manager: `__enter__` returns the supply. On exit, write `"OUTP 0"`, then call `close()`, always attempting close even if the write fails. Never swallow or replace the block's exception, including when cleanup also fails. With no block exception, cleanup errors propagate; if both write and close fail, the close error propagates.
+- Context manager: `__enter__` returns the supply. On exit, write `"OUTP 0"`, then call `close()`, always attempting close even if the write fails. Never swallow or replace the block's exception, including when cleanup also fails. If cleanup also fails, append one note per failed operation to that same exception: `f'cleanup failed: {operation}: {cleanup_error!r}'`, with `operation` equal to `"OUTP 0"` for the write or `"close"` for closing, and `cleanup_error` the caught cleanup error; preserve existing notes. The `!r` uses `repr` to include the cleanup error's type and message. With no block exception, cleanup errors propagate; if both write and close fail, the close error propagates.
+
+  Python 3.11+ exceptions provide `add_note(text)`, which appends extra information without changing which exception is raised. Notes are stored in the exception's `__notes__` list and print below the traceback, the error report showing where the exception occurred.
 - `close`: release the resource at most once; repeated calls are no-ops, including after context exit. Mark it closed even if the resource's close call raises. Calling `close()` alone sends no command.
+
+A timed-out query can still produce a late reply, so a retry could read that stale reply (the response to the earlier query). PyVISA resources provide `clear()`, the VISA device clear used here to abort the pending operation and discard the instrument's queued output before retrying. Real stations may need recovery steps specific to their instrument beyond this clear.
 
 **Example:** with config `{"ip": "192.0.2.45", "max_voltage": 12.5}`, the manager opens `"TCPIP::192.0.2.45::INSTR"` with timeout 2000 and newline terminations. `set_voltage(3.3125)` writes `"VOLT 3.312"`; a query reply `"3.3125"` returns `3.3125`. In this example, the first query raises `VisaTimeout` and the second returns that reply:
 
@@ -76,12 +80,12 @@ The supplied `ResourceManagerLike` and `ResourceLike` protocols and `VisaTimeout
 with StationSupply.from_config(config, rm) as supply:
     supply.set_voltage(3.3125)
     supply.enable_output(True)
-    voltage = supply.read_voltage()  # 3.3125, after one retry
+    voltage = supply.read_voltage()  # 3.3125, after clear and one retry
 ```
 
-The writes, in order, are `"VOLT 3.312"`, `"OUTP 1"`, `"OUTP 0"`; the resource is then closed once.
+The query calls are `query("MEAS:VOLT?")` (timeout), `clear()`, then `query("MEAS:VOLT?")` (reply). The writes, in order, are `"VOLT 3.312"`, `"OUTP 1"`, `"OUTP 0"`; the resource is then closed once.
 
-**Watch out:** Keep the supplied setup unchanged. Distinguish a read timeout from a bad reply, check the rounded voltage before writing, and attempt close even if disabling output fails. This exercise uses its own supply config; it does not consume E1's `StationConfig`.
+**Watch out:** Keep the supplied setup unchanged. Distinguish a read timeout from a bad reply, check both the requested and rounded voltage before writing, and attempt close even if disabling output fails. This exercise uses its own supply config; it does not consume E1's `StationConfig`.
 
 **Reread:** If you failed E2, reread **d19**, the `Psu` class exercises E5-E6, PyVISA resource strings, and terminations; **d20**, cleanup; **d05**, exceptions; **d08**, type hints are not runtime checks.
 
@@ -166,7 +170,7 @@ Always call `cleanup()` exactly once, after actions and before returning, even f
 
 **Watch out:** Cleanup belongs in `finally`, which runs even when control leaves through an exception.
 
-**Reread:** If you failed E6, reread **d39**, "Finite-state machine" (states and transitions); **d20**, Python Tutorial section 8.7; **d31**, `threading` documentation on clean shutdown. This executor is sequential and needs no threads.
+**Reread:** If you failed E6, reread **d37**, "Finite-state machine" (states and transitions); **d20**, Python Tutorial section 8.7; **d31**, `threading` documentation on clean shutdown. This executor is sequential and needs no threads.
 
 ### E7 - Save a requirement evidence report (medium, ~13 min)
 
@@ -201,11 +205,13 @@ Use `argparse`, Python's command-line parser, with program name `station-check`.
 - Help: write argparse help to `out`, return 0, do not call `run`; config is not required for help.
 - Missing/bad arguments: write argparse usage and error text to `err`, return 2, do not call `run`. Do not let argparse's `SystemExit` escape.
 - Valid dry run: write exactly `"DRY RUN <path>\n"` to `out`, return 0, do not call `run` or check if the path exists. Render `<path>` with `str(Path(argument))`, using native path formatting.
-- Valid normal run: call `run(Path(argument))` exactly once. For PASS, FAIL, ERROR, write `"RESULT <status>\n"` to `out` and return 0, 1, 2 respectively. Any other string or any `Exception` from `run` becomes ERROR with exit code 2. Do not catch `BaseException` subclasses.
+- Valid normal run: call `run(Path(argument))` exactly once. For PASS, FAIL, ERROR, write `"RESULT <status>\n"` to `out` and return 0, 1, 2 respectively. Any other string becomes ERROR with exit code 2.
+- If `run` raises an `Exception`, write `"RESULT ERROR\n"` to `out`, return 2, and write a **diagnostic** (a message explaining a problem) to `err`, starting with `"error: <ExceptionType>: <message>\n"`. Use the exception class name for `<ExceptionType>` and `str(exception)` for `<message>`, replacing line breaks with spaces so the error stays on one line. An empty message leaves the space after the colon. Do not catch `BaseException` subclasses.
+- After that error line, write every exception note from `exception.__notes__` to `err`, in its existing order, one note per line. A **note** is extra text attached with `exception.add_note(text)`, as E2 does for cleanup failures. Replace line breaks within each note with spaces and end each note with `"\n"`; an empty note produces a blank line. If `__notes__` is absent or empty, write only the error line.
 
-Dry/normal runs write nothing to `err`. Usage errors write nothing to `out`; help writes nothing to `err`. Exact argparse wording is not graded. The callback owns config loading and hardware work; this is the callable CLI boundary, without a script entry point.
+`err` represents standard error, the output stream for diagnostics. Dry runs and normal runs where `run` returns a string write nothing to `err`. Usage errors write nothing to `out`; help writes nothing to `err`. Exact argparse wording is not graded. The callback owns config loading and hardware work; this is the callable CLI boundary, without a script entry point.
 
-**Example:** `main(["--config", "shift.toml"], lambda path: "FAIL", out, err)` -> code 1 and `"RESULT FAIL\n"` in `out`.
+**Example:** `main(["--config", "shift.toml"], lambda path: "FAIL", out, err)` -> code 1 and `"RESULT FAIL\n"` in `out`. If `run` instead raises `OSError("config not readable")`, return code 2, write `"RESULT ERROR\n"` to `out`, and write `"error: OSError: config not readable\n"` to `err`. If that exception has the note `cleanup failed: OUTP 0: OSError('cannot disable')`, append `"cleanup failed: OUTP 0: OSError('cannot disable')\n"` to `err` after the error line.
 
 **Watch out:** Do not read `sys.argv` or print to the real terminal. `contextlib.redirect_stdout` and `redirect_stderr` can route argparse output to supplied streams.
 
@@ -221,7 +227,7 @@ Parse this INI-style text (named `[sections]` containing `key=value` settings) w
 
 Return failed setting names, once each, in this order:
 
-1. `User`: missing, empty, or exactly `root`. This is the account running the service; root is the administrator account.
+1. `User`: missing, empty, or exactly `root` or `0`. This is the account running the service; root is the administrator account, and `0` is its user ID (the number identifying an account).
 2. `ExecStart`: missing/empty or its stripped value does not start with `/`. This specifies the program to start; require an absolute Linux path.
 3. `Restart`: not exactly `on-failure`, the policy to restart a failed process.
 4. `NoNewPrivileges`: not exactly `true`, preventing the process from gaining additional privileges.
@@ -289,7 +295,7 @@ The grader runs each test on your repaired harness, then on a **mutant**, a deli
 | E3 | d02 (conditions and functions), d06 (result states), d09/d12 (pytest) |
 | E4 | d16 (bytes), d26 (struct), d47 (bitwise operations) |
 | E5 | d27 (sequence arithmetic), d03 (dictionary counters), d15 (Big O) |
-| E6 | d39 (states), d20 (cleanup), d31 (clean shutdown) |
+| E6 | d37 (states), d20 (cleanup), d31 (clean shutdown) |
 | E7 | d53 (verification), d04 (JSON and paths), d13 (reports) |
 | E8 | d38 (argparse), d33 (exit codes), d05 (exceptions) |
 | E9 | d41 (systemd and configparser), d36 (absolute paths), d44 (deployment) |

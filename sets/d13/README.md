@@ -105,10 +105,10 @@ Python's standard-library `xml.etree.ElementTree` (imported as `ET` in your star
 | `"offline"` | `5.0` | `"offline"` | ERROR |
 
 3. Complete `test_e4_voltage` with an assertion that the actual `voltage` is between `4.8` and `5.2`, including both limits. Do not force a failure based on a row's ID or catch the intentional failures. The `station_ready` argument makes pytest run the fixture first; its value is `None`.
-4. From the repo root, with the course Python environment active, run:
+4. From the repo root, run this command in WSL or Codespaces. For native Windows PowerShell, replace `.venv/bin/python` with `.venv\Scripts\python`:
 
 ```text
-python -m pytest sets/d13/starter/station_checks.py -q --junitxml=sets/d13/station.xml -o junit_family=xunit1
+.venv/bin/python -m pytest sets/d13/starter/station_checks.py -q --junitxml=sets/d13/station.xml -o junit_family=xunit1
 ```
 
 `--junitxml` selects the output file. This command intentionally exits with code `1` and reports `1 failed, 1 passed, 1 error`. Open `sets/d13/station.xml` and find the three case names, the `<failure>` and `<error>`, and both hardware properties on every case. The d13 grader runs this module in a separate Python process (a subprocess) in a temporary directory, so these intentional outcomes do not make E4 fail when implemented correctly.

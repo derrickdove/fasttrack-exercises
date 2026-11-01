@@ -69,9 +69,37 @@ def test_check_unit_mismatch_is_error_with_unit_message(models: ModuleType, them
     assert "unit" in result.message.casefold()
 
 
-def test_check_nan_is_error(models: ModuleType, themis: ModuleType) -> None:
-    result = themis.check(models.Measurement("bus_voltage", math.nan, "V"), models.Limit("bus_voltage", 22.0, 30.0, "V"))
-    assert result.status == models.Status.ERROR
+@pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf],
+                         ids=["nan", "positive-infinity", "negative-infinity"])
+@pytest.mark.parametrize("low,high", [(22.0, 30.0), (22.0, None), (None, 30.0)],
+                         ids=["two-bounds", "low-only", "high-only"])
+def test_check_non_finite_value_is_error(
+    models: ModuleType, themis: ModuleType, value: float,
+    low: float | None, high: float | None,
+) -> None:
+    result = themis.check(
+        models.Measurement("bus_voltage", value, "V"),
+        models.Limit("bus_voltage", low, high, "V"),
+    )
+    assert result.status == models.Status.ERROR, f"for {value} with limits {(low, high)}: {result}"
+    assert "not finite" in result.message.casefold(), result.message
+    assert str(value) in result.message.casefold(), result.message
+
+
+@pytest.mark.parametrize("bound", ["low", "high"])
+@pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf],
+                         ids=["nan", "positive-infinity", "negative-infinity"])
+def test_check_non_finite_bound_is_error(
+    models: ModuleType, themis: ModuleType, bound: str, value: float,
+) -> None:
+    limit = models.Limit("bus_voltage", 22.0, 30.0, "V")
+    # Bypass construction validation to test check()'s own guard on a frozen record.
+    object.__setattr__(limit, bound, value)
+    result = themis.check(models.Measurement("bus_voltage", 24.0, "V"), limit)
+    assert result.status == models.Status.ERROR, f"for {bound} bound {value}: {result}"
+    assert "not finite" in result.message.casefold(), result.message
+    assert bound in result.message.casefold(), result.message
+    assert str(value) in result.message.casefold(), result.message
 
 
 def test_check_all_sorts_limits_then_unexpected_names(models: ModuleType, themis: ModuleType) -> None:

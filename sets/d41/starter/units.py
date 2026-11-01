@@ -48,28 +48,18 @@ def validate_unit(parsed: dict[str, dict[str, list[str]]]) -> list[str]:
         tokens = " ".join(unit.get(key, [])).split()
         if "network-online.target" not in tokens:
             problems.append(f"{key} must include network-online.target")
-    if last(service, "Type") != "simple":
-        problems.append("Type must be simple")
+    if last(service, "Type") != "oneshot":
+        problems.append("Type must be oneshot")
     command = last(service, "ExecStart").split()
-    if (len(command) < 3 or not command[0].startswith("/")
+    if (len(command) < 4 or not command[0].startswith("/")
             or command[0].rsplit("/", 1)[-1] not in ("python", "python3")
-            or command[1:3] != ["-m", "chassis"]):
-        problems.append("ExecStart must run an absolute python -m chassis command")
+            or command[1:4] != ["-m", "chassis", "check"]):
+        problems.append("ExecStart must run an absolute python -m chassis check command")
     restart = last(service, "Restart")
     if not restart:
         problems.append("Restart missing")
-    elif restart != "on-failure":
-        problems.append("Restart must be on-failure")
-    delay = last(service, "RestartSec")
-    if not delay:
-        problems.append("RestartSec missing")
-    else:
-        try:
-            seconds = int(delay)
-        except ValueError:
-            seconds = 0
-        if seconds <= 0:
-            problems.append("RestartSec must be positive whole seconds")
+    elif restart != "no":
+        problems.append("Restart must be no")
     user = last(service, "User")
     if not user:
         problems.append("User missing")

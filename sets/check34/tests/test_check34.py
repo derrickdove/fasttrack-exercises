@@ -402,13 +402,19 @@ def test_e7_cleanup_error_after_success_propagates() -> None:
 
 
 @pytest.mark.parametrize("phase", ["enable", "measure"])
-def test_e7_cleanup_does_not_replace_original(phase: str) -> None:
+@pytest.mark.parametrize("cleanup_type", [OSError, KeyboardInterrupt])
+def test_e7_cleanup_does_not_replace_original(phase: str, cleanup_type: type[BaseException]) -> None:
     calls: list[str] = []
     original = TimeoutError("lost device")
+    original.add_note("measurement context")
+    cleanup_error = cleanup_type("output off failed")
     with pytest.raises(TimeoutError) as caught:
-        guarded_read(_operation(calls, "enable", original if phase == "enable" else None), _measurement(calls, original if phase == "measure" else None), _operation(calls, "disable", OSError("cleanup failed")))
+        guarded_read(_operation(calls, "enable", original if phase == "enable" else None), _measurement(calls, original if phase == "measure" else None), _operation(calls, "disable", cleanup_error))
     assert caught.value is original
     assert calls.count("disable") == 1
+    notes = caught.value.__notes__
+    assert notes == ["measurement context", f"cleanup failed: disable: {cleanup_error!r}"], "append exactly one cleanup note without losing existing notes"
+    assert "cleanup failed" in notes[-1] and "disable" in notes[-1], "identify the failed cleanup operation"
 
 
 def test_e7_operator_interrupt_still_disables() -> None:
@@ -418,6 +424,8 @@ def test_e7_operator_interrupt_still_disables() -> None:
         guarded_read(_operation(calls, "enable"), _measurement(calls, error), _operation(calls, "disable", RuntimeError("cleanup failed")))
     assert caught.value is error
     assert calls == ["enable", "measure", "disable"]
+    assert caught.value.__notes__ == ["cleanup failed: disable: RuntimeError('cleanup failed')"]
+    assert "cleanup failed" in caught.value.__notes__[0] and "disable" in caught.value.__notes__[0]
 
 
 def _packet(seq: int = 42, timestamp: int = 123456789, readings: list[tuple[int, float]] | None = None, sync: int = 0xEB90) -> bytes:

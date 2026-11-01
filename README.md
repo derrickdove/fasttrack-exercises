@@ -117,3 +117,5 @@ tools/run.sh         Linux / Mac / Codespaces / Git Bash runner
 ```
 
 Authors: run `.venv\Scripts\python tools\verify_sets.py <id> --repeat 3 --mypy` (Linux: `.venv/bin/python`). It checks isolated starter and reference copies; references default to the sibling `fasttrack-exercises-solutions` repo. Run `python tools/gen_tasks.py` after adding folders. `.verify.json` supports `{"starter_expect": "all"}` for setup checks; the default is `"none"`, with every failure required to be `NotImplementedError`. A set-level `mypy.ini` can relax checks for named helper modules using per-module sections. `FT_CAPSTONE` selects another capstone directory for gates. To check the shared tools, run `.venv\Scripts\python -m unittest discover -s tools -p test_scaffold.py`.
+
+Starting on a hardware test team? Read [Your first two weeks](FIRST-TWO-WEEKS.md).

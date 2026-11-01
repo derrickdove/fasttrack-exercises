@@ -1,4 +1,4 @@
-Oct 30 09:10:00 rack7 systemd[1]: Started chassis-demo.service - Chassis test station.
+Oct 30 09:10:00 rack7 systemd[1]: Starting chassis-demo.service - Chassis test station.
 Oct 30 09:10:00 rack7 python3[1038]: Traceback (most recent call last):
 Oct 30 09:10:00 rack7 python3[1038]:   File "/opt/chassis/chassis/config.py", line 18, in load_station
 Oct 30 09:10:00 rack7 python3[1038]:     raise ValueError("station.name: required string")

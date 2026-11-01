@@ -7,9 +7,6 @@ import shlex
 import pytest
 import yaml
 
-from starter.deploycheck import idempotent_tasks
-from starter.deploycheck import role_problems
-
 STARTER = Path(__file__).resolve().parents[1] / "starter"
 
 
@@ -74,12 +71,6 @@ def _groups() -> dict[str, list[str]]:
     return groups
 
 
-def _write_playbook(tmp_path: Path, text: str) -> Path:
-    path = tmp_path / "station.yml"
-    path.write_text(text, encoding="utf-8")
-    return path
-
-
 def test_e1_base_and_project_copy() -> None:
     instructions = _instructions()
     bases = [arg for op, arg in instructions if op == "FROM"]
@@ -106,12 +97,13 @@ def test_e1_package_install_and_launch() -> None:
     assert all("." not in packages or any(copy < index for copy in copies)
                for index, packages in installs), "COPY the project before installing it with pip install ."
 
-    # Docker keeps the last of each instruction; a new ENTRYPOINT clears an earlier CMD.
+    # Keep the last CMD and ENTRYPOINT in this Dockerfile, regardless of order.
+    # A local ENTRYPOINT resets the base image CMD, so inherited CMD is ignored.
     entrypoint = ""
     command = ""
     for operation, argument in instructions:
         if operation == "ENTRYPOINT":
-            entrypoint, command = argument, ""
+            entrypoint = argument
         elif operation == "CMD":
             command = argument
     assert entrypoint or command, "Provide CMD or ENTRYPOINT"
@@ -127,6 +119,15 @@ def test_e1_package_install_and_launch() -> None:
     assert args[:3] in (["python", "-m", "chassis"], ["python3", "-m", "chassis"]), (
         "The effective final CMD/ENTRYPOINT must invoke python -m chassis (optional arguments follow)"
     )
+
+
+def test_e1_cmd_before_entrypoint_is_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    text = _file("Dockerfile", 1)
+    (tmp_path / "Dockerfile").write_text(
+        text + '\nCMD ["-m","chassis"]\nENTRYPOINT ["python"]\n', encoding="utf-8"
+    )
+    monkeypatch.setitem(globals(), "STARTER", tmp_path)
+    test_e1_package_install_and_launch()
 
 
 def test_e1_nonroot_runtime_user() -> None:
@@ -147,12 +148,23 @@ def test_e2_unit_copy_and_package_install() -> None:
     units = [task[module] for task in tasks for module in ("ansible.builtin.copy", "ansible.builtin.template") if module in task]
     assert any(isinstance(args, dict) and args.get("src") and args.get("dest") == "/etc/systemd/system/chassis-telemetry.service"
                for args in units), "Copy/template the service unit to /etc/systemd/system/chassis-telemetry.service"
-    packages = [task["ansible.builtin.pip"] for task in tasks if "ansible.builtin.pip" in task]
-    commands = [task["ansible.builtin.command"] for task in tasks if "ansible.builtin.command" in task]
-    has_pip = any(isinstance(args, dict) and args.get("name") for args in packages)
-    has_command = any((isinstance(args, str) and args.strip()) or (isinstance(args, dict) and args.get("cmd"))
-                      for args in commands)
-    assert has_pip or has_command, "Install a package with pip.name or a nonempty command/cmd"
+    prerequisites = []
+    for index, task in enumerate(tasks):
+        args = task.get("ansible.builtin.apt")
+        if isinstance(args, dict) and args.get("state") == "present":
+            names = args.get("name")
+            if names == "python3-venv" or (isinstance(names, list) and "python3-venv" in names):
+                prerequisites.append(index)
+    assert prerequisites, "Install python3-venv with ansible.builtin.apt and state: present"
+    packages = [(index, task["ansible.builtin.pip"]) for index, task in enumerate(tasks)
+                if "ansible.builtin.pip" in task]
+    installs = [index for index, args in packages if isinstance(args, dict) and args.get("name")
+                and args.get("virtualenv") == "/opt/chassis/.venv"
+                and args.get("virtualenv_command") == "python3 -m venv"]
+    assert installs, "Use pip.name with virtualenv: /opt/chassis/.venv and virtualenv_command: python3 -m venv"
+    assert any(prerequisite < install for prerequisite in prerequisites for install in installs), (
+        "Install python3-venv before the pip task creates the virtual environment"
+    )
 
 
 def test_e2_service_is_started_and_enabled() -> None:
@@ -177,232 +189,3 @@ def test_e3_bench_hosts_are_test_stations() -> None:
         stations.update(groups.get("bench", []))
     assert stations, "test_stations must resolve to at least one host"
     assert set(groups.get("bench", [])) <= stations, "Every bench host must also belong to test_stations"
-
-
-def test_e4_reports_both_modules_in_document_order(tmp_path: Path) -> None:
-    path = _write_playbook(tmp_path, """
-- hosts: test_stations
-  tasks:
-    - name: Read station identity
-      ansible.builtin.command: chassis-id
-    - name: Read station revision
-      ansible.builtin.shell:
-        cmd: cat /opt/chassis/revision
-    - name: Copy limits
-      ansible.builtin.copy:
-        src: limits.csv
-        dest: /opt/chassis/limits.csv
-- hosts: bench
-  tasks:
-    - name: Read station identity
-      ansible.builtin.command: chassis-id
-""")
-    got = idempotent_tasks(path)
-    assert got == ["Read station identity", "Read station revision", "Read station identity"], f"Keep play/task order and duplicate names, got {got!r}"
-
-
-@pytest.mark.parametrize("module", ["ansible.builtin.command", "ansible.builtin.shell"])
-@pytest.mark.parametrize("guard", ["creates", "removes"])
-def test_e4_accepts_file_guards_in_args_or_module(tmp_path: Path, module: str, guard: str) -> None:
-    path = _write_playbook(tmp_path, f"""
-- hosts: bench
-  tasks:
-    - name: Guard inside module parameters
-      {module}:
-        cmd: station-init
-        {guard}: /opt/chassis/ready
-    - name: Guard in task args
-      {module}: station-init
-      args:
-        {guard}: /opt/chassis/ready
-""")
-    assert idempotent_tasks(path) == [], "creates/removes may be in module parameters or task args"
-
-
-@pytest.mark.parametrize("value", ["false", "true", "'station_result.rc == 0'", "[]", "'false'", "0", "null", "{}"])
-def test_e4_only_boolean_false_guards_without_file_guards(tmp_path: Path, value: str) -> None:
-    read_only = value == "false"
-    command_name = "Read telemetry status" if read_only else "Initialize station"
-    shell_name = "Read driver status" if read_only else "Reload driver"
-    command = "telemetry-status" if read_only else "station-init"
-    shell = "driver-status" if read_only else "chassis-driver reload"
-    path = _write_playbook(tmp_path, f"""
-- hosts: bench
-  tasks:
-    - name: {command_name}
-      ansible.builtin.command: {command}
-      changed_when: {value}
-    - name: {shell_name}
-      ansible.builtin.shell:
-        cmd: {shell}
-      changed_when: {value}
-    - name: File-guarded initialization
-      ansible.builtin.command: station-init
-      args:
-        creates: /opt/chassis/ready
-      changed_when: {value}
-    - name: File-guarded cleanup
-      ansible.builtin.shell:
-        cmd: station-cleanup
-        removes: /opt/chassis/pending
-      changed_when: {value}
-""")
-    expected = [] if read_only else [command_name, shell_name]
-    got = idempotent_tasks(path)
-    assert got == expected, f"Only boolean false or creates/removes guards a task; changed_when: {value} gave {got!r}"
-
-
-def test_e4_unrelated_keys_do_not_guard_tasks(tmp_path: Path) -> None:
-    path = _write_playbook(tmp_path, """
-- hosts: bench
-  changed_when: false
-  tasks:
-    - name: Probe supply
-      ansible.builtin.command:
-        cmd: probe-psu
-      args:
-        chdir: /opt/chassis
-      register: supply_result
-    - name: Probe meter
-      ansible.builtin.shell: probe-dmm
-      when: station_online
-    - name: Guarded initialization
-      ansible.builtin.command: station-init
-      args:
-        creates: /opt/chassis/ready
-""")
-    assert idempotent_tasks(path) == ["Probe supply", "Probe meter"], "Only task-local guard keys count; register/when/chdir are not guards"
-
-
-@pytest.mark.parametrize("text", ["", "# station not commissioned yet\n", "[]", "- hosts: bench\n", "- hosts: bench\n  tasks: []\n"])
-def test_e4_empty_inputs_and_string_paths(tmp_path: Path, text: str) -> None:
-    path = _write_playbook(tmp_path, text)
-    assert idempotent_tasks(str(path)) == [], "Empty documents, missing tasks, and empty task lists have no unsafe tasks"
-
-
-def test_e4_file_and_yaml_errors_propagate(tmp_path: Path) -> None:
-    with pytest.raises(OSError):
-        idempotent_tasks(tmp_path / "missing.yml")
-    path = _write_playbook(tmp_path, "- hosts: [bench\n")
-    with pytest.raises(yaml.YAMLError):
-        idempotent_tasks(path)
-
-
-@pytest.mark.parametrize(("folder", "expected"), [
-    ("good", []),
-    ("missing_tasks", ["tasks/main.yml: missing"]),
-    ("bad_shapes", [
-        "defaults/main.yml: expected a mapping",
-        "tasks/main.yml: expected a list",
-    ]),
-    ("notify_mismatch", [
-        "handlers/main.yml: handler 'Restart station' is never notified",
-        "tasks/main.yml: task 1 has no name",
-        "tasks/main.yml: task 2 notifies unknown handler 'Reload driver'",
-    ]),
-])
-def test_e5_supplied_roles(folder: str, expected: list[str]) -> None:
-    role_dir = STARTER.parent / "data/roles" / folder
-    got = role_problems(role_dir)
-    assert got == expected, f"For role {folder}, expected {expected!r}, got {got!r}"
-
-
-@pytest.mark.parametrize("with_optional_files", [False, True])
-def test_e5_empty_task_list_and_optional_files(tmp_path: Path, with_optional_files: bool) -> None:
-    (tmp_path / "tasks").mkdir()
-    (tmp_path / "tasks/main.yml").write_text("[]", encoding="utf-8")
-    if with_optional_files:
-        (tmp_path / "defaults").mkdir()
-        (tmp_path / "defaults/main.yml").write_text("{}", encoding="utf-8")
-        (tmp_path / "handlers").mkdir()
-        (tmp_path / "handlers/main.yml").write_text("[]", encoding="utf-8")
-    assert role_problems(tmp_path) == [], "Empty lists/mappings are valid; optional files may be absent"
-    (tmp_path / "tasks/main.yml").unlink()
-    (tmp_path / "tasks/probe.yml").write_text(
-        "- name: Probe station\n  notify: Missing handler\n", encoding="utf-8"
-    )
-    assert role_problems(tmp_path) == [
-        "tasks/main.yml: missing",
-        "tasks/probe.yml: task 1 notifies unknown handler 'Missing handler'",
-    ], "Missing main.yml must not stop checks; without handlers every notification is unknown"
-
-
-@pytest.mark.parametrize("text", ["", "# not filled in", "null", "[]", "telemetry", "9200", "false"])
-def test_e5_defaults_must_be_mapping(tmp_path: Path, text: str) -> None:
-    (tmp_path / "tasks").mkdir()
-    (tmp_path / "tasks/main.yml").write_text("[]", encoding="utf-8")
-    (tmp_path / "defaults").mkdir()
-    (tmp_path / "defaults/main.yml").write_text(text, encoding="utf-8")
-    assert role_problems(tmp_path) == ["defaults/main.yml: expected a mapping"], (
-        f"Present defaults must load as a dict, even when empty/comment-only: {text!r}"
-    )
-
-
-@pytest.mark.parametrize("text", ["", "# no tasks yet", "null", "{}", "station", "false", "9200"])
-def test_e5_every_direct_yml_task_file_must_be_list(tmp_path: Path, text: str) -> None:
-    (tmp_path / "tasks").mkdir()
-    (tmp_path / "tasks/main.yml").write_text("[]", encoding="utf-8")
-    (tmp_path / "tasks/calibrate.yml").write_text(text, encoding="utf-8")
-    (tmp_path / "tasks/notes.txt").write_text("not YAML: [", encoding="utf-8")
-    (tmp_path / "tasks/nested").mkdir()
-    (tmp_path / "tasks/folder.yml").mkdir()
-    (tmp_path / "tasks/nested/ignored.yml").write_text("{}", encoding="utf-8")
-    assert role_problems(tmp_path) == ["tasks/calibrate.yml: expected a list"], (
-        "Check every direct tasks/*.yml file, and ignore other extensions and nested folders"
-    )
-
-
-def test_e5_names_notifications_and_sorted_messages(tmp_path: Path) -> None:
-    (tmp_path / "tasks").mkdir()
-    (tmp_path / "tasks/main.yml").write_text("""
-- name: Install settings
-  notify: [Restart telemetry, Restart telemetry]
-- name: null
-  notify: [restart telemetry, Missing driver, Missing driver]
-- name: '   '
-- name: 17
-- ansible.builtin.command: chassis-id
-""", encoding="utf-8")
-    (tmp_path / "tasks/extra.yml").write_text("""
-- name: Calibrate station
-  notify: Reload driver
-- name: Calibrate station
-  notify: Missing driver
-""", encoding="utf-8")
-    (tmp_path / "handlers").mkdir()
-    (tmp_path / "handlers/main.yml").write_text("""
-- name: Reload driver
-- name: Restart telemetry
-- name: Unused handler
-""", encoding="utf-8")
-    expected = [
-        "handlers/main.yml: handler 'Unused handler' is never notified",
-        "tasks/extra.yml: task 2 notifies unknown handler 'Missing driver'",
-        "tasks/main.yml: task 2 has no name",
-        "tasks/main.yml: task 2 notifies unknown handler 'Missing driver'",
-        "tasks/main.yml: task 2 notifies unknown handler 'restart telemetry'",
-        "tasks/main.yml: task 3 has no name",
-        "tasks/main.yml: task 4 has no name",
-        "tasks/main.yml: task 5 has no name",
-    ]
-    got = role_problems(tmp_path)
-    assert got == expected, f"Keep per-task diagnostics, match names exactly, and sort: {got!r}"
-    assert role_problems(tmp_path) == expected, "Repeated calls must not retain notifications from earlier roles"
-    (tmp_path / "tasks/main.yml").write_text("[]", encoding="utf-8")
-    (tmp_path / "tasks/extra.yml").write_text("[]", encoding="utf-8")
-    assert role_problems(tmp_path) == [
-        "handlers/main.yml: handler 'Reload driver' is never notified",
-        "handlers/main.yml: handler 'Restart telemetry' is never notified",
-        "handlers/main.yml: handler 'Unused handler' is never notified",
-    ], "Each call must collect notifications again from the current files"
-
-
-@pytest.mark.parametrize("relative", ["tasks/main.yml", "defaults/main.yml", "handlers/main.yml"])
-def test_e5_invalid_yaml_propagates(tmp_path: Path, relative: str) -> None:
-    (tmp_path / "tasks").mkdir()
-    (tmp_path / "tasks/main.yml").write_text("[]", encoding="utf-8")
-    path = tmp_path / relative
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("broken: [", encoding="utf-8")
-    with pytest.raises(yaml.YAMLError):
-        role_problems(tmp_path)

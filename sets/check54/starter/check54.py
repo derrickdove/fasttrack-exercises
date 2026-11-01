@@ -63,6 +63,10 @@ class ResourceLike(Protocol):
         """Return a reply; timeouts raise VisaTimeout or VisaIOError(error_timeout)."""
         ...
 
+    def clear(self) -> None:
+        """Abort the pending operation and discard the instrument's queued output."""
+        ...
+
     def close(self) -> None:
         """Release the instrument connection."""
         ...
@@ -137,11 +141,11 @@ class StationSupply:
 
     # Learner work: implement the methods below.
     def read_voltage(self) -> float:
-        """Query MEAS:VOLT?, retry one fake or VISA timeout, and convert the reply."""
-        raise NotImplementedError("E2: query voltage with one timeout retry")
+        """Query MEAS:VOLT?, clear before one timeout retry, and convert the reply."""
+        raise NotImplementedError("E2: query voltage, clearing before one timeout retry")
 
     def set_voltage(self, volts: float) -> None:
-        """Require a finite value whose three-decimal command is within the limit."""
+        """Require a finite request and three-decimal command within the limit."""
         raise NotImplementedError("E2: validate voltage before writing")
 
     def enable_output(self, on: bool) -> None:
@@ -156,7 +160,7 @@ class StationSupply:
         self, exc_type: type[BaseException] | None,
         exc_value: BaseException | None, traceback: TracebackType | None,
     ) -> None:
-        """Disable output and close, preserving any exception from the block."""
+        """Disable output and close; note cleanup failures on the block's exception."""
         raise NotImplementedError("E2: disable and always close on context exit")
 
     def close(self) -> None:

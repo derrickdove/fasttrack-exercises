@@ -1,6 +1,6 @@
 # d09 — Your first pytest tests
 
-**Time:** about 45 minutes (5 minutes to read and run, then 40 minutes of exercises) · **Read first:** [pytest: Get started](https://docs.pytest.org/en/stable/getting-started.html), [pytest: How to write and report assertions](https://docs.pytest.org/en/stable/how-to/assert.html), and [Missing Semester: Shell Tools and Scripting (first half, Shell Scripting)](https://missing.csail.mit.edu/2020/shell-tools/) · **You edit:** `starter/test_limits_learner.py`
+**Time:** about 45 minutes (5 minutes to read and run, then 40 minutes of exercises) · **Read first:** [pytest: Get started](https://docs.pytest.org/en/stable/getting-started.html), [pytest: How to write and report assertions](https://docs.pytest.org/en/stable/how-to/assert.html), and [Missing Semester: Shell Tools and Scripting (first half, Shell Scripting)](https://missing.csail.mit.edu/2020/shell-tools/) (optional preview; scheduled on day 10) · **You edit:** `starter/test_limits_learner.py`
 
 ## What you're building
 

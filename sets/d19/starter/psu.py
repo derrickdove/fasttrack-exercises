@@ -108,4 +108,4 @@ class Psu:
         exc_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> Literal[False]:
-        raise NotImplementedError("E6: turn output off and always close, preserving a block exception")
+        raise NotImplementedError("E6: turn output off and always close; preserve a block exception and add cleanup failure notes")

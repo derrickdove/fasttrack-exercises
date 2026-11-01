@@ -1,0 +1,37 @@
+Recorded case case_d - Ubuntu 24.04, IPv4 TCP connect
+Each command block is a snapshot taken immediately before the failed connection.
+Bench-interface IPv6 is disabled; loopback IPv6 remains enabled.
+The SCPI service, when present, uses TCP port 5025. SSH uses port 22.
+Approved station address: 192.168.83.10/24 (reserved), enp1s0.
+Approved instrument address: 192.168.83.80/24. They share a bench switch.
+No gateway is required for this bench. Filtering is disabled.
+The address and listener configuration stayed unchanged during the attempt.
+[station Python connection attempt]
+socket.create_connection(("192.168.83.80", 5024), timeout=2.0)
+ConnectionRefusedError: [Errno 111] Connection refused
+
+[station]
+$ ip -br addr
+lo               UNKNOWN        127.0.0.1/8 ::1/128
+enp1s0           UP             192.168.83.10/24
+
+$ ip route
+192.168.83.0/24 dev enp1s0 proto kernel scope link src 192.168.83.10
+
+$ ss -ltn
+State  Recv-Q Send-Q Local Address:Port Peer Address:Port Process
+LISTEN 0      4096         0.0.0.0:22        0.0.0.0:*
+
+[instrument]
+$ ip -br addr
+lo               UNKNOWN        127.0.0.1/8 ::1/128
+enp1s0           UP             192.168.83.80/24
+
+$ ip route
+192.168.83.0/24 dev enp1s0 proto kernel scope link src 192.168.83.80
+
+$ ss -ltn
+State  Recv-Q Send-Q Local Address:Port Peer Address:Port Process
+LISTEN 0      4096         0.0.0.0:22        0.0.0.0:*
+LISTEN 0      128          0.0.0.0:5025      0.0.0.0:*
+

@@ -1,6 +1,6 @@
 ﻿# d23 — SCPI over Ethernet: a raw TCP socket client
 
-**Time:** about 45 minutes · **Read first:** [Python Socket Programming HOWTO](https://docs.python.org/3/howto/sockets.html); [The Linux Command Line, ch. 16: networking (ping, ip, ss, ssh)](https://linuxcommand.org/tlcl.php); [Python socket docs: create_connection and settimeout](https://docs.python.org/3/library/socket.html) · **You edit:** `starter/tcp_instrument.py`
+**Time:** about 60 minutes · **Read first:** [Python Socket Programming HOWTO](https://docs.python.org/3/howto/sockets.html); [The Linux Command Line, ch. 16: networking (ping, ip, ss, ssh)](https://linuxcommand.org/tlcl.php); [Python socket docs: create_connection and settimeout](https://docs.python.org/3/library/socket.html) · **You edit:** `starter/tcp_instrument.py` and `starter/network_diagnosis.py`
 
 ## What you're building
 
@@ -8,8 +8,8 @@ Your test station controls a bench instrument over Ethernet, a network connectio
 
 ## How this works
 
-1. Replace the `raise NotImplementedError(...)` lines in `starter/tcp_instrument.py`. Don't edit `tests/`. E3 improves the methods you wrote in E2; it has no separate method stub.
-2. Press **Ctrl+Shift+B → Test: d23** (or run `bash tools/run.sh d23` / `tools\run.ps1 d23`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+1. Replace the `raise NotImplementedError(...)` lines in `starter/tcp_instrument.py`. Don't edit `tests/`. E3 improves the methods you wrote in E2; it has no separate method stub. E5 has its own stub in `starter/network_diagnosis.py`.
+2. Press **Ctrl+Shift+B → Test: d23** (or run `bash tools/run.sh d23` / `tools\run.ps1 d23`). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 TCP (Transmission Control Protocol) delivers an ordered stream of bytes, the numeric units used to transmit data. A socket is the program's connection endpoint; a raw TCP client uses this socket directly. The host identifies the instrument computer, and the port identifies its listening service. Tests use `127.0.0.1` (your own computer) and an automatically assigned port, so no hardware or internet is needed.
@@ -27,6 +27,54 @@ print(remaining)            # b'NEXT'
 ```
 
 Use `sendall` to send the complete encoded message. `recv` returns up to the requested byte count, so one call might return part of a line, several lines, or `b""` when the peer (the other endpoint) closes. Keep bytes until LF arrives; decode only the complete line because a UTF-8 character may span receives.
+
+## Network evidence primer (for E5)
+
+An **IPv4 address** identifies a network interface (a device's network connection)
+using four numbers from 0 to 255, such as `192.168.70.12`. A **prefix** says how
+many leading address bits belong to the network (a bit is a binary digit, 0 or 1).
+With `/24`, the first three
+numbers identify the **subnet**, a group of addresses treated as directly
+reachable: `192.168.70.12/24` and `192.168.70.90/24` share a subnet;
+`192.168.71.90/24` does not. All bench interfaces here use `/24`.
+
+A **route** tells the computer where to send packets (small units of network
+data). A connected route such as `192.168.70.0/24 dev enp1s0` sends directly
+through interface `enp1s0`. A **gateway** is a router that forwards packets to
+another network. The **default route**, such as
+`default via 192.168.70.1 dev enp1s0`, uses that gateway when no more specific
+route matches. Two subnets can communicate through a correctly configured
+router; different subnets alone do not prove a fault.
+
+These are recorded Ubuntu 24.04 **iproute2** outputs (Linux network tools), not
+commands you must run. `$` marks the recorded command; `[station]` and
+`[instrument]` identify which computer produced it. `ip -br addr` lists interface
+names, link states, and addresses; `UP` means enabled with a working link, while
+`UNKNOWN` on `lo` is normal. `lo` is the **loopback** interface for the computer
+itself. `::1/128` is its IPv6 loopback address; IPv6 is another address format and
+is not used for these connections. `ip route` lists IPv4 routes; `dev` names the
+interface, `src` its source address, `proto kernel` a route created from an
+interface address, and `scope link` a directly reachable network.
+
+A **service** is a program accepting network requests. `ss -ltn` lists
+**listeners**, services waiting for TCP connections, using numeric
+addresses and ports. In `0.0.0.0:5025`, port 5025 accepts connections on any local
+IPv4 interface. `Local Address:Port` names the listener, `Peer Address:Port`
+is the remote endpoint (`*` means any), and `Recv-Q`/`Send-Q` are queue counts
+(for a listener, pending connections and the maximum allowed pending count).
+The optional `Process` column is empty without process details. SSH (Secure
+Shell) provides a remote command prompt; its port 22 listener is separate
+from the SCPI service.
+
+For a Python **connection attempt** (before sending any command):
+
+- `ConnectionRefusedError`: the host was reached but nothing is listening on
+  that port in these captures. Check both the client's port and the listener.
+  A real firewall (a packet-filtering rule) can also actively reject connections.
+- `TimeoutError`: packets were dropped or the host did not answer before the
+  timeout. This alone cannot identify a bad address, a cable fault, or filtering.
+- `OSError: [Errno 101] Network is unreachable`: the station has no usable route
+  to the destination in these captures. Changing the timeout cannot add a route.
 
 ## Exercises
 
@@ -90,3 +138,59 @@ Carry E3's error handling forward: a send timeout names the command being sent; 
 
 **Reread:** Socket Programming HOWTO, “Using a Socket”, especially its warning that a receive can include the start of the following message.
 
+### E5 — Why can't the station reach the instrument? (medium, ~15 min)
+
+**Goal:** Diagnose recorded connection failures before changing a driver.
+
+**Signature:** `def diagnose_network() -> dict[str, dict[str, str]]` in
+`starter/network_diagnosis.py`.
+
+A **switch** connects devices on the local network. An **approved** setting is
+the station's documented intended configuration, given at the top of each
+capture; a **reserved** address is allocated to that station so it can be used
+without conflicting with another device. These are proposed fixes, not commands
+to run on a real station.
+
+Read every `data/*.txt` capture as evidence. These are invented, independent
+station runs with realistic command output, not measurements from your computer.
+Each file gives the intended wiring and approved configuration, the client's
+connection target, the Python error, and address, route, and listener output from
+both computers. Treat the capture's stated conditions as facts. No hardware,
+Linux installation, shell execution, network access, or file parser is required:
+read the files yourself and return your decisions as a dictionary.
+
+**Contract:** Return one entry for every `.txt` file in `data/`, keyed by the
+filename without `.txt` (for example, `case_a`). Each value is a separate
+dictionary with exactly two keys, `diagnosis` and `fix`. All values are
+case-sensitive strings from the following tables, with no extra whitespace.
+Choose the best-supported cause and its next action; do not guess a specific
+physical fault from a timeout alone. E5 is independent of E1 through E4.
+
+| `diagnosis` vocabulary | Meaning |
+| --- | --- |
+| `wrong_subnet` | The station's bench address/prefix disagrees with the approved direct instrument network. |
+| `no_route` | The station's local address is correct, but no route reaches the instrument's network. |
+| `nothing_listening` | The client uses the approved SCPI port, but the instrument has no listener there. |
+| `wrong_port` | The instrument listens on its approved SCPI port, but the client requests another port. |
+| `no_response` | Addressing, routing, and the expected listener are consistent; the timeout requires more path/host evidence. |
+
+| `fix` vocabulary | Next action |
+| --- | --- |
+| `set_station_address` | Set the station bench interface to its approved, reserved IPv4 address/prefix, then reconnect. |
+| `add_default_route` | Restore the approved default gateway on the station, then reconnect. |
+| `start_scpi_service` | Start the instrument's SCPI service on its approved port, confirm its listener, then reconnect. |
+| `use_scpi_port` | Change the client's target port to the approved SCPI listener, then reconnect. |
+| `check_path_and_host` | Check host availability, cable/switch connections, and filtering along the path before reconnecting; the capture does not isolate one of them. |
+
+**Example:** `len(diagnose_network())` returns `5`. The files `case_a.txt` through
+`case_d.txt` are your first four cases; inspect the data directory for the
+additional capture too. The README does not supply any case's diagnosis or fix.
+
+**Watch out:** Compare both ends and the requested port. A default route can
+send a mistaken bench address toward another network, producing a timeout
+rather than an immediate unreachable error. A listener on port 22 says nothing
+about port 5025. The grader checks answer fingerprints (digests computed from
+the answer text) and gives rereading hints without printing answer values.
+
+**Reread:** The network evidence primer above; The Linux Command Line ch. 16,
+`ip` and `ss`; Python socket docs, connection errors.

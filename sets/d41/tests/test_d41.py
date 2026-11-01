@@ -1,11 +1,14 @@
 """Offline station deployment checks: no Linux service is installed or started."""
 from configparser import ConfigParser
+from copy import deepcopy
+import hashlib
+import json
 from pathlib import Path
 import tomllib
 
 import pytest
 
-from starter.units import diagnose_service, load_station_toml
+from starter.units import diagnose_service, load_station_toml, parse_unit, validate_unit
 
 
 @pytest.fixture
@@ -31,20 +34,38 @@ def test_e1_network_ordering(service_file: ConfigParser) -> None:
 def test_e1_service_policy(service_file: ConfigParser) -> None:
     assert service_file.has_section("Service"), "Add a [Service] section"
     service = service_file["Service"]
-    assert service.get("Type") == "simple", "Use Type=simple for the station process"
+    assert service.get("Type") == "oneshot", "Use Type=oneshot for the saved-file check"
     command = service.get("ExecStart", "").split()
-    assert len(command) >= 3, "ExecStart needs the Python path, -m, and chassis"
+    assert len(command) >= 4, "ExecStart needs the Python path, -m, chassis, and check"
     assert command[0].startswith("/"), "Use an absolute Linux Python path"
     assert command[0].rsplit("/", 1)[-1] in ("python", "python3"), "Use python or python3"
-    assert command[1:3] == ["-m", "chassis"], "Start the chassis module"
-    assert service.get("Restart") == "on-failure", "Restart the station after a failure"
-    assert int(service.get("RestartSec", "0")) > 0, "RestartSec must be positive whole seconds"
+    assert command[1:4] == ["-m", "chassis", "check"], "Run the one-shot chassis check"
+    assert service.get("Restart") == "no", "A FAIL result must not automatically re-run the check"
     assert service.get("User", "").strip() not in ("", "root", "0"), "Choose a named non-root service user"
 
 
 def test_e1_boot_target(service_file: ConfigParser) -> None:
     assert service_file.has_section("Install"), "Add an [Install] section"
     assert "multi-user.target" in service_file["Install"].get("WantedBy", "").split(), "Use the normal multi-user boot target"
+
+
+@pytest.mark.parametrize("key, value, problem", [
+    ("Type", "simple", "Type must be oneshot"),
+    ("Restart", "on-failure", "Restart must be no"),
+    ("Restart", "", "Restart missing"),
+    ("ExecStart", "/opt/chassis/bin/python -m chassis worker",
+     "ExecStart must run an absolute python -m chassis check command"),
+    ("User", "root", "User is root"),
+    ("User", "0", "User is root"),
+])
+def test_e1_supplied_validator_policy(service_file: ConfigParser, key: str, value: str, problem: str) -> None:
+    path = Path(__file__).resolve().parents[1] / "starter" / "chassis-demo.service"
+    parsed = parse_unit(path)
+    parsed["Service"].pop("RestartSec", None)
+    assert validate_unit(parsed) == [], "The one-shot unit needs no restart delay"
+    changed = deepcopy(parsed)
+    changed["Service"][key] = [value]
+    assert validate_unit(changed) == [problem], f"Reject unsafe one-shot policy: {key}={value}"
 
 
 def _check_answer_shape(answers: dict[str, dict[str, str]]) -> None:
@@ -60,26 +81,15 @@ def _check_answer_shape(answers: dict[str, dict[str, str]]) -> None:
 def _check_recorded_answer(answers: dict[str, dict[str, str]], case_id: str) -> None:
     __tracebackhide__ = True
     _check_answer_shape(answers)
-    # Keep the answer key inside a hidden helper; failures identify only the case.
-    expected = {
-        "case_01": {
-            "cause": "missing_executable",
-            "fix": "Correct ExecStart to an existing executable path.",
-        },
-        "case_02": {
-            "cause": "permission",
-            "fix": "Grant the service user execute access to the executable and search access to its parent directories.",
-        },
-        "case_03": {
-            "cause": "application_exception",
-            "fix": "Set station.name to a string in the station TOML file.",
-        },
-        "case_04": {
-            "cause": "unknown",
-            "fix": "Inspect the full service journal before changing the unit.",
-        },
+    # Store SHA-256 digests (fixed-length fingerprints), not readable diagnoses.
+    answer_digests = {
+        "case_01": "b9b48e8d189efc9ff38f78d63164dd8e64d13cfdb57013a931c926a442ce1cfd",
+        "case_02": "11a02b62b8664cf1c3ef4d060bd4c1c338f8b64784c505059173477f1b93ce10",
+        "case_03": "ea4f13280587d937fbf6e1bbf8c17f0378c222f1e7b033268fe2ba8afc7e4a0f",
+        "case_04": "a14b9375619a92775a68a4e9b48b5e1980b23e67616d8c987f7f571647294b44",
     }
-    if answers[case_id] != expected[case_id]:
+    actual = hashlib.sha256(json.dumps(answers[case_id], sort_keys=True).encode("utf-8")).hexdigest()
+    if actual != answer_digests[case_id]:
         pytest.fail(f"E2: Revisit both recordings for {case_id}; review the cause and fix.", pytrace=False)
 
 

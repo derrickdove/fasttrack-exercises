@@ -866,6 +866,33 @@
       }
     },
     {
+      "label": "Test: d37",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d37"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d37"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
       "label": "Test: d38",
       "type": "shell",
       "command": "bash",
@@ -882,33 +909,6 @@
           "-File",
           "${workspaceFolder}\\tools\\run.ps1",
           "d38"
-        ]
-      },
-      "group": "build",
-      "problemMatcher": [],
-      "presentation": {
-        "reveal": "always",
-        "panel": "dedicated",
-        "clear": true
-      }
-    },
-    {
-      "label": "Test: d39",
-      "type": "shell",
-      "command": "bash",
-      "args": [
-        "${workspaceFolder}/tools/run.sh",
-        "d39"
-      ],
-      "windows": {
-        "command": "powershell",
-        "args": [
-          "-NoProfile",
-          "-ExecutionPolicy",
-          "Bypass",
-          "-File",
-          "${workspaceFolder}\\tools\\run.ps1",
-          "d39"
         ]
       },
       "group": "build",
@@ -1179,6 +1179,33 @@
           "-File",
           "${workspaceFolder}\\tools\\run.ps1",
           "d51"
+        ]
+      },
+      "group": "build",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "Test: d52",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "${workspaceFolder}/tools/run.sh",
+        "d52"
+      ],
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "${workspaceFolder}\\tools\\run.ps1",
+          "d52"
         ]
       },
       "group": "build",

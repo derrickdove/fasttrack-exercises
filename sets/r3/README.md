@@ -91,7 +91,9 @@ To keep this review short, validation and formatting are supplied: call `configu
 
 Call `generator.output(True)`, then call `measure()` once, then call `generator.output(False)` and return the measurement unchanged. Attempt output-off exactly once even when enabling the output or measuring raises an exception, including `KeyboardInterrupt`. If enabling fails, do not call `measure`.
 
-If enable or measurement fails, propagate that same exception object after attempting output-off. If cleanup also fails, preserve the original enable/measurement exception. If only output-off fails, propagate that cleanup exception. Never retry, close the transport, or validate the returned measurement. The supplied `OutputControl` protocol allows any instrument with an `output(bool)` method.
+If enable or measurement fails, propagate that same exception object after attempting output-off. If cleanup also fails, preserve the original enable/measurement exception and call `original.add_note(f'cleanup failed: generator.output(False): {cleanup_error!r}')` exactly once. Here `original` is the enable/measurement exception, `cleanup_error` is the output-off exception, and `!r` includes that exception's type and message. If only output-off fails, propagate that cleanup exception. Never retry, close the transport, or validate the returned measurement. The supplied `OutputControl` protocol allows any instrument with an `output(bool)` method.
+
+Python 3.11+ exceptions provide `add_note(text)`, which attaches extra information without replacing the exception. Notes are stored in `exc.__notes__`, a list of strings on the exception, and print under the traceback, the report showing where an exception occurred.
 
 **Example:** if `measure()` returns `0.82`, the wrapper returns `0.82`, and the output calls are `[True, False]`. If `measure()` raises `TimeoutError`, the same calls occur and that error reaches the caller.
 

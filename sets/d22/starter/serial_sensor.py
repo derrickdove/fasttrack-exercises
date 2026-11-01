@@ -2,6 +2,8 @@
 
 import serial  # type: ignore[import-untyped]
 
+MAX_LINE_BYTES = 256
+
 
 def open_loopback(timeout: float) -> serial.Serial:
     """Open loop:// with bounded read and write waits; caller closes it."""
@@ -31,5 +33,5 @@ def read_frames(
 
 
 def bus_answers() -> dict[str, str]:
-    """Return Q1 and Q2 mapped to uppercase option letters for the UART quiz."""
-    raise NotImplementedError("E5: return the option letters for the UART and settings questions")
+    """Return Q1 through Q5 mapped to uppercase option letters for the bus quiz."""
+    raise NotImplementedError("E5: return the option letters for the SPI, I2C, UART, and settings questions")

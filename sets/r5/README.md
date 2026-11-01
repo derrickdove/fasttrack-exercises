@@ -104,7 +104,7 @@ Return `(final_state, history)`. History is a fresh list starting with `IDLE`, `
 
 **Watch out:** Register a cleanup before attempting its run. One cleanup error must not prevent earlier resources from being released. `KeyboardInterrupt` is not a subclass of `Exception`.
 
-**Reread:** d39, Wikipedia "Finite-state machine", states and transitions; *A Common-Sense Guide to DSA*, graphs and directed edges (allowed moves). For E4's cleanup behavior, revisit the d39 sequence exercise; for interrupts, d33's `signal` docs and Missing Semester job control.
+**Reread:** d37, Wikipedia "Finite-state machine", states and transitions; *A Common-Sense Guide to DSA*, graphs and directed edges (allowed moves). For E4's cleanup behavior, revisit the d37 sequence exercise; for interrupts, d33's `signal` docs and Missing Semester job control.
 
 ### E5 — Apply measurement review comments (easy, ~8 min)
 

@@ -65,6 +65,24 @@ def test_e1_preserves_block_error_and_continues_cleanup(psu: FakePSU, cleanup_fa
             raise original
     assert caught.value is original, "the measurement error must survive failed cleanup"
     assert psu.events == [("output", 2, False), ("output", 1, False)]
+    expected_notes = ([f"cleanup failed: output(2, False): {psu.off_errors[2]!r}"]
+                      if cleanup_fails else [])
+    assert getattr(original, "__notes__", []) == expected_notes
+
+
+def test_e1_notes_each_failed_call_and_keeps_existing_notes(psu: FakePSU) -> None:
+    original = OSError("measurement failed")
+    original.add_note("station A")
+    psu.off_errors = {2: RuntimeError("shutdown failed"), 1: OSError("offline")}
+    guard = OutputGuard(psu, [2, 1, 2, 3])
+    with pytest.raises(OSError) as caught:
+        with guard:
+            raise original
+    assert caught.value is original
+    assert psu.events == [("output", ch, False) for ch in [2, 1, 2, 3]]
+    assert original.__notes__ == ["station A"] + [
+        f"cleanup failed: output({ch}, False): {psu.off_errors[ch]!r}" for ch in [2, 1, 2]
+    ], "each failed call, including duplicates, needs its own note in call order"
 
 
 def test_e1_reports_first_cleanup_error_after_attempting_all(psu: FakePSU) -> None:
@@ -97,6 +115,7 @@ def test_e1_handles_operator_interrupt(psu: FakePSU) -> None:
             raise original
     assert caught.value is original
     assert psu.events == [("output", 1, False), ("output", 2, False)]
+    assert original.__notes__ == [f"cleanup failed: output(1, False): {psu.off_errors[1]!r}"]
 
 
 @pytest.mark.parametrize("result", [0, None, False, "ready"])
@@ -370,11 +389,12 @@ def test_e4_write_or_settle_failure_recovers_and_reraises(
     assert psu.events == expected, "stop the ramp and perform only the two cleanup commands"
 
 
-@pytest.mark.parametrize("voltage_fails,off_fails", [(True, False), (False, True), (True, True)])
+@pytest.mark.parametrize("voltage_fails,off_fails", [(False, False), (True, False), (False, True), (True, True)])
 def test_e4_cleanup_failures_do_not_replace_original(
     psu: FakePSU, voltage_fails: bool, off_fails: bool
 ) -> None:
     original = ValueError("settling failed")
+    original.add_note("station A")
     if voltage_fails:
         psu.fail_at, psu.write_error = 0.0, OSError("reset failed")
     if off_fails:
@@ -387,6 +407,12 @@ def test_e4_cleanup_failures_do_not_replace_original(
         ramp_voltage(psu, 4, 5, 2, settle)
     assert caught.value is original
     assert psu.events == [("voltage", 4, 2), ("voltage", 4, 0), ("output", 4, False)]
+    expected_notes = ["station A"]
+    if voltage_fails:
+        expected_notes.append(f"cleanup failed: set_voltage(4, 0.0): {psu.write_error!r}")
+    if off_fails:
+        expected_notes.append(f"cleanup failed: output(4, False): {psu.off_errors[4]!r}")
+    assert original.__notes__ == expected_notes, "only failed cleanup calls add notes"
 
 
 @pytest.mark.parametrize("target,step", [(-1, 1), (1, 0), (1, -1), (0, 0)])
@@ -398,8 +424,12 @@ def test_e4_invalid_inputs_do_not_touch_device(psu: FakePSU, target: float, step
     assert calls == []
 
 
-def test_e4_operator_interrupt_also_recovers(psu: FakePSU) -> None:
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+def test_e4_operator_interrupt_also_recovers(psu: FakePSU, cleanup_fails: bool) -> None:
     original = KeyboardInterrupt("operator stop")
+    if cleanup_fails:
+        psu.fail_at, psu.write_error = 0.0, KeyboardInterrupt("reset interrupted")
+        psu.off_errors[1] = KeyboardInterrupt("shutdown interrupted")
 
     def settle() -> None:
         raise original
@@ -408,3 +438,8 @@ def test_e4_operator_interrupt_also_recovers(psu: FakePSU) -> None:
         ramp_voltage(psu, 1, 1, 1, settle)
     assert caught.value is original
     assert psu.events == [("voltage", 1, 1), ("voltage", 1, 0), ("output", 1, False)]
+    expected_notes = ([
+        f"cleanup failed: set_voltage(1, 0.0): {psu.write_error!r}",
+        f"cleanup failed: output(1, False): {psu.off_errors[1]!r}",
+    ] if cleanup_fails else [])
+    assert getattr(original, "__notes__", []) == expected_notes

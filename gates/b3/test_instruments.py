@@ -220,6 +220,38 @@ def test_psu_context_preserves_body_error_when_teardown_also_fails(instruments, 
     assert not fake.closed
 
 
+@pytest.mark.parametrize("body_error_type", [None, RuntimeError, KeyboardInterrupt])
+@pytest.mark.parametrize("cleanup_error_type", [KeyboardInterrupt, SystemExit, OSError])
+def test_psu_context_attempts_all_channels_and_preserves_error_priority_on_interrupt(
+    instruments, fake_factory, monkeypatch, body_error_type, cleanup_error_type,
+):
+    fake = fake_factory()
+    original = body_error_type("test step failed") if body_error_type is not None else None
+    first_cleanup = cleanup_error_type("first shutdown failed")
+    cleanup_errors = iter([first_cleanup, KeyboardInterrupt("later shutdown interrupted")])
+    write = fake.write
+
+    def interrupted_write(cmd):
+        write(cmd)
+        if cmd == "OUTP OFF":
+            error = next(cleanup_errors, None)
+            if error is not None:
+                raise error
+
+    monkeypatch.setattr(fake, "write", interrupted_write)
+    expected = original if original is not None else first_cleanup
+    with pytest.raises(BaseException) as caught:
+        with instruments.PowerSupply(fake):
+            if original is not None:
+                raise original
+    assert caught.value is expected, "preserve the body error, otherwise the first cleanup error"
+    assert fake.events == [
+        event for ch in range(1, 4)
+        for event in [("write", f"INST:NSEL {ch}"), ("write", "OUTP OFF")]
+    ], "attempt every channel even after an interruption during shutdown"
+    assert not fake.closed, "the caller owns the transport"
+
+
 @pytest.mark.parametrize("custom", [False, True], ids=["defaults", "custom-options"])
 @pytest.mark.parametrize("shared_manager", [False, True], ids=["separate-managers", "cached-manager"])
 def test_visa_transport_configures_queries_writes_and_closes_both_owners(

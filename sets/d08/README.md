@@ -1,6 +1,6 @@
 # d08 — Modules, packages, type hints and mypy
 
-**Time:** about 57 minutes · **Read first:** [Python Tutorial §6: Modules and packages](https://docs.python.org/3/tutorial/modules.html), [§12: Virtual environments and packages](https://docs.python.org/3/tutorial/venv.html), [typing introduction](https://docs.python.org/3/library/typing.html), [mypy: Getting started](https://mypy.readthedocs.io/en/stable/getting_started.html), and [The Linux Command Line ch. 9: Permissions](https://linuxcommand.org/tlcl.php) · **You edit:** `starter/units/convert.py`, `starter/units/parse.py`, `starter/units/__init__.py`, `starter/units/guard.py`
+**Time:** about 57 minutes · **Read first:** [Python Tutorial §6: Modules and packages](https://docs.python.org/3/tutorial/modules.html), [§12: Virtual environments and packages](https://docs.python.org/3/tutorial/venv.html), [typing introduction](https://docs.python.org/3/library/typing.html), [mypy: Getting started](https://mypy.readthedocs.io/en/stable/getting_started.html), and [The Linux Command Line ch. 9: Permissions](https://linuxcommand.org/tlcl.php) (optional preview; scheduled on day 9) · **You edit:** `starter/units/convert.py`, `starter/units/parse.py`, `starter/units/__init__.py`, `starter/units/guard.py`
 
 ## What you're building
 
@@ -87,7 +87,7 @@ You may use ordinary string processing or the standard library's `re` module for
 
 For a direct check from the repo root, run `.venv\Scripts\python.exe -m mypy --strict sets/d08/starter/units` on Windows or `.venv/bin/python -m mypy --strict sets/d08/starter/units` on Linux. Run the set first so the virtual environment exists. If Python says `No module named mypy`, check that you used the repo's `.venv` interpreter.
 
-**Reread:** mypy Getting started, A quick intro to type hints and Next steps; Python Tutorial §12.1–12.2, Creating virtual environments and Managing packages; The Linux Command Line ch. 9, Reading, writing, and executing.
+**Reread:** mypy Getting started, A quick intro to type hints and Next steps; Python Tutorial §12.1–12.2, Creating virtual environments and Managing packages. Optional preview: The Linux Command Line ch. 9, Reading, writing, and executing (scheduled on day 9).
 
 ### E5 — Type hints don't stop bad values at runtime (easy–medium, ~12 min)
 

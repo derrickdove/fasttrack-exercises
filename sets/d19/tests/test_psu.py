@@ -223,6 +223,24 @@ def test_e6_limits_allow_boundary_and_reject_before_rounding(
     getattr(zero, method)(0)
     with pytest.raises(ValueError, match=key):
         getattr(zero, method)(0.001)
+    for fractional_limit in (12.3456, 0.0006):
+        fractional_manager = FakeResourceManager()
+        fractional = Psu("192.0.2.1", rm=fractional_manager, **{key: fractional_limit})
+        fractional_setter = getattr(fractional, method)
+        for request in (fractional_limit, fractional_limit - 0.00001):
+            with pytest.raises(ValueError) as caught:
+                fractional_setter(request)
+            message = str(caught.value)
+            numbers = re.findall(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?", message)
+            assert key in message and any(Decimal(number) == Decimal(str(fractional_limit)) for number in numbers), (
+                "name the maximum and its value when formatting exceeds it"
+            )
+            assert fractional_manager.resource.writes == [], "reject rounded settings above the maximum before writing"
+            assert fractional_manager.resource.queries == []
+        safe_request = 12.345 if fractional_limit == 12.3456 else 0.0
+        assert fractional_setter(safe_request) is None
+        command = "VOLT" if method == "set_voltage" else "CURR"
+        assert fractional_manager.resource.writes == [f"{command} {safe_request:.3f}"]
     unlimited = Psu("192.0.2.1", rm=manager)
     getattr(unlimited, method)(100)
     assert manager.resource.writes[-1].endswith("100.000"), "None means no maximum"
@@ -309,13 +327,13 @@ def test_e6_context_disables_then_closes(raise_in_block: bool, manager: FakeReso
 
 
 @pytest.mark.parametrize("raise_in_block", [False, True])
-@pytest.mark.parametrize("failure_stage", ["output-off", "resource-close"])
+@pytest.mark.parametrize("failure_stage", ["output-off", "resource-close", "both"])
 def test_e6_cleanup_failure_preserves_block_exception(
     raise_in_block: bool, failure_stage: str, manager: FakeResourceManager
 ) -> None:
     supply = Psu("192.0.2.1", rm=manager)
-    manager.resource.fail_off = failure_stage == "output-off"
-    manager.resource.fail_close = failure_stage == "resource-close"
+    manager.resource.fail_off = failure_stage in ("output-off", "both")
+    manager.resource.fail_close = failure_stage in ("resource-close", "both")
     failure = RuntimeError("original test failure")
     with pytest.raises(RuntimeError if raise_in_block else OSError) as caught:
         with supply:
@@ -323,8 +341,20 @@ def test_e6_cleanup_failure_preserves_block_exception(
                 raise failure
     if raise_in_block:
         assert caught.value is failure, "cleanup must not replace the block failure"
+        assert failure.args == ("original test failure",), "keep the original failure message"
+        failed_operations = []
+        if manager.resource.fail_off:
+            failed_operations.append(("OUTP 0", OSError("output-off failed")))
+        if manager.resource.fail_close:
+            failed_operations.append(("close", OSError("resource-close failed")))
+        notes = getattr(failure, "__notes__", [])
+        assert len(notes) == len(failed_operations), "add exactly one note per failed cleanup operation"
+        for note, (operation, cleanup_error) in zip(notes, failed_operations):
+            assert "cleanup failed" in note and operation in note, "identify the failed cleanup operation"
+            assert note == f"cleanup failed: {operation}: {cleanup_error!r}", "include the cleanup error"
     else:
-        assert f"{failure_stage} failed" in str(caught.value), "surface cleanup failure after a successful block"
+        expected_stage = "resource-close" if failure_stage == "both" else failure_stage
+        assert f"{expected_stage} failed" in str(caught.value), "surface cleanup failure after a successful block"
     assert manager.resource.events == ["OUTP 0", "close"], "attempt output-off, then close, even if cleanup raises"
     supply.close()
     assert manager.resource.close_count == 1

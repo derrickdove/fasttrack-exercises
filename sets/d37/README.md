@@ -1,6 +1,6 @@
-# d39 — Test sequences as state machines
+# d37 — Test sequences as state machines
 
-**Time:** about 45 minutes · **Read first:** [Wikipedia: Finite-state machine (overview)](https://en.wikipedia.org/wiki/Finite-state_machine); *A Common-Sense Guide to Data Structures and Algorithms*, chapter on graphs; [Pro Git 6.2: Contributing to a Project (forks, pull requests, review)](https://git-scm.com/book/en/v2/GitHub-Contributing-to-a-Project) · **You edit:** `starter/sequencer.py`
+**Time:** about 45 minutes · **Read first:** [Wikipedia: Finite-state machine (overview)](https://en.wikipedia.org/wiki/Finite-state_machine); *A Common-Sense Guide to Data Structures and Algorithms*, chapter on graphs; [Pro Git 6.2: Contributing to a Project (forks, pull requests, review)](https://git-scm.com/book/en/v2/GitHub-Contributing-to-a-Project) (optional preview; scheduled on day 39) · **You edit:** `starter/sequencer.py`
 
 ## What you're building
 
@@ -9,7 +9,7 @@ A chassis test station must prepare its instruments before taking measurements a
 ## How this works
 
 1. Fill in `TRANSITIONS` and replace the `raise NotImplementedError(...)` lines in `starter/sequencer.py`. Don't edit `tests/`.
-2. Press **Ctrl+Shift+B → Test: d39** (or run `bash tools/run.sh d39` / `tools\run.ps1 d39`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d37** (or run `bash tools/run.sh d37` / `tools\run.ps1 d37`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A **finite-state machine** allows only specified changes between a fixed collection of states. A **state** names the current phase; a **transition** is an allowed change. A **terminal state** ends the sequence and has no outgoing transitions.
@@ -59,7 +59,7 @@ A new sequencer exposes `state == "IDLE"` and `history == ["IDLE"]`. For a move 
 
 **Watch out:** A rejected move does not count as a visit. A terminal state cannot be restarted. Reuse `can_move` for the transition rule.
 
-**Reread:** Wikipedia, Concepts and terminology (current state and transitions); Pro Git 6.2, GitHub Flow (review the small change to the transition rule before merging).
+**Reread:** Wikipedia, Concepts and terminology (current state and transitions); Pro Git 6.2 (optional preview; scheduled on day 39), GitHub Flow (review the small change to the transition rule before merging).
 
 ### E3 — Run measurements and release instruments (medium, ~17 min)
 
@@ -90,4 +90,4 @@ Follow this order exactly:
 
 **Watch out:** Hold the selected result until cleanup finishes: moving to `ABORTED` and then to `ERROR` would violate E1. If setup was interrupted, history has no `RUNNING` entry. Teardown interruption is an equipment cleanup failure and therefore ends in `ERROR`.
 
-**Reread:** Wikipedia, Concepts and terminology (terminal states and transitions); Pro Git 6.2, GitHub Flow and Pull Requests (review the abort and cleanup cases as part of the change).
+**Reread:** Wikipedia, Concepts and terminology (terminal states and transitions); Pro Git 6.2 (optional preview; scheduled on day 39), GitHub Flow and Pull Requests (review the abort and cleanup cases as part of the change).

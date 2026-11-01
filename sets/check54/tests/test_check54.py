@@ -76,6 +76,7 @@ class ScriptedResource:
         self.events: list[tuple[object, ...]] = []
         self.write_error: OSError | None = None
         self.close_error: OSError | None = None
+        self.clear_error: Exception | None = None
 
     def query(self, cmd: str) -> str:
         self.events.append(("query", cmd))
@@ -90,10 +91,26 @@ class ScriptedResource:
         if self.write_error is not None:
             raise self.write_error
 
+    def clear(self) -> None:
+        self.events.append(("clear",))
+        if self.clear_error is not None:
+            raise self.clear_error
+
     def close(self) -> None:
         self.events.append(("close",))
         if self.close_error is not None:
             raise self.close_error
+
+
+class DelayedReplyResource(ScriptedResource):
+    """The timed-out query's reply stays queued until device clear discards it."""
+
+    def __init__(self, timeout: Exception) -> None:
+        super().__init__([timeout, "1.125", "3.3125"])
+
+    def clear(self) -> None:
+        super().clear()
+        self.replies.pop(0)  # Discard the late first reply, keeping the next reply.
 
 
 class FakeResourceManager:
@@ -207,14 +224,52 @@ def test_e2_reads_and_retries_only_visa_timeout(
             assert caught.value is replies[-1], "propagate the resource's exception"
     else:
         assert supply.read_voltage() == pytest.approx(expected)
-    assert resource.events == [("query", "MEAS:VOLT?")] * queries
+    expected_events: list[tuple[object, ...]] = [("query", "MEAS:VOLT?")]
+    if queries == 2:
+        expected_events += [("clear",), ("query", "MEAS:VOLT?")]
+    assert resource.events == expected_events, "clear exactly once before retry, never otherwise"
+    supply.close()
+
+
+@pytest.mark.parametrize("timeout", [VisaTimeout("first"), VisaIOError(StatusCode.error_timeout)])
+def test_e2_clears_delayed_reply_before_retry(timeout: Exception) -> None:
+    uncleared = DelayedReplyResource(timeout)
+    with pytest.raises(type(timeout)):
+        uncleared.query("MEAS:VOLT?")
+    assert uncleared.query("MEAS:VOLT?") == "1.125", "without clear, retry consumes the stale reply"
+
+    resource = DelayedReplyResource(timeout)
+    supply = StationSupply.from_config(
+        {"ip": "192.0.2.45", "max_voltage": 12.5}, FakeResourceManager(resource),
+    )
+    assert supply.read_voltage() == 3.3125, "retry must return the new reply, not the stale 1.125 V"
+    assert resource.events == [("query", "MEAS:VOLT?"), ("clear",), ("query", "MEAS:VOLT?")]
+    assert resource.replies == [], "clear must discard the queued first reply"
+    supply.close()
+
+
+@pytest.mark.parametrize("timeout", [VisaTimeout("first"), VisaIOError(StatusCode.error_timeout)])
+@pytest.mark.parametrize("clear_error", [
+    OSError("clear failed"), VisaTimeout("clear timed out"), VisaIOError(StatusCode.error_timeout),
+])
+def test_e2_clear_error_propagates_without_retry(timeout: Exception, clear_error: Exception) -> None:
+    resource = ScriptedResource([timeout, "3.3125"])
+    resource.clear_error = clear_error
+    supply = StationSupply.from_config(
+        {"ip": "192.0.2.45", "max_voltage": 12.5}, FakeResourceManager(resource),
+    )
+    with pytest.raises(type(clear_error)) as caught:
+        supply.read_voltage()
+    assert caught.value is clear_error, "propagate the clear error unchanged"
+    assert resource.events == [("query", "MEAS:VOLT?"), ("clear",)], "failed clear must prevent retry"
+    assert resource.replies == ["3.3125"], "failed clear must leave the retry unattempted"
     supply.close()
 
 
 @pytest.mark.parametrize("maximum,volts,command", [
     (12.5, 0.0, "VOLT 0.000"), (12.5, 12.5, "VOLT 12.500"),
     (12.5, 3.3125, "VOLT 3.312"), (12.5, -0.001, None),
-    (12.5, 12.5001, "VOLT 12.500"), (12.5, -0.0001, "VOLT -0.000"),
+    (12.5, 12.5001, None), (12.5, -0.0001, None),
     (12.5, 12.501, None), (12.5, math.nan, None),
     (12.5, math.inf, None), (12.5, -math.inf, None),
     (12.3456, 12.3456, None), (12.3456, 12.345, "VOLT 12.345"),
@@ -248,11 +303,14 @@ def test_e2_commands_validate_before_writing(
     assert resource.events.count(("close",)) == 1, "close must be idempotent"
 
 
-@pytest.mark.parametrize("block_error", [None, RuntimeError("step failed"), KeyboardInterrupt()])
+@pytest.mark.parametrize("block_error_type", [None, RuntimeError, KeyboardInterrupt])
 @pytest.mark.parametrize("write_fails,close_fails", [(False, False), (True, False), (False, True), (True, True)])
 def test_e2_context_disables_then_closes_and_preserves_block_error(
-    block_error: BaseException | None, write_fails: bool, close_fails: bool,
+    block_error_type: type[BaseException] | None, write_fails: bool, close_fails: bool,
 ) -> None:
+    block_error = block_error_type("step failed") if block_error_type is not None else None
+    if block_error is not None:
+        block_error.add_note("station: BENCH-9")
     resource = ScriptedResource([])
     resource.write_error = OSError("cannot disable") if write_fails else None
     resource.close_error = OSError("cannot close") if close_fails else None
@@ -275,6 +333,17 @@ def test_e2_context_disables_then_closes_and_preserves_block_error(
         if isinstance(caught.value, NotImplementedError):
             raise caught.value
         assert caught.value is expected, "a block exception must survive cleanup failures"
+    if block_error is not None:
+        expected_notes = ["station: BENCH-9"]
+        for operation, error in [("OUTP 0", resource.write_error), ("close", resource.close_error)]:
+            if error is not None:
+                expected_notes.append(f"cleanup failed: {operation}: {error!r}")
+                assert any("cleanup failed" in note and operation in note
+                           for note in block_error.__notes__), f"missing cleanup note for {operation}"
+        assert block_error.__notes__ == expected_notes, "append exactly one note per failed cleanup"
+        assert block_error.args == ("step failed",), "preserve the original exception message"
+    elif expected is not None:
+        assert not getattr(expected, "__notes__", []), "successful blocks keep cleanup behavior unchanged"
     assert resource.events == [("write", "OUTP 0"), ("close",)]
     supply.close()
     assert resource.events == [("write", "OUTP 0"), ("close",)], "exit already closed the supply"
@@ -552,15 +621,45 @@ def test_e8_help_is_successful_without_config() -> None:
     assert err.getvalue() == ""
 
 
-def test_e8_run_exception_returns_error() -> None:
+@pytest.mark.parametrize("notes,note_diagnostic", [
+    ([], ""),
+    (["cleanup failed: OUTP 0: OSError('cannot disable')"],
+     "cleanup failed: OUTP 0: OSError('cannot disable')\n"),
+    (["station: BENCH-9\r\ncheck cable\nretry",
+      "cleanup failed: OUTP 0: OSError('cannot disable')",
+      "cleanup failed: close: OSError('cannot close')"],
+     "station: BENCH-9 check cable retry\n"
+     "cleanup failed: OUTP 0: OSError('cannot disable')\n"
+     "cleanup failed: close: OSError('cannot close')\n"),
+    ([""], "\n"),
+])
+@pytest.mark.parametrize("error,diagnostic", [
+    (OSError("config not readable"), "error: OSError: config not readable\n"),
+    (ValueError("invalid station"), "error: ValueError: invalid station\n"),
+    (RuntimeError("supply offline\r\ncheck cable\nretry"),
+     "error: RuntimeError: supply offline check cable retry\n"),
+    (RuntimeError(), "error: RuntimeError: \n"),
+])
+def test_e8_run_exception_returns_error(
+    error: Exception, diagnostic: str, notes: list[str], note_diagnostic: str,
+) -> None:
+    # Use E2-style notes without requiring the learner to finish E2 first.
+    error = type(error)(*error.args)
+    for note in notes:
+        error.add_note(note)
+    calls: list[Path] = []
     out, err = StringIO(), StringIO()
 
     def run(path: Path) -> str:
-        raise OSError("config not readable")
+        calls.append(path)
+        raise error
 
     assert main(["--config", "missing.toml"], run, out, err) == 2
+    assert calls == [Path("missing.toml")]
     assert out.getvalue() == "RESULT ERROR\n"
-    assert err.getvalue() == ""
+    assert err.getvalue() == diagnostic + note_diagnostic, (
+        "preserve the error line, then each flattened exception note in order"
+    )
 
 
 def test_e8_operator_interrupt_is_not_a_result() -> None:
@@ -596,6 +695,7 @@ def test_e9_reports_all_missing_in_fixed_order() -> None:
 
 @pytest.mark.parametrize("old,new,expected", [
     ("User=station", "User=root", "User"), ("User=station", "User=", "User"),
+    ("User=station", "User=0", "User"),
     ("ExecStart=/opt/station/bin/run --serial %i", "ExecStart=station", "ExecStart"),
     ("Restart=on-failure", "Restart=always", "Restart"),
     ("NoNewPrivileges=true", "NoNewPrivileges=false", "NoNewPrivileges"),

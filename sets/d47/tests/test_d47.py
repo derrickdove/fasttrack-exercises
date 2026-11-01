@@ -1,10 +1,28 @@
+import hashlib
+
 import pytest
 
 from starter.registers import clear_bits, decode_status, explain, field, set_bits, unpack_status_frame
 from starter.registers import endian_answers
 
 
-_ENDIAN_ANSWERS = {"Q1": "B", "Q2": "D", "Q3": "A", "Q4": "C"}
+# Store SHA-256 digests (fixed-length fingerprints), not readable quiz answers.
+_ENDIAN_DIGESTS = {
+    "Q1": "df7e70e5021544f4834bbee64a9e3789febc4be81470df629cad6ddb03320a5c",
+    "Q2": "3f39d5c348e5b79d06e842c114e6cc571583bbf44e4b0ebfda1a01ec05745d43",
+    "Q3": "559aead08264d5795d3909718cdd05abd49572e84fe55590eef31a88a08fdffd",
+    "Q4": "6b23c0d5f35d1b11f9b683f0b0a617355deb11277d91ae091d399c655b87940d",
+}
+
+
+def _endian_answer_is_correct(answers: object, question: str) -> bool:
+    __tracebackhide__ = True
+    if not isinstance(answers, dict):
+        return False
+    value = answers.get(question)
+    return (isinstance(value, str)
+            and hashlib.sha256(value.encode("utf-8")).hexdigest() == _ENDIAN_DIGESTS[question])
+
 
 @pytest.mark.parametrize(
     ("byte", "expected"),
@@ -149,20 +167,20 @@ def test_e5_q1_big_endian_memory() -> None:
     answers = endian_answers()
     assert isinstance(answers, dict), "E5: Return a dictionary as described in the README"
     assert set(answers) == {"Q1", "Q2", "Q3", "Q4"}, "E5: Return exactly the four question IDs"
-    correct = answers.get("Q1") == _ENDIAN_ANSWERS["Q1"]
+    correct = _endian_answer_is_correct(answers, "Q1")
     assert correct, "Q1: Reread Endianness, Overview, and compare the byte positions"
 
 
 def test_e5_q2_network_byte_order() -> None:
-    correct = endian_answers().get("Q2") == _ENDIAN_ANSWERS["Q2"]
+    correct = _endian_answer_is_correct(endian_answers(), "Q2")
     assert correct, "Q2: Reread Endianness, Networking, for the agreed network convention"
 
 
 def test_e5_q3_test_pc_native_order() -> None:
-    correct = endian_answers().get("Q3") == _ENDIAN_ANSWERS["Q3"]
+    correct = _endian_answer_is_correct(endian_answers(), "Q3")
     assert correct, "Q3: Reread Endianness, Hardware, for x86 and ARM byte order"
 
 
 def test_e5_q4_wrong_unpack_order() -> None:
-    correct = endian_answers().get("Q4") == _ENDIAN_ANSWERS["Q4"]
+    correct = _endian_answer_is_correct(endian_answers(), "Q4")
     assert correct, "Q4: Reread Endianness, Overview, and the README's worked struct example"

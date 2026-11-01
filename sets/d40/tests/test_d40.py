@@ -1,3 +1,5 @@
+import hashlib
+import json
 from pathlib import Path
 import shlex
 from typing import Any
@@ -162,11 +164,20 @@ def test_e3_pytest_and_mypy_after_install(steps: list[dict[str, Any]]) -> None:
     )
 
 
-# Keep keyed answers out of traceback source lines and assertion introspection.
-_REVIEW_KEYS = {
-    "Q1": ("drivers/bus_probe.py", 14, "C", "B", True, "D"),
-    "Q2": ("drivers/bus_probe.py", 15, "A", "D", False, "B"),
-    "Q3": ("drivers/bus_probe.py", 18, "D", "A", True, "A"),
+# Store SHA-256 digests (fixed-length fingerprints), not readable answer keys.
+_REVIEW_DIGESTS = {
+    "Q1": (
+        "63159fa6479d2b5d4fdedf962f5716ec9d19bad8d0187e638294044fedb8d36c",
+        "b180e2de3e4f562e845bfe4573876c5e0073c62d9cda8d41ec6956409aa355f6",
+    ),
+    "Q2": (
+        "980ac8f82eccb123aa913dcc7032172d7ccd51e0069a6bd8d2985875cc738746",
+        "811f90b8f3786d68e04b3a53afc293dcbc9c45579a29d5bcbd234647e473ce3c",
+    ),
+    "Q3": (
+        "3a8786d94befed56eab217a7c71e38c7a0f51f0f849dee28bc5e9cdcde568834",
+        "acbae96ec98842d2123368eaa60e1971440ce9b685bfdccd86c5c1c2a27001ad",
+    ),
 }
 _REVIEW_FIELDS = {
     "file", "line", "consequence", "regression_test", "repair_fixed", "repair_reason", "comment",
@@ -200,15 +211,20 @@ def review() -> list[dict[str, Any]]:
     return answers
 
 
+def _review_digest(values: tuple[Any, ...]) -> str:
+    return hashlib.sha256(json.dumps(values).encode("utf-8")).hexdigest()
+
+
 def _check_review(review: list[dict[str, Any]], question: str) -> None:
-    expected = _REVIEW_KEYS[question]
+    __tracebackhide__ = True
+    anchor_digest, answer_digest = _REVIEW_DIGESTS[question]
     matched = next((finding for finding in review
-                    if (finding["file"], finding["line"]) == expected[:2]), None)
+                    if _review_digest((finding["file"], finding["line"])) == anchor_digest), None)
     if matched is None:
         pytest.fail(f"{question}: reread E4 Diff primer and Station contract; recheck defect anchors", pytrace=False)
     actual = tuple(matched[field] for field in
                    ("file", "line", "consequence", "regression_test", "repair_fixed", "repair_reason"))
-    if actual != expected:
+    if _review_digest(actual) != answer_digest:
         pytest.fail(f"{question}: reread E4 Station contract and Review choices; trace both diffs again", pytrace=False)
 
 

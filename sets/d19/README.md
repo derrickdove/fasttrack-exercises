@@ -4,7 +4,7 @@
 
 ## What you're building
 
-A chassis test station needs to read a meter and control a power supply before the instruments arrive. A **driver** translates station operations into instrument commands; a **transport** carries those commands and replies. You will pass a transport into each driver so the same driver can work with a fake today and connected hardware later.
+A chassis test station needs to read a meter and control a power supply before the instruments arrive. A **driver** translates station operations into instrument commands; a **transport** carries those commands and replies. You will pass a transport into each driver so the same driver can work with a fake today and connected hardware later. Checking what you actually send prevents rounding above a safety maximum; check54 later uses the same idea.
 
 ## How this works
 
@@ -179,12 +179,15 @@ The supplied method requires a string `ip`. Optional `timeout_ms` defaults to `2
 
 A **class method** receives the class as `cls`. The supplied `@classmethod` uses `cls(...)` so calling it on a **subclass** (a class that inherits from `Psu`) constructs that subclass and forwards the settings and manager. Existing configuration tests still check how the supplied code works with your driver; there is no factory method left to implement.
 
-- In each setter, use the stored `self._max_voltage` or `self._max_current`. A setpoint above its maximum raises `ValueError` naming the maximum's key and value before any write. Equality is allowed, zero is a real limit, and `None` removes that limit. Check before rounding: `12.0001` exceeds a maximum of `12`. Keep E5's negative and non-finite setpoint checks.
+- In each setter, use the stored `self._max_voltage` or `self._max_current`. A requested setpoint above its maximum raises `ValueError` naming the maximum's key and value before any write. Check before rounding: `12.0001` exceeds a maximum of `12`. Keep E5's negative and non-finite setpoint checks.
+- Then format the setpoint with `:.3f`, convert that formatted number text back to a float, and compare it with the same maximum. If the formatted value is above the maximum, raise `ValueError` naming the maximum's key and value before any write. Write the checked text only after both checks pass. Equality passes either comparison, but both must pass; zero is a real limit, and `None` removes that limit.
 - `close()` closes the resource once and returns `None`; repeated calls do nothing, even if the first close raised. Use the supplied `self._closed` flag and mark it closed before calling the resource's `close`. This is **idempotent**: repeating the operation has the same effect as calling it once. Explicit `close()` sends no output command. Do not close the manager: other drivers may share it.
 
 A **context manager** is an object used in a `with` statement to arrange entry and cleanup. Python calls `__enter__` before the block; return `self` so `with supply as active:` gives the block that supply. It calls `__exit__` after the block, even when the block raises an exception. Its three arguments describe that exception (all are `None` after normal completion); `TracebackType` describes the record of where it occurred. `Literal[False]` means the return value is always `False`, so Python continues raising the block's exception.
 
-In `__exit__`, first attempt `"OUTP 0"`, then always close the resource, even if that write fails; `try`/`finally` ensures the close is attempted. If the block raised (`exc_value is not None`), preserve that original exception even if cleanup also raises an ordinary exception (`Exception`). After a successful block, let a cleanup failure reach the caller. If both output-off and close fail after a successful block, the close exception takes precedence, as it does in `try`/`finally`. Context cleanup sends no other commands. Re-entering an already closed supply and operations after close are outside this exercise.
+In `__exit__`, first attempt `"OUTP 0"`, then always close the resource, even if that write fails; `try`/`finally` ensures the close is attempted. If the block raised (`exc_value is not None`), preserve that original exception unchanged even if cleanup also raises an ordinary exception (`Exception`). For each failed cleanup operation, call `exc_value.add_note(f"cleanup failed: {operation}: {cleanup_error!r}")` once, using `"OUTP 0"` for the output-off write or `"close"` for closing the resource as `operation`, and the caught exception as `cleanup_error`; `!r` includes the error's type and message. After a successful block, let a cleanup failure reach the caller. If both output-off and close fail after a successful block, the close exception takes precedence, as it does in `try`/`finally`. Context cleanup sends no other commands. Re-entering an already closed supply and operations after close are outside this exercise.
+
+In Python 3.11+, `add_note(text)` attaches a text note to the same exception and stores it in the exception's `__notes__` list. Python prints these notes below the traceback so the operator can see which cleanup operations failed.
 
 **Example:** With `path` containing the TOML above and a fake manager, the following code writes `["VOLT 12.000", "CURR 0.500", "OUTP 1", "OUTP 0"]` and closes the resource once:
 
@@ -196,6 +199,8 @@ with Psu.from_config(path, rm=manager) as supply:
 ```
 
 With the same configuration, requesting `supply.set_voltage(12.0001)` inside the block raises `ValueError` mentioning `max_voltage` and `12`, before sending a voltage-setting command; output-off and close still run on exit.
+
+With `max_voltage=12.3456`, `supply.set_voltage(12.3456)` formats to `12.346`, which exceeds the maximum: raise `ValueError` mentioning `max_voltage` and `12.3456`, with no setter write. Likewise, with `max_current=12.3456`, `supply.set_current_limit(12.3456)` raises `ValueError` mentioning `max_current` and `12.3456`, with no setter write.
 
 **Watch out:** Do not use **truthiness** (whether an `if` treats a value as true or false) to detect a maximum: zero must still be enforced. Do not return `True` from `__exit__`, which would hide a failed test step.
 

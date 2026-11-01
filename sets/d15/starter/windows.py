@@ -20,3 +20,8 @@ def first_spike(values: list[float], window: int, factor: float) -> int | None:
 def dedupe_keep_order(serials: list[str]) -> list[str]:
     """E4: Keep the first occurrence of each exact serial string in O(n)."""
     raise NotImplementedError("E4: Track seen serials with a set")
+
+
+def speed_answers() -> dict[str, str]:
+    """E5: Map Q1 through Q4 to uppercase option letters from the README."""
+    raise NotImplementedError("E5: Choose one option for each speed and worst-case question")

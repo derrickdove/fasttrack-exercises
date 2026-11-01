@@ -4,6 +4,7 @@ import pytest
 import serial
 
 from starter.serial_sensor import (
+    MAX_LINE_BYTES,
     bus_answers,
     open_loopback,
     parse_sensor_line,
@@ -68,7 +69,11 @@ def test_e2_roundtrip_two_replies(port: serial.Serial) -> None:
     assert port.is_open, "reading must leave the connection open"
 
 
-@pytest.mark.parametrize("raw, expected", [(b"  READY  \r\n", "  READY  "), (b"\r\n", "")])
+@pytest.mark.parametrize("raw, expected", [
+    (b"  READY  \r\n", "  READY  "),
+    (b"\r\n", ""),
+    (b"T" * (MAX_LINE_BYTES - 2) + b"\r\n", "T" * (MAX_LINE_BYTES - 2)),
+])
 def test_e2_read_preserves_payload(port: serial.Serial, raw: bytes, expected: str) -> None:
     port.write(raw)
     assert read_line(port) == expected, "remove only the final CRLF, preserving payload spaces"
@@ -165,6 +170,7 @@ def test_e4_validate_before_read(port: serial.Serial, count: int, max_bad: int) 
     assert port.readline() == b"untouched\r\n", "validate before consuming buffered bytes"
 
 
+@pytest.mark.parametrize("unterminated", [False, True])
 @pytest.mark.parametrize("max_bad, prefix", [
     (None, []),
     (1, []),
@@ -173,23 +179,38 @@ def test_e4_validate_before_read(port: serial.Serial, count: int, max_bad: int) 
 ])
 def test_e4_bad_frame_budget(
     port: serial.Serial, monkeypatch: pytest.MonkeyPatch,
-    max_bad: int | None, prefix: list[bytes],
+    max_bad: int | None, prefix: list[bytes], unterminated: bool,
 ) -> None:
     limit = 20 if max_bad is None else max_bad
-    # After this script, the sensor keeps emitting corrupt lines, never silence.
+    # After this script, the sensor keeps emitting corrupt bytes, never silence.
     script = iter(prefix)
     reads = 0
     expected_reads = limit + (1 if prefix else 0)
 
-    def corrupt_readline() -> bytes:
+    real_readline = port.readline
+    emitted = 0
+
+    def endless_read(size: int = 1) -> bytes:
+        nonlocal emitted
+        emitted += size
+        assert emitted <= limit * MAX_LINE_BYTES, "an endless no-LF stream must reach the budget"
+        return b"x" * size
+
+    def corrupt_readline(size: int = -1) -> bytes:
         nonlocal reads
         reads += 1
         assert reads <= expected_reads, "stop at the budget; do not wait for another good frame"
-        return next(script, b"corrupt\r\n")
+        chunk = next(script, None)
+        if chunk is not None:
+            return chunk
+        # Exercise pySerial's real readline against continuously available bytes.
+        return real_readline(size) if unterminated else b"corrupt\r\n"
 
     port.write(b"untouched\r\n")
     with monkeypatch.context() as patched:
         patched.setattr(port, "readline", corrupt_readline)
+        if unterminated:
+            patched.setattr(port, "read", endless_read)
         with pytest.raises(ValueError) as error:
             if max_bad is None:
                 read_frames(port, 2)
@@ -219,7 +240,7 @@ def test_e4_propagate_connection_failure(port: serial.Serial) -> None:
 def test_e5_q1_asynchronous_bus() -> None:
     answers = bus_answers()
     assert isinstance(answers, dict), "Return a dictionary of question IDs and option letters"
-    assert set(answers) == {"Q1", "Q2"}, "Return exactly Q1 and Q2"
+    assert set(answers) == {"Q1", "Q2", "Q3", "Q4", "Q5"}, "Return exactly Q1 through Q5"
     if answers.get("Q1") != "C":
         pytest.fail("Q1: reread SparkFun Serial Communication, Synchronous vs. Asynchronous", pytrace=False)
 
@@ -227,3 +248,30 @@ def test_e5_q1_asynchronous_bus() -> None:
 def test_e5_q2_usb_adapter_and_baud() -> None:
     if bus_answers().get("Q2") != "C":
         pytest.fail("Q2: reread SparkFun Serial Communication, UARTs and Baud Rate", pytrace=False)
+
+
+def test_e5_q3_clock_and_device_selection() -> None:
+    if bus_answers().get("Q3") != "B":
+        pytest.fail(
+            "Q3: reread SparkFun SPI signal wiring and chip selection, I2C addressing, "
+            "and Serial Communication, Synchronous vs. Asynchronous",
+            pytrace=False,
+        )
+
+
+def test_e5_q4_wire_counts_and_duplex() -> None:
+    if bus_answers().get("Q4") != "D":
+        pytest.fail(
+            "Q4: reread SparkFun SPI signal wiring and I2C hardware wiring, "
+            "Serial Communication, UARTs, and the primer's duplex definitions",
+            pytrace=False,
+        )
+
+
+def test_e5_q5_typical_bench_devices() -> None:
+    if bus_answers().get("Q5") != "A":
+        pytest.fail(
+            "Q5: reread the SparkFun SPI and I2C introductions for device uses "
+            "and Serial Communication, UARTs",
+            pytrace=False,
+        )
