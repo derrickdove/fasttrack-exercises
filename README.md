@@ -64,6 +64,8 @@ Small test-driven exercise sets that go with the Engineering Tracker. Each set p
 3. Save your changes and run `bash tools/run.sh d05` (replace `d05` with the current set). Red means not yet; fix and rerun after each exercise. Run `git diff` to review your edits.
 4. Report **all pass / partial / stuck** on the task in the tracker. Partial and stuck come back in two days. After you report, the tracker links the reference solution so you can compare approaches.
 
+Each run is recorded in the local `.ft-progress.jsonl` file, which is never uploaded. Run `python tools/ft_times.py <set>` (inside WSL: `.venv/bin/python tools/ft_times.py <set>`) to see how long each exercise took.
+
 Use this Bash loop from the repo folder every day; replace `<set>` with a name such as `d05`, without the angle brackets:
 
 ```bash

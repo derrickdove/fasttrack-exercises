@@ -1,8 +1,10 @@
 """Shared-tool regression checks; all fixtures live in deleted temporary folders."""
 from contextlib import redirect_stdout
+from datetime import datetime
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -12,6 +14,7 @@ import unittest
 from unittest.mock import patch
 
 from gen_tasks import set_order
+from ft_times import report as timing_report
 from verify_sets import run_report
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +24,147 @@ class TaskChecks(unittest.TestCase):
     def test_plan_order(self):
         names = ["check54", "d53", "d51", "r6", "d48", "d36", "r4", "check34", "d33", "d15", "r1", "d13", "d00-hello"]
         self.assertEqual(sorted(names, key=set_order), list(reversed(names)))
+
+
+class TimingChecks(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="fasttrack timing ")
+        self.addCleanup(self.temporary.cleanup)
+        self.log = Path(self.temporary.name) / "progress.jsonl"
+
+    def write_run(self, time, passed=(), failed=("E1", "E2", "E3"), identifier="probe"):
+        with self.log.open("a", encoding="utf-8") as log:
+            log.write(json.dumps({"time": time, "set": identifier, "passed": list(passed),
+                                  "failed": list(failed), "total": len(passed) + len(failed)}) + "\n")
+
+    def test_minutes_first_pass_survives_regression_and_other_sets(self):
+        self.write_run("2026-11-11T09:00:00-05:00")
+        self.write_run("2026-11-11T09:05:30-05:00", ["E1"], ["E2", "E3"])
+        self.write_run("2026-11-11T09:07:00-05:00", ["E2"], ["E1", "E3"])
+        self.write_run("2026-11-11T09:08:00-05:00", ["E1"], [], identifier="other")
+        self.assertEqual(timing_report(self.log, "probe"),
+                         "probe: first run 2026-11-11T09:00:00-05:00\n"
+                         "E1: 2026-11-11T09:05:30-05:00 | 5.5 min\n"
+                         "E2: 2026-11-11T09:07:00-05:00 | 1.5 min\n"
+                         "E3: not yet\nRuns: 3\nTotal active: 7 min")
+
+    def test_break_and_resumed_day_keep_prior_progress(self):
+        self.write_run("2026-11-11T09:00:00-05:00")
+        self.write_run("2026-11-11T09:10:00-05:00", ["E1"], ["E2", "E3"])
+        self.write_run("2026-11-11T09:20:00-05:00", ["E1"], ["E2", "E3"])
+        self.write_run("2026-11-11T09:40:00-05:00", ["E1", "E2"], ["E3"])
+        self.write_run("2026-11-12T09:40:00-05:00", ["E1", "E2"], ["E3"])
+        self.write_run("2026-11-12T09:45:00-05:00", ["E1", "E2", "E3"], [])
+        output = timing_report(self.log, "probe")
+        self.assertIn("E2: 2026-11-11T09:40:00-05:00 | 30 min", output)
+        self.assertIn("E3: 2026-11-12T09:45:00-05:00 | 5 min (plus a break of 1440 min)", output)
+        self.assertTrue(output.endswith("Runs: 6\nTotal active: 45 min"))
+
+    def test_long_exercise_counts_every_failing_run(self):
+        for minute in range(0, 35, 5):
+            self.write_run(f"2026-11-11T09:{minute:02d}:00-05:00")
+        self.write_run("2026-11-11T09:35:00-05:00", ["E1"], ["E2", "E3"])
+        self.assertEqual(timing_report(self.log, "probe"),
+                         "probe: first run 2026-11-11T09:00:00-05:00\n"
+                         "E1: 2026-11-11T09:35:00-05:00 | 35 min\n"
+                         "E2: not yet\nE3: not yet\nRuns: 8\nTotal active: 35 min")
+
+    def test_break_inside_exercise_keeps_active_time_on_both_sides(self):
+        self.write_run("2026-11-11T09:00:00-05:00")
+        self.write_run("2026-11-11T09:05:00-05:00")
+        self.write_run("2026-11-11T10:40:00-05:00")
+        self.write_run("2026-11-11T10:45:30-05:00", ["E1"], ["E2", "E3"])
+        output = timing_report(self.log, "probe")
+        self.assertIn("E1: 2026-11-11T10:45:30-05:00 | 10.5 min (plus a break of 95 min)", output)
+        self.assertTrue(output.endswith("Runs: 4\nTotal active: 10.5 min"))
+
+    def test_runs_after_last_new_pass_count_active_time_but_not_breaks(self):
+        self.write_run("2026-11-11T09:00:00-05:00")
+        self.write_run("2026-11-11T09:05:00-05:00", ["E1"], ["E2", "E3"])
+        self.write_run("2026-11-11T09:10:00-05:00")
+        self.write_run("2026-11-11T10:45:00-05:00")
+        self.write_run("2026-11-11T10:50:30-05:00", ["E1"], ["E2", "E3"])
+        output = timing_report(self.log, "probe")
+        self.assertIn("E1: 2026-11-11T09:05:00-05:00 | 5 min", output)
+        self.assertTrue(output.endswith("Still working: 10.5 min since the last new pass\n"
+                                        "Runs: 5\nTotal active: 15.5 min"))
+
+    def test_break_only_after_last_pass_has_no_still_working_line(self):
+        self.write_run("2026-11-11T09:00:00-05:00", ["E1"], ["E2", "E3"])
+        self.write_run("2026-11-12T09:00:00-05:00", ["E1"], ["E2", "E3"])
+        output = timing_report(self.log, "probe")
+        self.assertIn("E1: 2026-11-11T09:00:00-05:00 | 0 min", output)
+        self.assertNotIn("Still working:", output)
+        self.assertTrue(output.endswith("Total active: 0 min"))
+
+    def test_active_time_before_any_pass_is_in_total(self):
+        self.write_run("2026-11-11T09:00:00-05:00")
+        self.write_run("2026-11-11T09:05:00-05:00")
+        self.write_run("2026-11-11T10:40:00-05:00")
+        self.assertEqual(timing_report(self.log, "probe"),
+                         "probe: first run 2026-11-11T09:00:00-05:00\n"
+                         "E1: not yet\nE2: not yet\nE3: not yet\nRuns: 3\nTotal active: 5 min")
+
+    def test_numeric_display_uses_chronological_events_and_simultaneous_passes(self):
+        # Deliberately write the first run last, and complete E10 before E2.
+        self.write_run("2026-11-11T09:05:00-05:00", ["E10"], ["E2", "E3"])
+        self.write_run("2026-11-11T09:10:00-05:00", ["E10", "E3", "E2"], [])
+        self.write_run("2026-11-11T09:00:00-05:00", [], ["E2", "E3", "E10"])
+        output = timing_report(self.log, "probe")
+        self.assertIn("E2: 2026-11-11T09:10:00-05:00 | 5 min", output)
+        self.assertIn("E3: 2026-11-11T09:10:00-05:00 | passed in the same run as E2", output)
+        self.assertIn("E10: 2026-11-11T09:05:00-05:00 | 5 min", output)
+        self.assertLess(output.index("E2:"), output.index("E10:"))
+        self.assertNotIn("E1:", output)
+        self.assertNotIn("Still working:", output)
+        self.assertTrue(output.endswith("Total active: 10 min"))
+
+    def test_offset_change_and_exact_break_boundary(self):
+        self.write_run("2026-11-01T01:50:00-04:00", [], ["E1"])
+        self.write_run("2026-11-01T01:10:00-05:00", ["E1"], [])
+        self.assertIn("| 20 min", timing_report(self.log, "probe"))
+        self.assertIn("| 0 min (plus a break of 20 min)", timing_report(self.log, "probe", 19))
+
+    def test_fractional_gaps_sum_to_whole_minutes(self):
+        for second in range(0, 60, 10):
+            self.write_run(f"2026-11-11T09:00:{second:02d}-05:00")
+        self.write_run("2026-11-11T09:01:00-05:00", ["E1"], ["E2", "E3"])
+        output = timing_report(self.log, "probe")
+        self.assertIn("E1: 2026-11-11T09:01:00-05:00 | 1 min", output)
+        self.assertTrue(output.endswith("Total active: 1 min"))
+
+    def test_malformed_lines_are_skipped(self):
+        good = {"time": "2026-11-11T09:00:00-05:00", "set": "probe",
+                "passed": [], "failed": ["E1"], "total": 1}
+        invalid = [None, [], 42, "text", {}, {**good, "time": "bad"},
+                   {**good, "time": "2026-11-11T09:00:00"}, {**good, "time": None},
+                   {**good, "passed": "E1"}, {**good, "failed": [1]},
+                   {**good, "failed": ["not an exercise"]}, {**good, "total": True},
+                   {**good, "total": 2}, {**good, "passed": ["E1"]}]
+        self.log.write_bytes(b"broken json\n\xff\n" + b"".join(
+            (json.dumps(entry) + "\n").encode("utf-8") for entry in invalid))
+        self.write_run(good["time"], [], ["E1"])
+        self.assertEqual(timing_report(self.log, "probe"),
+                         "probe: first run 2026-11-11T09:00:00-05:00\n"
+                         "E1: not yet\nRuns: 1\nTotal active: 0 min")
+
+    def test_empty_missing_and_no_matching_set(self):
+        self.assertEqual(timing_report(self.log, "probe"), "No data for probe.")
+        self.log.touch()
+        self.assertEqual(timing_report(self.log, "probe"), "No data for probe.")
+        self.write_run("2026-11-11T09:00:00-05:00", identifier="other")
+        self.assertEqual(timing_report(self.log, "probe"), "No data for probe.")
+
+    def test_cli_file_and_break_options_and_missing_file_exit_zero(self):
+        command = [sys.executable, str(ROOT / "tools/ft_times.py"), "probe",
+                   "--file", str(self.log), "--break-minutes", "3"]
+        missing = subprocess.run(command, cwd=self.temporary.name, capture_output=True, text=True)
+        self.assertEqual((missing.returncode, missing.stdout, missing.stderr), (0, "No data for probe.\n", ""))
+        self.write_run("2026-11-11T09:00:00-05:00", [], ["E1"])
+        self.write_run("2026-11-11T09:05:00-05:00", ["E1"], [])
+        result = subprocess.run(command, cwd=self.temporary.name, capture_output=True, text=True)
+        self.assertEqual((result.returncode, result.stderr), (0, ""))
+        self.assertIn("| 0 min (plus a break of 5 min)", result.stdout)
 
 
 class ReportChecks(unittest.TestCase):
@@ -112,6 +256,64 @@ class PipelineChecks(unittest.TestCase):
 
     def report(self):
         return run_report(self.repo, [self.set_dir], self.work)
+
+    def learner(self, environment=None, *options):
+        env = os.environ.copy()
+        env.update(PYTEST_DISABLE_PLUGIN_AUTOLOAD="1", PYTEST_ADDOPTS="", PYTHONPATH=str(self.repo),
+                   FT_REPORT_MODE="", FT_NO_LOG="")
+        env.update(environment or {})
+        return subprocess.run([sys.executable, "-m", "pytest", str(self.set_dir), "-p", "tools.ft_report",
+                               "-q", "--no-header", *options], cwd=self.work, env=env,
+                              capture_output=True, text=True, encoding="utf-8", errors="replace")
+
+    def test_learner_appends_one_private_log_entry_per_run(self):
+        self.write("sets/probe/pytest.ini", "[pytest]\n")
+        self.write("sets/probe/tests/test_probe.py", "def test_e10_reading():\n    assert False\n"
+                   "def test_e2_low():\n    pass\ndef test_e2_high():\n    pass\n")
+        for count in (1, 2):
+            result = self.learner()
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertTrue(result.stdout.rstrip().endswith("Exercises: 1 / 2 passed"))
+            lines = (self.repo / ".ft-progress.jsonl").read_text(encoding="utf-8").splitlines()
+            self.assertEqual(len(lines), count)
+            entry = json.loads(lines[-1])
+            self.assertEqual(set(entry), {"time", "set", "passed", "failed", "total"})
+            self.assertEqual({key: value for key, value in entry.items() if key != "time"},
+                             {"set": "probe", "passed": ["E2"], "failed": ["E10"], "total": 2})
+            self.assertIsNotNone(datetime.fromisoformat(entry["time"]).utcoffset())
+            self.assertRegex(entry["time"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$")
+
+    def test_progress_logging_exclusions(self):
+        log = self.repo / ".ft-progress.jsonl"
+        self.report()  # --ft-report-json verifier run
+        self.assertFalse(log.exists())
+        for env in ({"FT_REPORT_MODE": "checks"}, {"FT_NO_LOG": "1"}, {"FT_NO_LOG": "0"}):
+            with self.subTest(env=env):
+                self.learner(env)
+                self.assertFalse(log.exists())
+        self.learner({}, "--ft-report-json=")  # Presence alone suppresses logging.
+        self.assertFalse(log.exists())
+        self.write("sets/probe/tests/test_probe.py", "# No exercises collected.\n")
+        self.learner()
+        self.assertFalse(log.exists())
+        self.write("sets/probe/tests/test_probe.py", "def test_e1_reading():\n    pass\n")
+        self.write("sets/probe/conftest.py", "raise RuntimeError('cannot collect')\n")
+        self.learner()
+        self.assertFalse(log.exists())
+
+    def test_logging_oserror_preserves_output_and_exit_status(self):
+        log = self.repo / ".ft-progress.jsonl"
+        for body in ("pass", "assert False"):
+            with self.subTest(body=body):
+                self.write("sets/probe/tests/test_probe.py", f"def test_e1_reading():\n    {body}\n")
+                disabled = self.learner({"FT_NO_LOG": "1"})
+                log.mkdir()
+                try:
+                    unwritable = self.learner()
+                finally:
+                    log.rmdir()
+                self.assertEqual((unwritable.stdout, unwritable.stderr, unwritable.returncode),
+                                 (disabled.stdout, disabled.stderr, disabled.returncode))
 
     def test_interrupted_phase_never_passes(self):
         for phase in ("setup", "call", "teardown"):

@@ -1,6 +1,7 @@
 """Small learner report; --ft-report-json also gives verify_sets exact outcomes."""
 from __future__ import annotations
 
+from datetime import datetime
 import json
 import os
 from pathlib import Path
@@ -184,4 +185,22 @@ def pytest_sessionfinish(session, exitstatus):
             "errors": state["errors"], "failures": state["failures"],
             "exitstatus": int(session.exitstatus),
         }, indent=2), encoding="utf-8")
+    if destination is None and not checks and state["items"] and not os.environ.get("FT_NO_LOG"):
+        try:
+            root = Path(__file__).resolve().parents[1]
+            paths = [Path(item["path"]).resolve() for item in state["items"].values()]
+            if all(path.is_relative_to(root / "sets") for path in paths):
+                identifiers = {path.relative_to(root / "sets").parts[0] for path in paths}
+                if len(identifiers) == 1:
+                    entry = {
+                        "time": datetime.now().astimezone().isoformat(timespec="seconds"),
+                        "set": identifiers.pop(),
+                        "passed": [key for key in ordered if groups[key]["passed"]],
+                        "failed": [key for key in ordered if not groups[key]["passed"]],
+                        "total": total,
+                    }
+                    with (root / ".ft-progress.jsonl").open("a", encoding="utf-8", newline="\n") as log:
+                        log.write(json.dumps(entry) + "\n")
+        except OSError:
+            pass
     print(f"{kind}: {passed} / {total if total is not None else '?'} passed", flush=True)
