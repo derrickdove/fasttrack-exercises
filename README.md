@@ -102,6 +102,8 @@ On capstone-only days, use `(cd capstone && ../.venv/bin/python -m pytest)` for 
 ```text
 sets/d00-hello/       setup check (already correct)
 sets/d01/ …          one folder per daily set
+sets/p01/ …          primers: gentle first steps before d02-d06
+sets/t01/            think-it-through practice
 sets/r1/ …           review sets
 sets/check34/ …      longer checkpoints
   README.md          what to do, exact contracts, readings to reread
