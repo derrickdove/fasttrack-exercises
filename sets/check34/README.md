@@ -1,4 +1,4 @@
-# check34 — Day 34: minimum-ready check
+# check34 — minimum-ready check
 
 **Time:** about 165 minutes · **Read first:** review day; no new reading. Review the earlier readings named below. · **You edit:** `starter/check34.py`
 
@@ -13,7 +13,7 @@ A chassis test station needs to launch its tools, read limits, command a power s
 3. **Time-box this check to 165 minutes:** set a timer, work from E1 to E10, and move on when an exercise's budget expires. The exercises can be completed independently. E10 includes 10 minutes of code work plus 5 minutes reserved for reading these instructions and rerunning tests throughout the check. Record unfinished exercises and the ones that took longest.
 4. Report **all pass / partial / stuck** in the tracker when time is up. Use the reread table to choose your next practice.
 
-The earlier readings to keep nearby are Python Tutorial §5 (data structures), §7.2 (files), and §8 (exceptions); the `csv`, `dataclasses`, `subprocess`, `socket`, `threading`, `queue`, `typing.Protocol`, `collections.deque`, `struct`, and `zlib.crc32` documentation; pytest “Get started” and “How to write and report assertions”; and the day 27 serial-number arithmetic overview. Each exercise identifies the relevant part precisely.
+The earlier readings to keep nearby are Python Tutorial §5 (data structures), §7.2 (files), and §8 (exceptions); the `csv`, `dataclasses`, `subprocess`, `socket`, `threading`, `queue`, `typing.Protocol`, `collections.deque`, `struct`, and `zlib.crc32` documentation; pytest “Get started” and “How to write and report assertions”; and d27's serial-number arithmetic reading. Each exercise identifies the relevant part precisely.
 
 A **test harness** is the supplied test code that calls your work and checks its behavior. An **interface** lists the operations an object promises to provide. A **contract** states inputs, outputs, and errors. A **dataclass** supplies fields, construction, and equality automatically; all four supplied data classes are frozen, meaning you cannot assign new values to their fields. A **callable** is a function or other object that you can call. An **iterable** can supply items one at a time; some iterables can be consumed only once. `None` means no value, and **finite** excludes `nan` (not a number), `inf`, and `-inf`.
 
@@ -247,7 +247,7 @@ The supplied worker checks the stop flag between receives, records any failure i
 
 ## If you failed Ek, reread dXX
 
-| Failed exercise | Reread days and focus |
+| Failed exercise | Reread sets and focus |
 | --- | --- |
 | E1 | d33 subprocess arguments, output capture, exit codes, and timeout cleanup |
 | E2 | d09 pytest assertions and boundary cases |

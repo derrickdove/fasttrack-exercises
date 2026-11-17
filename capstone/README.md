@@ -1,8 +1,8 @@
 # Build a mini chassis tester
 
-**Time:** about 1895 minutes across the plan; daily estimates are below.
+**Time:** about 1895 minutes across the plan; task estimates are below.
 
-A chassis tester is software that connects to instruments and checks a piece of hardware, such as an electronics chassis. Over the 54-day plan you will build `chassis`, a Python package (a folder of related Python modules, each stored in a `.py` file) that does this job in small blocks.
+A chassis tester is software that connects to instruments and checks a piece of hardware, such as an electronics chassis. Over the plan you will build `chassis`, a Python package (a folder of related Python modules, each stored in a `.py` file) that does this job in small blocks.
 
 This project follows the work of a test-station software engineer. You will write drivers (code that sends commands to instruments), Themis-style checking (comparing measurements with allowed limits and reporting PASS, FAIL, or ERROR), telemetry (measurements sent over a network), operator tools (commands and a status page for the person running a test), and deployment files (instructions for installing and running the software on a station). Each block adds one part to the same package.
 
@@ -10,7 +10,7 @@ This project follows the work of a test-station software engineer. You will writ
 
 Use Bash (the Linux command shell) on Linux or WSL (Windows Subsystem for Linux, which runs Linux on Windows) for your daily loop.
 
-1. On day 4, use Git, a tool that records your project's history in a repository. A commit is a saved version of your files. Open a terminal in this `capstone/` folder. The supplied `pyproject.toml` describes the package and its Python/tool settings; `chassis/__init__.py` marks the package. Keep both. Run these commands in order, replacing the name and email with your own; `git config` sets the identity recorded on commits in this repository:
+1. When you start your capstone, use Git, a tool that records your project's history in a repository. A commit is a saved version of your files. Open a terminal in this `capstone/` folder. The supplied `pyproject.toml` describes the package and its Python/tool settings; `chassis/__init__.py` marks the package. Keep both. Run these commands in order, replacing the name and email with your own; `git config` sets the identity recorded on commits in this repository:
 
    ```text
    git init
@@ -21,14 +21,14 @@ Use Bash (the Linux command shell) on Linux or WSL (Windows Subsystem for Linux,
    ```
 
    `git add .` selects the current files for the next commit. This repository lives inside the exercises clone; run your project git commands from `capstone/`.
-2. From day 8, use a branch for each feature, following that day's branch reading. A branch is a separate line of work that you can merge (combine) into your main line when it works. Before starting one, run `git branch --show-current` and note your main line's name (usually `main` or `master`). For example, `git switch -c limit-files` starts a feature branch; after committing the finished feature, run `git switch main` (use the name you noted), then `git merge limit-files`. Work directly on your initial line through day 6.
+2. After the branch reading, use a branch for each feature. A branch is a separate line of work that you can merge (combine) into your main line when it works. Before starting one, run `git branch --show-current` and note your main line's name (usually `main` or `master`). For example, `git switch -c limit-files` starts a feature branch; after committing the finished feature, run `git switch main` (use the name you noted), then `git merge limit-files`. Work directly on your initial line through Block 1.
 3. Write your code in `chassis/` and your own tests in `tests/` (that is, `capstone/tests/` from the exercises root). A test is a small function that checks an example with `assert`, which raises an error if its condition is false. Use pytest, the test runner installed with the exercises. From this `capstone/` folder, run `../.venv/bin/python -m pytest` on WSL/Linux (or Mac) or `..\.venv\Scripts\python -m pytest` on Windows; your tests can import `from chassis.models import Limit`, for example.
 4. Run the supplied gate after each feature and at the end of the block. A gate is a suite of checks for the public interfaces listed below; don't edit `gates/` to make your code pass. Later gates also run all earlier blocks. `Checks: N / M passed` tells you how many individual checks passed. A missing-module error is expected until you create the named files.
 5. Commit working changes and report all pass / partial / stuck in the tracker. Keep your own tests as you add later blocks.
 
-Within the first five minutes of each existing slot, run `pwd` to show the current folder and `git status --short` to list changed files from inside `capstone/`. Run the current gate from the exercises root with `bash tools/run.sh b4`, for example. On capstone-only days, run `(cd capstone && ../.venv/bin/python -m pytest)` from the exercises root; `cd` changes folders, `&&` runs the next command only if that succeeds, and parentheses keep the folder change inside that command. After editing, rerun the tests and run `git diff` inside `capstone/` to inspect your changes. This uses the existing task time.
+Within the first five minutes of each existing slot, run `pwd` to show the current folder and `git status --short` to list changed files from inside `capstone/`. Run the current gate from the exercises root with `bash tools/run.sh b4`, for example. For capstone-only tasks, run `(cd capstone && ../.venv/bin/python -m pytest)` from the exercises root; `cd` changes folders, `&&` runs the next command only if that succeeds, and parentheses keep the folder change inside that command. After editing, rerun the tests and run `git diff` inside `capstone/` to inspect your changes. This uses the existing task time.
 
-## Before day 5: your first temporary-file test
+## Before the limit-file parsing task: your first temporary-file test
 
 pytest finds files named `test_*.py` and functions whose names start with `test_`. Each function checks behavior with assertions (`assert`); a false assertion fails the test. A fixture is reusable test setup that pytest supplies when you put its name in a test function's arguments. The built-in `tmp_path` fixture supplies a fresh temporary folder as a `pathlib.Path`, Python's object for a file or folder path. pytest manages that folder so your test does not overwrite project files.
 
@@ -54,9 +54,9 @@ def test_e1_limit_csv_round_trip(tmp_path: Path) -> None:
 
 `tmp_path / "limits.csv"` makes a file path inside the temporary folder. `write_text` writes the supplied text; `\n` starts a new line. `csv.DictReader` returns each row as a dictionary (a mapping from unique keys to values), using header names as keys and cell text as string values. `newline=""` lets the CSV reader handle line endings on Windows and Linux.
 
-From `capstone/`, run exactly `../.venv/bin/python -m pytest tests/test_limit_csv_example.py -q` on WSL/Linux (or Mac), or `..\.venv\Scripts\python -m pytest tests/test_limit_csv_example.py -q` on Windows. Expect `1 passed`. Spend the first ~5 minutes of day 5's existing 50-minute slot running and reading this example. Use its temporary-file pattern for your own parser tests during the remaining ~45 minutes; assert your parser's returned values and errors as you implement it.
+From `capstone/`, run exactly `../.venv/bin/python -m pytest tests/test_limit_csv_example.py -q` on WSL/Linux (or Mac), or `..\.venv\Scripts\python -m pytest tests/test_limit_csv_example.py -q` on Windows. Expect `1 passed`. Spend the first ~5 minutes of the limit-file parsing task's existing 50-minute slot running and reading this example. Use its temporary-file pattern for your own parser tests during the remaining ~45 minutes; assert your parser's returned values and errors as you implement it.
 
-## Block 1 - models and limit files (days 4-6, gate b1 on day 14)
+## Block 1 - models and limit files (gate b1)
 
 Build small records for instrument measurements and allowed limits, then load those limits from a CSV file. Reject invalid limits with useful file line numbers so an operator can fix the file before a test runs.
 
@@ -128,16 +128,16 @@ Raise `LimitFileError` for a bad header, a row with the wrong number of columns,
 
 ### Suggested order
 
-- **Day 4 (~45 minutes): Start your capstone: git init, pyproject.toml, the chassis package.** Follow the setup above, inspect the supplied package files, make your first commit, and write `Status` in `chassis/models.py`. Check that each member's `.value` is the specified string.
-- **Day 5 (~50 minutes): Parse limit-file rows: skip blanks and comments, with line-numbered errors.** Use the standard-library `csv` module to read the header and rows. Strip whitespace, convert nonempty bounds with `float`, and check column counts, empty names, and duplicates. Keep physical line numbers even when skipping blanks and `#` comments. Start with the temporary-file example above, then use the same pattern in your own parser tests; today you can hold parsed fields in tuples until the records are ready.
-- **Day 6 (~55 minutes): Measurement and Limit dataclasses; finish load_limits() returning Limit objects.** Add both records and `Limit.__post_init__`, then turn yesterday's parsed fields into a dictionary of `Limit` objects. Wrap invalid bounds in `LimitFileError` with the row's physical line number. Test two bounds, one missing bound, equal bounds, NaN, reversed bounds, and both bounds missing; commit the working code. Branch work starts on day 8.
-- **Day 14 (~10 minutes): Run gate b1 on your capstone.** Save your files, run the gate, and use each failing check's name and message to fix the behavior. The tracker puts this gate on the Sunday review, but run it as soon as your day 6 work is finished: Block 2 starts on day 9 and builds on these records and limits.
+- **(~45 minutes) Start your capstone: git init, pyproject.toml, the chassis package.** Follow the setup above, inspect the supplied package files, make your first commit, and write `Status` in `chassis/models.py`. Check that each member's `.value` is the specified string.
+- **(~50 minutes) Parse limit-file rows: skip blanks and comments, with line-numbered errors.** Use the standard-library `csv` module to read the header and rows. Strip whitespace, convert nonempty bounds with `float`, and check column counts, empty names, and duplicates. Keep physical line numbers even when skipping blanks and `#` comments. Start with the temporary-file example above, then use the same pattern in your own parser tests; for now you can hold parsed fields in tuples until the records are ready.
+- **(~55 minutes) Measurement and Limit dataclasses; finish load_limits() returning Limit objects.** Add both records and `Limit.__post_init__`, then turn the previous task's parsed fields into a dictionary of `Limit` objects. Wrap invalid bounds in `LimitFileError` with the row's physical line number. Test two bounds, one missing bound, equal bounds, NaN, reversed bounds, and both bounds missing; commit the working code. Start using branches before Block 2.
+- **(~10 minutes) Run gate b1 on your capstone.** Save your files, run the gate, and use each failing check's name and message to fix the behavior. The tracker schedules this gate later, but run it as soon as Block 1 is finished: Block 2 builds on these records and limits.
 
 Run: Ctrl+Shift+B → Gate: b1
 
 From a terminal at the exercises root: `bash tools/run.sh b1` on WSL/Linux (or Mac), or `tools\run.ps1 b1` on Windows. The gate runs your `chassis` package; your own tests stay in `capstone/tests/`.
 
-## Block 2 - result checking and reports (days 9-15, gate b2 on day 21)
+## Block 2 - result checking and reports (gate b2)
 
 Build a small Themis-style checker that compares your Block 1 measurements with their limits and records PASS, FAIL, or ERROR. Add a JSON report for other software and a short text summary for the operator so a run's outcome is easy to inspect.
 
@@ -244,19 +244,19 @@ Empty input gives just `OVERALL: ERROR (0 pass, 0 fail, 0 error)`. A final newli
 
 ### Suggested order
 
-- **Day 9 (~40 minutes): Add type hints everywhere and make mypy --strict clean.** Start your Block 2 feature branch. Check your Block 1 functions and fields, then run `../.venv/bin/python -m mypy --strict chassis` from `capstone/` on WSL/Linux (or Mac), or `..\.venv\Scripts\python -m mypy --strict chassis` on Windows. Keep this check clean as you add the new modules.
-- **Day 10 (~55 minutes): themis.check() for one measurement against one limit.** Add `CheckResult` and `check`. Write your own pytest tests for a normal reading, both inclusive endpoints, each failure bound, a unit mismatch, and NaN.
-- **Day 11 (~55 minutes): check_all() for a whole test with missing and unexpected measurements.** Match names with dictionaries, detect duplicates before overwriting any reading, and sort the two groups of names. Test missing readings, unexpected readings, repeated names, and an iterator as input.
-- **Day 12 (~50 minutes): Parametrized tests for themis (every bound and status case).** Group related examples with `pytest.mark.parametrize`. Include one-sided limits, zero bounds, equal bounds, FAIL, and ERROR. Use fixtures in your own tests for shared setup; gate helpers belong to the supplied gate, not your package.
-- **Day 13 (~55 minutes): report.write_json_report() and summary_text().** Write sample results to a temporary file, read the JSON back, and check its fields and counts. Test a mix of statuses, empty input, and non-finite result numbers written as `null`. Both reports need the overall decision; write a first version of `overall` now, then finish its coverage in the next capstone task (day 15).
-- **Day 15 (~45 minutes): overall(), clean up, mypy clean, merge your Block 2 branch.** Test status priority and empty input, rerun your own tests, and make `mypy --strict chassis` clean. Review names and messages, commit, and merge the working branch into your main branch.
-- **Day 21 (~10 minutes): Run gate b2 on your capstone.** Run it as soon as your day 15 work is merged, and fix failing checks before Block 3 starts on day 17. This gate reruns b1 too, so your existing models and limit loader must still work.
+- **(~40 minutes) Add type hints everywhere and make mypy --strict clean.** Start your Block 2 feature branch. Check your Block 1 functions and fields, then run `../.venv/bin/python -m mypy --strict chassis` from `capstone/` on WSL/Linux (or Mac), or `..\.venv\Scripts\python -m mypy --strict chassis` on Windows. Keep this check clean as you add the new modules.
+- **(~55 minutes) themis.check() for one measurement against one limit.** Add `CheckResult` and `check`. Write your own pytest tests for a normal reading, both inclusive endpoints, each failure bound, a unit mismatch, and NaN.
+- **(~55 minutes) check_all() for a whole test with missing and unexpected measurements.** Match names with dictionaries, detect duplicates before overwriting any reading, and sort the two groups of names. Test missing readings, unexpected readings, repeated names, and an iterator as input.
+- **(~50 minutes) Parametrized tests for themis (every bound and status case).** Group related examples with `pytest.mark.parametrize`. Include one-sided limits, zero bounds, equal bounds, FAIL, and ERROR. Use fixtures in your own tests for shared setup; gate helpers belong to the supplied gate, not your package.
+- **(~55 minutes) report.write_json_report() and summary_text().** Write sample results to a temporary file, read the JSON back, and check its fields and counts. Test a mix of statuses, empty input, and non-finite result numbers written as `null`. Both reports need the overall decision; write a first version of `overall` now, then finish its coverage in the next capstone task, **overall(), clean up, mypy clean, merge your Block 2 branch**.
+- **(~45 minutes) overall(), clean up, mypy clean, merge your Block 2 branch.** Test status priority and empty input, rerun your own tests, and make `mypy --strict chassis` clean. Review names and messages, commit, and merge the working branch into your main branch.
+- **(~10 minutes) Run gate b2 on your capstone.** Run it as soon as your Block 2 work is merged, and fix failing checks before starting Block 3. This gate reruns b1 too, so your existing models and limit loader must still work.
 
 Run: Ctrl+Shift+B → Gate: b2
 
 From a terminal at the exercises root: `bash tools/run.sh b2` on WSL/Linux (or Mac), or `tools\run.ps1 b2` on Windows. Your own tests still run separately from `capstone/tests/`.
 
-## Block 3 - instrument drivers (days 17-24, gate b3 on day 28)
+## Block 3 - instrument drivers (gate b3)
 
 Build drivers that control a power supply and read a digital multimeter through VISA, a serial port, or an Ethernet connection. Keep the same driver methods for all three transports. Test the commands without hardware, and make the power supply turn its outputs off whenever its context ends, including after a failed test step.
 
@@ -395,19 +395,19 @@ Create `chassis/instruments/__init__.py` and re-export `InstrumentError`, `Trans
 
 ### Suggested order
 
-- **Day 17 (~45 minutes): instruments/base.py: InstrumentError, Transport, parse_error().** Start your Block 3 branch. Define the transport methods, add the error's code and message, and test valid error replies and garbage.
-- **Day 18 (~55 minutes): VisaTransport over pyvisa, tested against pyvisa-sim.** Open a simulated resource, set timeout and termination strings, then implement forwarding, whitespace stripping, closing, and the context manager. Check that the resource closes before its manager. Open the simulated PSU and DMM together, close either transport, and check that the other still works; finally close the remaining transport and manager.
-- **Day 19 (~60 minutes): PowerSupply and Dmm drivers with envelope checks.** Add the public methods and re-exports. Check each command's spelling and order, float conversion, and allowed endpoints. Reject out-of-range values before any transport write.
-- **Day 20 (~60 minutes): PSU teardown, check_errors(), and your own FakeTransport tests.** Turn all configured outputs off on context exit and drain error queues with the 20-read cap, preserving the first error. In `capstone/tests/`, make a fake that records writes and queries and scripts several replies per query. Test command order, invalid input with no writes, an exception in the body, a shutdown error, and both together.
-- **Day 23 (~50 minutes): SerialTransport over pyserial, tested with loop://.** Open a loop port, send terminated ASCII commands, and read a complete reply with a timeout. Test framing, stripped replies, incomplete replies, closing, and context cleanup. A helper can consume each command's echo on the same port and write a simulated instrument reply so you can reuse both drivers.
-- **Day 24 (~55 minutes): TcpTransport for SCPI over Ethernet, plus driver docs.** Spend ~25 minutes adapting your own d23 client code to `TcpTransport`: use ASCII, the configurable terminator, and stripped replies while retaining its buffering, timeouts, and connection cleanup. Reuse both drivers unchanged. Spend ~15 minutes testing with the complete fake server below, ~10 minutes filling the short driver-doc template for each driver in `capstone/docs/`, and ~5 minutes rerunning your tests and `mypy --strict chassis`, then committing and merging. A failure mode is a way an operation can fail, such as a timeout or failed shutdown.
-- **Day 28 (~10 minutes): Run gate b3 on your capstone.** Save your files, run the gate, and fix failing checks. It reruns b1 and b2 as well as the new drivers.
+- **(~45 minutes) instruments/base.py: InstrumentError, Transport, parse_error().** Start your Block 3 branch. Define the transport methods, add the error's code and message, and test valid error replies and garbage.
+- **(~55 minutes) VisaTransport over pyvisa, tested against pyvisa-sim.** Open a simulated resource, set timeout and termination strings, then implement forwarding, whitespace stripping, closing, and the context manager. Check that the resource closes before its manager. Open the simulated PSU and DMM together, close either transport, and check that the other still works; finally close the remaining transport and manager.
+- **(~60 minutes) PowerSupply and Dmm drivers with envelope checks.** Add the public methods and re-exports. Check each command's spelling and order, float conversion, and allowed endpoints. Reject out-of-range values before any transport write.
+- **(~60 minutes) PSU teardown, check_errors(), and your own FakeTransport tests.** Turn all configured outputs off on context exit and drain error queues with the 20-read cap, preserving the first error. In `capstone/tests/`, make a fake that records writes and queries and scripts several replies per query. Test command order, invalid input with no writes, an exception in the body, a shutdown error, and both together.
+- **(~50 minutes) SerialTransport over pyserial, tested with loop://.** Open a loop port, send terminated ASCII commands, and read a complete reply with a timeout. Test framing, stripped replies, incomplete replies, closing, and context cleanup. A helper can consume each command's echo on the same port and write a simulated instrument reply so you can reuse both drivers.
+- **(~55 minutes) TcpTransport for SCPI over Ethernet, plus driver docs.** Spend ~25 minutes adapting your own d23 client code to `TcpTransport`: use ASCII, the configurable terminator, and stripped replies while retaining its buffering, timeouts, and connection cleanup. Reuse both drivers unchanged. Spend ~15 minutes testing with the complete fake server below, ~10 minutes filling the short driver-doc template for each driver in `capstone/docs/`, and ~5 minutes rerunning your tests and `mypy --strict chassis`, then committing and merging. A failure mode is a way an operation can fail, such as a timeout or failed shutdown.
+- **(~10 minutes) Run gate b3 on your capstone.** Save your files, run the gate, and fix failing checks. It reruns b1 and b2 as well as the new drivers.
 
 Run: Ctrl+Shift+B → Gate: b3
 
 From a terminal at the exercises root: `bash tools/run.sh b3` on WSL/Linux (or Mac), or `tools\run.ps1 b3` on Windows. Your own tests still run separately from `capstone/tests/`.
 
-### Day 24: fake TCP server and driver-doc template
+### TcpTransport task: fake TCP server and driver-doc template
 
 Copy this complete helper and test into `capstone/tests/test_tcp_transport.py`. The remaining work is your `TcpTransport` implementation, additional tests for the cases below, and the two short driver documents. A thread runs work alongside your test; `threading.Event` signals it to stop, and `join` waits for it to finish. `queue.Queue` passes recorded commands safely between threads. A `bytes` value holds raw bytes; the `b` prefix makes one, such as `b"OK\n"`. The reply dictionary maps each SCPI command to a tuple (an ordered group of values) of byte pieces to send; an absent command gets no reply. Here `@contextmanager` makes the helper usable in a `with` block: `yield` supplies the port and command queue, and `finally` runs cleanup on exit.
 
@@ -505,9 +505,11 @@ Failure modes: <invalid settings before any write; incomplete/silent reply
 and timeout; instrument error queue; failed output shutdown, as applicable>.
 ```
 
-## Block 4 - telemetry (days 25-32, gate b4 on day 35)
+## Block 4 - telemetry (gate b4)
 
-**Time:** about 335 minutes, split across the days below.
+Optional: build this block only if you have time; the core plan does not need it.
+
+**Time:** about 335 minutes, split across the tasks below.
 
 Build telemetry packets that carry chassis readings over a network, and track sequence numbers to find readings that have not arrived. Add a UDP listener that receives packets from two UUTs (units under test) in the background, tracks each source separately, reports damaged packets, and stops cleanly when the test ends.
 
@@ -629,19 +631,21 @@ for source, missing in listener.gap_report().items():
 
 ### Suggested order
 
-- **Day 25 (~30 minutes): Read this brief and sketch the telemetry packet layout by hand.** Start your Block 4 branch. Draw each field's offset, size, and type, including two readings and the CRC; calculate the total length. Practise UDP separately in the day's exercise.
-- **Day 26 (~60 minutes): `build_packet()` and `parse_packet()` with full validation.** Spend ~30 minutes starting from your own working d26 packet builder and parser, copying them into `chassis/telemetry.py` and adapting names and return records to `PacketError`, `Packet`, and the interfaces above. Spend ~30 minutes writing your own tests in `capstone/tests/`: use independent byte examples assembled from the layout above, without calling your builder to create parser inputs or expected bytes. Check building and parsing separately, every required rejection, zero readings, and boundary channel numbers.
-- **Day 27 (~70 minutes): `SequenceTracker`.** Spend ~30 minutes starting from your own working d27 gap tracker, copying it into `chassis/telemetry.py` and adapting names and any records to the interface above. Spend ~30 minutes writing your own tests in `capstone/tests/`, choosing inputs and expected results independently of that implementation. Cover consecutive numbers, gaps, wraparound, recent duplicates, and delayed arrivals that repair gaps without moving the forward position back. Inspect the returned gaps, public counters, and `missing`, including a duplicate of a delayed repair.
-- **Day 29 (~55 minutes): Your own telemetry tests for packets, CRC, and gaps at wraparound.** Keep tests in `capstone/tests/`. Include independently packed bytes so an encoder and decoder with the same bug cannot hide each other's mistake. Change a byte to break the CRC, and give duplicate channels a valid CRC to test that separate check.
-- **Day 30 (~50 minutes): Replay the supplied pcap through your parser and SequenceTracker.** Reuse your working day-30 reader, `udp_payloads(path, port)` from `sets/d30/starter/pcap.py`, with `sets/d30/data/telemetry.pcap` and destination port `5005`. Resolve that path from the exercises root; you may copy your reader and its helpers into a test-support module in your capstone. Extract payloads in file order, pass each to the capstone `parse_packet`, catch `PacketError` for a corrupt payload, count it, and continue; only valid packets reach `SequenceTracker.update`. Do not use `telemetry_from_capture` here: it would bypass your capstone parser. Assert four extracted payloads, one rejected payload, valid sequences `[40, 42, 43]`, readings `[{1: 12.5, 3: -2.0}, {}, {7: 28.0}]`, `received == 3`, zero duplicates and out-of-order packets, and `missing == {41}`. Keep separate synthetic tests (tests using bytes you construct) for duplicates and delayed repairs. Replay needs no socket or listener.
-- **Day 32 (~60 minutes): TelemetryListener: UDP thread, Event, timeout, clean stop(), and tests.** Bind to loopback with port 0, receive and parse datagrams, keep one tracker per sender address, and call `on_packet`. Send from two separately bound loopback sockets, each using port 0: identical sequences must not be duplicates across sources, and gaps, duplicates, and late repairs in one source must leave the other unchanged. Check that `gap_report()` names each source and retains the results after stopping. Use a queue with a timeout to observe callbacks. Implement Event-based shutdown and the context manager; test idle shutdown, a body exception, and bad packets followed by a good one, with and without `on_error`. Always stop listeners and join threads in cleanup. Rerun your tests and `mypy --strict chassis`, then commit and merge.
-- **Day 35 (~10 minutes): Run gate b4 on your capstone.** Save all files and fix failing checks. This gate runs b1 through b4, so models, limits, checking, reports, and drivers must keep working.
+- **(~30 minutes) Read this brief and sketch the telemetry packet layout by hand.** Start your Block 4 branch. Draw each field's offset, size, and type, including two readings and the CRC; calculate the total length. Practise UDP separately in d25.
+- **(~60 minutes) `build_packet()` and `parse_packet()` with full validation.** Spend ~30 minutes starting from your own working d26 packet builder and parser, copying them into `chassis/telemetry.py` and adapting names and return records to `PacketError`, `Packet`, and the interfaces above. Spend ~30 minutes writing your own tests in `capstone/tests/`: use independent byte examples assembled from the layout above, without calling your builder to create parser inputs or expected bytes. Check building and parsing separately, every required rejection, zero readings, and boundary channel numbers.
+- **(~70 minutes) `SequenceTracker`.** Spend ~30 minutes starting from your own working d27 gap tracker, copying it into `chassis/telemetry.py` and adapting names and any records to the interface above. Spend ~30 minutes writing your own tests in `capstone/tests/`, choosing inputs and expected results independently of that implementation. Cover consecutive numbers, gaps, wraparound, recent duplicates, and delayed arrivals that repair gaps without moving the forward position back. Inspect the returned gaps, public counters, and `missing`, including a duplicate of a delayed repair.
+- **(~55 minutes) Your own telemetry tests for packets, CRC, and gaps at wraparound.** Keep tests in `capstone/tests/`. Include independently packed bytes so an encoder and decoder with the same bug cannot hide each other's mistake. Change a byte to break the CRC, and give duplicate channels a valid CRC to test that separate check.
+- **(~50 minutes) Replay the supplied pcap through your parser and SequenceTracker.** Reuse your working d30 reader, `udp_payloads(path, port)` from `sets/d30/starter/pcap.py`, with `sets/d30/data/telemetry.pcap` and destination port `5005`. Resolve that path from the exercises root; you may copy your reader and its helpers into a test-support module in your capstone. Extract payloads in file order, pass each to the capstone `parse_packet`, catch `PacketError` for a corrupt payload, count it, and continue; only valid packets reach `SequenceTracker.update`. Do not use `telemetry_from_capture` here: it would bypass your capstone parser. Assert four extracted payloads, one rejected payload, valid sequences `[40, 42, 43]`, readings `[{1: 12.5, 3: -2.0}, {}, {7: 28.0}]`, `received == 3`, zero duplicates and out-of-order packets, and `missing == {41}`. Keep separate synthetic tests (tests using bytes you construct) for duplicates and delayed repairs. Replay needs no socket or listener.
+- **(~60 minutes) TelemetryListener: UDP thread, Event, timeout, clean stop(), and tests.** Bind to loopback with port 0, receive and parse datagrams, keep one tracker per sender address, and call `on_packet`. Send from two separately bound loopback sockets, each using port 0: identical sequences must not be duplicates across sources, and gaps, duplicates, and late repairs in one source must leave the other unchanged. Check that `gap_report()` names each source and retains the results after stopping. Use a queue with a timeout to observe callbacks. Implement Event-based shutdown and the context manager; test idle shutdown, a body exception, and bad packets followed by a good one, with and without `on_error`. Always stop listeners and join threads in cleanup. Rerun your tests and `mypy --strict chassis`, then commit and merge.
+- **(~10 minutes) Run gate b4 on your capstone (optional).** Save all files and fix failing checks. This gate runs b1 through b4, so models, limits, checking, reports, and drivers must keep working.
 
 Run: Ctrl+Shift+B → Gate: b4
 
 From a terminal at the exercises root: `bash tools/run.sh b4` on WSL/Linux (or Mac), or `tools\run.ps1 b4` on Windows. The gate uses local UDP only; no instruments or internet are needed. Your own tests still run separately from `capstone/tests/`.
 
-## Block 5 - test executor and operator CLI (days 33-40, gate b5 on day 42)
+## Block 5 - test executor and operator CLI (gate b5)
+
+The executor and CI tasks are core; the CLI tasks and gate b5 are optional.
 
 Build an executor that runs chassis test steps in order and always cleans up the steps it started, even when a reading fails or the operator interrupts the run. Add an operator command that checks saved measurements, prints a summary, and optionally writes the JSON report from Block 2.
 
@@ -660,7 +664,7 @@ Build an executor that runs chassis test steps in order and always cleans up the
 
 ### Exact interfaces
 
-Keep Blocks 1 through 4 working. Create `chassis/executor.py`, importing `enum`, `dataclass`, `Callable` from `collections.abc`, your `Measurement` and `Limit`, and Block 2's `CheckResult`:
+Keep Blocks 1 through 3 working, and Block 4 if you built it. Create `chassis/executor.py`, importing `enum`, `dataclass`, `Callable` from `collections.abc`, your `Measurement` and `Limit`, and Block 2's `CheckResult`:
 
 ```python
 class RunState(enum.Enum):
@@ -753,20 +757,22 @@ Use your exercise environment's Python path if `python` does not select it. No a
 
 ### Suggested order
 
-- **Day 33 (~50 minutes): `executor.py`: `RunState` and `TestStep`.** Start your Block 5 branch. Add the enum and records, including `RunResult`, then sketch the normal state transitions. Write a tiny step that returns a `Measurement` without using hardware.
-- **Day 34: No capstone task.** The tracker reserves today for the minimum-ready timed check. On day 36, write notes about your three weakest areas and use them to choose which daily sets to revisit this week.
-- **Day 37 (~60 minutes, after the separate 45-minute d37 set): `run_sequence()` with guaranteed teardown.** First complete [d37: Test sequences as state machines](../sets/d37/README.md) as its own tracker task. Then use the full 60-minute capstone slot to implement `run_sequence()`: run two successful capstone steps, register cleanup before setup, and handle exceptions with reverse-order teardown. Write your own tests for a failing setup, a failing run, Ctrl+C represented by raising `KeyboardInterrupt`, and a teardown failure that must not prevent other cleanup. Replace 5 minutes of successful-run practice with an abort followed by failed cleanup: check that the final state is ERROR, the abort remains in the log, earlier readings remain in the results, and all remaining cleanup runs. Check the callback order and final state.
-- **Day 38 (~60 minutes): Operator CLI: `chassis check` with exit codes 0/1/2/3.** Add `main`, parse the required paths, load both files, reuse checking and text reporting, and return the right integer. Test PASS, FAIL, ERROR, and invalid input separately; capture stdout and stderr with pytest's `capsys` fixture.
-- **Day 39 (~55 minutes): `python -m chassis`, JSON report from the CLI, and CLI tests.** Add `__main__.py`, the optional report and station arguments, and metadata. Test paths with spaces, read a generated JSON report back, and use `subprocess.run` with a timeout to check the actual module command and process exit code.
-- **Day 40 (~55 minutes): Push to GitHub, add CI (pytest + mypy), open your first PR.** Push your capstone repository and branch, add a GitHub Actions workflow (a file describing automated jobs) that installs the tools and runs `python -m pytest --junitxml=report.xml` and `python -m mypy --strict chassis` from your capstone repository root, then open a PR. The pytest option writes a JUnit XML test report, a structured text file of test outcomes, as practised in d13's JUnit lab. Add an `actions/upload-artifact` step to save `report.xml` as a downloadable artifact (a file retained with the workflow run); set its `path` to `report.xml` and `if: always()` so the report is uploaded even when tests fail. Download it from a workflow run and inspect its test outcomes. Review your diff before merging. From now on, use a PR for each capstone change and require CI to pass; the gate checks program behavior, not your GitHub account or workflow files.
-- **Day 42 (~10 minutes): Run gate b5 on your capstone.** Save your files and fix failing checks. This gate reruns b1 through b5, so models, limits, checking, reports, drivers, and telemetry must keep working.
+- **(~50 minutes) `executor.py`: `RunState` and `TestStep`.** Start your Block 5 branch. Add the enum and records, including `RunResult`, then sketch the normal state transitions. Write a tiny step that returns a `Measurement` without using hardware.
+- **No capstone task while doing the minimum-ready check (check34).** After check34, write notes about your three weakest areas and use them to choose which sets to revisit.
+- **(~60 minutes, after the separate 45-minute d37 set) `run_sequence()` with guaranteed teardown.** First complete [d37: Test sequences as state machines](../sets/d37/README.md) as its own tracker task. Then use the full 60-minute capstone slot to implement `run_sequence()`: run two successful capstone steps, register cleanup before setup, and handle exceptions with reverse-order teardown. Write your own tests for a failing setup, a failing run, Ctrl+C represented by raising `KeyboardInterrupt`, and a teardown failure that must not prevent other cleanup. Replace 5 minutes of successful-run practice with an abort followed by failed cleanup: check that the final state is ERROR, the abort remains in the log, earlier readings remain in the results, and all remaining cleanup runs. Check the callback order and final state.
+- **(~60 minutes) Operator CLI: `chassis check` with exit codes 0/1/2/3 (optional).** Add `main`, parse the required paths, load both files, reuse checking and text reporting, and return the right integer. Test PASS, FAIL, ERROR, and invalid input separately; capture stdout and stderr with pytest's `capsys` fixture.
+- **(~55 minutes) `python -m chassis`, JSON report from the CLI, and CLI tests (optional).** Add `__main__.py`, the optional report and station arguments, and metadata. Test paths with spaces, read a generated JSON report back, and use `subprocess.run` with a timeout to check the actual module command and process exit code.
+- **(~55 minutes) Push to GitHub, add CI (pytest + mypy), open your first PR.** Push your capstone repository and branch, add a GitHub Actions workflow (a file describing automated jobs) that installs the tools and runs `python -m pytest --junitxml=report.xml` and `python -m mypy --strict chassis` from your capstone repository root, then open a PR. The pytest option writes a JUnit XML test report, a structured text file of test outcomes, as practised in d13's JUnit lab. Add an `actions/upload-artifact` step to save `report.xml` as a downloadable artifact (a file retained with the workflow run); set its `path` to `report.xml` and `if: always()` so the report is uploaded even when tests fail. Download it from a workflow run and inspect its test outcomes. Review your diff before merging. From now on, use a PR for each capstone change and require CI to pass; the gate checks program behavior, not your GitHub account or workflow files.
+- **(~10 minutes) Run gate b5 on your capstone (optional).** Save your files and fix failing checks. This gate reruns b1 through b5, so models, limits, checking, reports, drivers, and telemetry must keep working.
 
 Run: Ctrl+Shift+B → Gate: b5
 
 From a terminal at the exercises root: `bash tools/run.sh b5` on WSL/Linux (or Mac), or `tools\run.ps1 b5` on Windows. Your own tests still run separately from `capstone/tests/`; the gate uses saved CSV files and local processes, with no hardware or internet needed.
 
 
-## Block 6 - station config, operator status page, and deployment (days 41-50, gate b6 on day 51)
+## Block 6 - station config, operator status page, and deployment (gate b6)
+
+Optional: build this block only if you have time; the core plan does not need it.
 
 Describe a station's instruments and hardware assignments in a checked configuration file, then expose its current status and latest report to an operator. Add installation and startup instructions as deployment files so another technician can reproduce the station setup.
 
@@ -890,19 +896,19 @@ The gate reads these files; it never runs Docker, systemd, or Ansible. Despite t
 
 ### Suggested order
 
-- **Day 41 (~60 minutes): `config.py`: station config in TOML, validated.** Start your Block 6 branch and PR. Add the records, load a small station file, and check the required errors. Keep error messages useful to an operator. Write your own tests in `capstone/tests/` using temporary files.
-- **Day 43 (~50 minutes): `web.py`: `/status` and `/results/latest`.** Add the app, setters, and endpoints. Test default status, updated status, missing report, and replacing a report with `TestClient`. Read a Block 2 JSON report into a dictionary and publish it to check that the modules fit together.
-- **Day 45 (~55 minutes): systemd unit, Dockerfile, Ansible playbook and inventory.** Spend ~47 minutes writing the four files above. Choose the account, install folder, and startup command consistently. Check the unit sections, Docker instructions, and YAML indentation. Spend ~8 minutes running the startup check command directly with saved measurements that produce PASS, FAIL, and ERROR. Compare the exit codes with 0, 1, and 2, then explain why FAIL must not trigger a retry of the same files. Use the Python path for your local environment; running a container or deploying to a real station is not needed for the gate.
-- **Day 46 (~50 minutes): `setup_order()` and config tests for shared channels and wrong kinds.** Implement the fixed two-group sort. Test scrambled input order, unused instruments, an empty station, each invalid reference, and a shared PSU channel. Also show that separate channels and sharing a DMM are valid.
-- **Day 48 (~55 minutes): One station run, end to end.** Follow the scaffold below: ~10 minutes wiring configuration and fake transports, ~25 minutes connecting the drivers to the executor, ~15 minutes making reports and operator results follow the final run state, and ~5 minutes running your tests and `mypy --strict chassis`. Treat the small reporting refactor as your technical-debt practice; review the diff and keep earlier interfaces working.
-- **Day 50 (~45 minutes): Operator README: install, configure, run, read the report.** Write instructions in your capstone repository for a technician. Give the Python/tool installation steps, a sample TOML configuration, the exact saved-file check command, report location, exit codes, and the meaning of PASS/FAIL/ERROR. Explain which deployment addresses and paths to edit, and that the status API needs the app and publication calls in the same process. Walk through the instructions from a fresh terminal.
-- **Day 51 (~10 minutes): Run gate b6 on your capstone.** Save your files and fix failing checks. This gate reruns b1 through b6, so every earlier interface must still work. Finish the PR after your tests, type checks, CI, and gate pass.
+- **(~60 minutes) `config.py`: station config in TOML, validated.** Start your Block 6 branch and PR. Add the records, load a small station file, and check the required errors. Keep error messages useful to an operator. Write your own tests in `capstone/tests/` using temporary files.
+- **(~50 minutes) `web.py`: `/status` and `/results/latest`.** Add the app, setters, and endpoints. Test default status, updated status, missing report, and replacing a report with `TestClient`. Read a Block 2 JSON report into a dictionary and publish it to check that the modules fit together.
+- **(~55 minutes) systemd unit, Dockerfile, Ansible playbook and inventory.** Spend ~47 minutes writing the four files above. Choose the account, install folder, and startup command consistently. Check the unit sections, Docker instructions, and YAML indentation. Spend ~8 minutes running the startup check command directly with saved measurements that produce PASS, FAIL, and ERROR. Compare the exit codes with 0, 1, and 2, then explain why FAIL must not trigger a retry of the same files. Use the Python path for your local environment; running a container or deploying to a real station is not needed for the gate.
+- **(~50 minutes) `setup_order()` and config tests for shared channels and wrong kinds.** Implement the fixed two-group sort. Test scrambled input order, unused instruments, an empty station, each invalid reference, and a shared PSU channel. Also show that separate channels and sharing a DMM are valid.
+- **(~55 minutes) One station run, end to end.** Follow the scaffold below: ~10 minutes wiring configuration and fake transports, ~25 minutes connecting the drivers to the executor, ~15 minutes making reports and operator results follow the final run state, and ~5 minutes running your tests and `mypy --strict chassis`. Treat the small reporting refactor as your technical-debt practice; review the diff and keep earlier interfaces working.
+- **(~45 minutes) Operator README: install, configure, run, read the report.** Write instructions in your capstone repository for a technician. Give the Python/tool installation steps, a sample TOML configuration, the exact saved-file check command, report location, exit codes, and the meaning of PASS/FAIL/ERROR. Explain which deployment addresses and paths to edit, and that the status API needs the app and publication calls in the same process. Walk through the instructions from a fresh terminal.
+- **(~10 minutes) Run gate b6 on your capstone (optional).** Save your files and fix failing checks. This gate reruns b1 through b6, so every earlier interface must still work. Finish the PR after your tests, type checks, CI, and gate pass.
 
 Run: Ctrl+Shift+B → Gate: b6
 
 From a terminal at the exercises root: `bash tools/run.sh b6` on WSL/Linux (or Mac), or `tools\run.ps1 b6` on Windows. Your own tests still run separately from `capstone/tests/`; no hardware, internet, Linux service manager, or Docker installation is needed for the gate.
 
-### Day 48: one station run, end to end (~55 minutes)
+### One station run, end to end (~55 minutes)
 
 An end-to-end run connects the station's configuration, instruments, executor, checks, report, and operator result in one call. This slot tests one configured UUT at a time. Use your Block 3 drivers with fake transports; no hardware is needed. The caller supplies and owns these transports, so `run_station` must not close them. Keep your earlier saved-file CLI working.
 
@@ -950,7 +956,7 @@ bus_voltage,22,30,V
 supply_current,0,3,A
 ```
 
-Reuse your day-20 fake. This small complete version is also supplied so you can run the example immediately. A scripted exception is an exception stored in place of a reply; `query` raises it to simulate a failure. Run this code from `capstone/` after implementing `run_station`:
+Reuse your FakeTransport from the PSU teardown task. This small complete version is also supplied so you can run the example immediately. A scripted exception is an exception stored in place of a reply; `query` raises it to simulate a failure. Run this code from `capstone/` after implementing `run_station`:
 
 ```python
 from chassis.config import load_station_config
@@ -991,16 +997,18 @@ run = run_station("station.toml", "station_limits.csv", "station_report.json",
 
 This prints `OVERALL: PASS (2 pass, 0 fail, 0 error)`. The returned state is `RunState.PASS`; the report's overall outcome is `"PASS"`. For your timeout test, script `TimeoutError("DMM timed out")` instead of the voltage reply; assert ERROR and output-off in the PSU's recorded writes. For your cleanup test, make the fake's `write("OUTP OFF")` record the attempted command and then raise `OSError("output-off failed")`. Keep both readings within limits: assert two PASS checks, but ERROR in the returned state, printed first line, and JSON overall. Also test an operator interruption and a partial setup failure. Use temporary paths and no sleeps or live instruments.
 
-## Final repairs, demonstration, and gates (days 52-53)
+## Final repairs, demonstration, and gates
 
-- [ ] **Day 52 (~50 minutes): Run every gate; fix anything red.** Run cumulative gate b6 using the command above; it reruns b1 through b6. Fix failing behavior, rerun your own tests and `mypy --strict chassis`, and report all pass / partial / stuck in the tracker.
-- [ ] **Day 53 (~45 minutes): Prepare a five-minute demo script of your mini chassis tester.** Write and rehearse a short walkthrough using your existing modules, with no real hardware required. Cover each item below:
-  - Reuse day 48's `run_station` with your station configuration, CSV limits, and fake transports for a PASS run.
-  - Repeat `run_station` with fresh fake transports and `TimeoutError("DMM timed out")` as the voltage reply. Show the ERROR outcome and that no further DMM query was sent.
-  - For both runs, show the configured PSU channel selection followed by `OUTP OFF` in the PSU fake's recorded writes as output-off evidence.
-  - Show each run's returned state, printed summary, and saved JSON report, including `summary.overall` and the log in `meta`. Explain PASS, FAIL, and ERROR and where the operator finds the reports.
-  - Reuse `TelemetryListener` with two separately bound loopback sender sockets, each using port 0, to represent two UUTs. Send packets that leave different gaps for each source, wait for their callbacks with a queue timeout, then stop the listener and show `gap_report()`. Label each `(sender_ip, sender_port)` pair with its UUT so every missing sequence number has an identified source. Explain what each gap means.
-- [ ] **Day 53 (~15 minutes): Final gate run: every gate green.** Run cumulative gate b6 again after your last changes, confirm every check passes, and report all pass / partial / stuck in the tracker.
-- [ ] **Day 53 (~30 minutes): Plan your first two weeks on the job.** Read `FIRST-TWO-WEEKS.md` in the exercises root, then write your own version: your reading order, the ten questions you will ask first, and the small first PR you will aim for. Keep it for January 4, 2027.
+- [ ] **(~50 minutes) Run your gates; fix anything red.** Run the cumulative gate for the last block you finished in order: **b3** for the core plan; b4, b5, or b6 only if you built every block up to that gate. Gate b5 also needs Block 4; b6 needs Blocks 4-6. From the exercises root, run `bash tools/run.sh b3` on WSL/Linux (or Mac), or `tools\run.ps1 b3` on Windows; replace b3 with your chosen gate if needed. Fix failing behavior, rerun your own tests (including your executor tests) and `mypy --strict chassis`, and report all pass / partial / stuck in the tracker.
+- [ ] **(~45 minutes) Prepare a five-minute demo script of your mini chassis tester.** Write and rehearse a short walkthrough using your existing modules, with no real hardware required. Cover each item below:
+  - Load CSV limits, check readings, and write and show the JSON report and text summary from Block 2. Explain PASS, FAIL, and ERROR and where the operator finds the reports.
+  - Drive the PSU and DMM drivers through fake transports. Show output-off evidence in the PSU fake's recorded writes.
+  - Run a short sequence with `run_sequence()` that fails. Show the returned state, log, and recorded writes proving teardown ran after the failure.
+  - If you built Block 6, reuse `run_station` with your station configuration, CSV limits, and fake transports for a PASS run.
+  - If you built Block 6, repeat `run_station` with fresh fake transports and `TimeoutError("DMM timed out")` as the voltage reply. Show the ERROR outcome and that no further DMM query was sent.
+  - If you built Block 6, for both runs show the configured PSU channel selection followed by `OUTP OFF` in the PSU fake's recorded writes as output-off evidence. Show each run's returned state, printed summary, and saved JSON report, including `summary.overall` and the log in `meta`.
+  - If you built Block 4, reuse `TelemetryListener` with two separately bound loopback sender sockets, each using port 0, to represent two UUTs. Send packets that leave different gaps for each source, wait for their callbacks with a queue timeout, then stop the listener and show `gap_report()`. Label each `(sender_ip, sender_port)` pair with its UUT so every missing sequence number has an identified source. Explain what each gap means.
+- [ ] **(~15 minutes) Final gate run: your gates green.** Run the same cumulative gate you chose for repairs (**b3** for the core plan; b4, b5, or b6 only if you built every block up to that gate). Gate b5 also needs Block 4; b6 needs Blocks 4-6. Run it again after your last changes, confirm every check passes, and report all pass / partial / stuck in the tracker.
+- [ ] **(~30 minutes) Plan your first two weeks on the job.** Read `FIRST-TWO-WEEKS.md` in the exercises root, then write your own version: your reading order, the ten questions you will ask first, and the small first PR you will aim for. Keep it for January 4, 2027.
 
-The demonstration is a manual task: b6 checks the interfaces above, but does not assess your presentation or require a particular demo filename or script layout.
+The demonstration is a manual task: the gates check the interfaces above, but do not assess your presentation or require a particular demo filename or script layout.

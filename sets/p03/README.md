@@ -1,6 +1,6 @@
 # p03 — Lists and dictionaries
 
-**Time:** about 63 minutes · **Read first:** [Automate the Boring Stuff 2e chapter 4: lists](https://automatetheboringstuff.com/2e/chapter4/) and [chapter 5: dictionaries](https://automatetheboringstuff.com/2e/chapter5/) · **You edit:** `starter/collections_basics.py`
+**Time:** about 63 minutes · **Read first:** the p03 Read first page in your tracker. Optional lookup: [Automate the Boring Stuff 2e chapter 4: lists](https://automatetheboringstuff.com/2e/chapter4/) and [chapter 5: dictionaries](https://automatetheboringstuff.com/2e/chapter5/) · **You edit:** `starter/collections_basics.py`
 
 ## What you're building
 

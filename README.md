@@ -35,7 +35,7 @@ Small test-driven exercise sets that go with the Engineering Tracker. Each set p
    systemd=true
    ```
 
-   If asked to choose an editor, choose nano; in nano, save with **Ctrl+O**, **Enter**, then exit with **Ctrl+X**. From **Windows PowerShell**, run `wsl --shutdown`, then reopen Ubuntu and check `ps -p 1 -o comm=` again. It must print `systemd` for the day-41 service drill.
+   If asked to choose an editor, choose nano; in nano, save with **Ctrl+O**, **Enter**, then exit with **Ctrl+X**. From **Windows PowerShell**, run `wsl --shutdown`, then reopen Ubuntu and check `ps -p 1 -o comm=` again. It must print `systemd` for the d41 service drill.
 5. **Clone fresh inside Linux.** A clone is your local copy of this Git repository, the project and its change history. Use your Linux home directory (`~`), not a Windows clone under `/mnt/c`; do not reuse or copy a Windows `.venv`.
 
    ```bash
@@ -53,9 +53,9 @@ Small test-driven exercise sets that go with the Engineering Tracker. Each set p
 
    The first run creates `.venv`, a local folder holding Python and the exercise tools, and installs the tools automatically. It needs internet and can take a few minutes. Expect `Exercises: 1 / 1 passed`: this setup check is already correct. You don't need to activate `.venv` or install Python packages by hand.
 
-**Alternative — native Windows (PowerShell):** install VS Code with Microsoft's Python extension, Python 3.12+ (tick **Add Python to PATH**), and [Git for Windows](https://git-scm.com/download/win). Reopen VS Code, clone the repo into a local Windows folder such as `C:\git`, and open it. In its PowerShell terminal run `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d00-hello`. This uses a separate Windows `.venv`. See d48's compiler note for Visual Studio Build Tools. Use WSL for Linux practice, including the day-41 systemd drill.
+**Alternative — native Windows (PowerShell):** install VS Code with Microsoft's Python extension, Python 3.12+ (tick **Add Python to PATH**), and [Git for Windows](https://git-scm.com/download/win). Reopen VS Code, clone the repo into a local Windows folder such as `C:\git`, and open it. In its PowerShell terminal run `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d00-hello`. This uses a separate Windows `.venv`. See d48's compiler note for Visual Studio Build Tools. Use WSL for Linux practice, including the d41 systemd drill.
 
-**Alternative — Codespaces:** if WSL installation exceeds the setup time, on this repo's GitHub page choose **Code → Codespaces → Create codespace**. It opens VS Code with Linux and the tools installed in your browser; run `bash tools/run.sh d00-hello` there. Its free tier is about **60 hours/month on 2 cores** (two processing units). Codespaces cannot run the day-41 systemd drill; use WSL for that drill.
+**Alternative — Codespaces:** if WSL installation exceeds the setup time, on this repo's GitHub page choose **Code → Codespaces → Create codespace**. It opens VS Code with Linux and the tools installed in your browser; run `bash tools/run.sh d00-hello` there. Its free tier is about **60 hours/month on 2 cores** (two processing units). Codespaces cannot run the d41 systemd drill; use WSL for that drill.
 
 ## Doing a set
 

@@ -4,7 +4,7 @@
 
 ## What you're building
 
-A chassis test station needs to read a meter and control a power supply before the instruments arrive. A **driver** translates station operations into instrument commands; a **transport** carries those commands and replies. You will pass a transport into each driver so the same driver can work with a fake today and connected hardware later. Checking what you actually send prevents rounding above a safety maximum; check54 later uses the same idea.
+A chassis test station needs to read a meter and control a power supply before the instruments arrive. A **driver** translates station operations into instrument commands; a **transport** carries those commands and replies. You will pass a transport into each driver so the same driver can work with a fake in this set and connected hardware later. Checking what you actually send prevents rounding above a safety maximum; check54 later uses the same idea.
 
 ## How this works
 

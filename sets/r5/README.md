@@ -120,7 +120,7 @@ Raise `ValueError` if either limit is nonfinite or `low > high`. Otherwise retur
 
 **Watch out:** A test checking only an ordinary in-range value misses both review defects. Think of the boundary and NaN cases you would request in a pull request (a proposed change submitted for review).
 
-**Reread:** d40, *Pro Git*, "Contributing to a Project", reviewing proposed changes; GitHub Docs "Building and testing Python", running tests in CI (continuous integration: automatic checks on changes). Revisit d40's two limit-checker review comments and the day 34 limit-validation checkpoint (`check34`).
+**Reread:** d40, *Pro Git*, "Contributing to a Project", reviewing proposed changes; GitHub Docs "Building and testing Python", running tests in CI (continuous integration: automatic checks on changes). Revisit d40's two limit-checker review comments and the check34 limit-validation checkpoint.
 
 
 ### E6 — Build the operator's rerun list (easy, ~9 min)

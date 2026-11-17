@@ -48,7 +48,7 @@ For this dynamically typed dictionary, reject booleans, floats, and numeric stri
 
 **Watch out:** This function does no input/output (I/O), meaning file or device access.
 
-**Reread:** If you failed E1, reread **d45**, `tomllib` documentation and configuration validation; **d03**, Python Tutorial section 5 (lists, dictionaries, sets, tuples); **d08**, the `typing` introduction.
+**Reread:** If you failed E1, reread **d41 E3** (config validation: load instrument settings with useful errors) and **d19 E5** (build the bench power-supply driver); **d03**, Python Tutorial section 5 (lists, dictionaries, sets, tuples); **d08**, the `typing` introduction.
 
 ### E2 - Drive a supply from the station config (medium, ~25 min)
 
@@ -238,7 +238,7 @@ Use values after `configparser` strips surrounding whitespace. Missing `[Service
 
 **Watch out:** Python's config parser normally changes setting names to lowercase. A small subclass overriding `optionxform` can preserve case without changing a method on an existing object.
 
-**Reread:** If you failed E9, reread **d41**, `systemd.service`, `systemd.unit`, and `configparser` documentation; **d36**, *The Linux Command Line* chapters on shell scripts (absolute paths); **d44**, deployment configuration review.
+**Reread:** If you failed E9, reread **d41**, `systemd.service`, `systemd.unit`, and `configparser` documentation; **d36**, *The Linux Command Line* chapters on shell scripts (absolute paths).
 
 ### E10 - Use interlocks to block output enable (medium, ~18 min)
 
@@ -290,7 +290,7 @@ The grader runs each test on your repaired harness, then on a **mutant**, a deli
 
 | Exercise | Reread |
 | --- | --- |
-| E1 | d45 (config validation), d03 (collections), d08 (typing) |
+| E1 | d41 E3 (config validation: load instrument settings with useful errors) and d19 E5 (build the bench power-supply driver), d03 (collections), d08 (typing) |
 | E2 | d19 (the Psu class exercises E5-E6, PyVISA resource strings, terminations), d20 (cleanup), d05 (exceptions), d08 (type hints are not runtime checks) |
 | E3 | d02 (conditions and functions), d06 (result states), d09/d12 (pytest) |
 | E4 | d16 (bytes), d26 (struct), d47 (bitwise operations) |
@@ -298,5 +298,5 @@ The grader runs each test on your repaired harness, then on a **mutant**, a deli
 | E6 | d37 (states), d20 (cleanup), d31 (clean shutdown) |
 | E7 | d53 (verification), d04 (JSON and paths), d13 (reports) |
 | E8 | d38 (argparse), d33 (exit codes), d05 (exceptions) |
-| E9 | d41 (systemd and configparser), d36 (absolute paths), d44 (deployment) |
+| E9 | d41 (systemd and configparser), d36 (absolute paths) |
 | E10 | d47 (bit masks), d51 (hardware debugging), d02 (conditions), d09/d12 (pytest regressions) |

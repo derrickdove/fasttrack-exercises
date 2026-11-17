@@ -1,6 +1,6 @@
 # p04 — Files, errors and reading tracebacks
 
-**Time:** about 65 minutes (11 exercises) · **Read first:** [Python Tutorial 7.2: Reading and Writing Files](https://docs.python.org/3/tutorial/inputoutput.html#reading-and-writing-files) and [8.1–8.4: Errors and Exceptions](https://docs.python.org/3/tutorial/errors.html) · **You edit:** `starter/filesafe.py`
+**Time:** about 65 minutes (11 exercises) · **Read first:** the p04 Read first page in your tracker. Optional lookup: [Python Tutorial 7.2: Reading and Writing Files](https://docs.python.org/3/tutorial/inputoutput.html#reading-and-writing-files) and [8.1–8.4: Errors and Exceptions](https://docs.python.org/3/tutorial/errors.html) · **You edit:** `starter/filesafe.py`
 
 ## What you're building
 

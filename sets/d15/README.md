@@ -1,6 +1,6 @@
 # d15 — Practical speed: big-O on sensor data
 
-**Time:** about 50 minutes · **Read first:** *A Common-Sense Guide to DSA*, the first chapters on Big O and the chapters on stacks and queues (your book; skip the end-of-chapter exercises because this set is today's practice); [Python `collections.deque` documentation](https://docs.python.org/3/library/collections.html#collections.deque); Python glossary entries "CPython" and "bytecode", and Python Design FAQ, "How are dictionaries implemented in CPython?" (for E5) · **You edit:** `starter/windows.py`
+**Time:** about 50 minutes · **Read first:** *A Common-Sense Guide to DSA*, the first chapters on Big O and the chapters on stacks and queues (your book; skip the end-of-chapter exercises because this set is your practice); [Python `collections.deque` documentation](https://docs.python.org/3/library/collections.html#collections.deque); Python glossary entries "CPython" and "bytecode", and Python Design FAQ, "How are dictionaries implemented in CPython?" (for E5) · **You edit:** `starter/windows.py`
 
 ## What you're building
 

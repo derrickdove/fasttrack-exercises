@@ -30,7 +30,7 @@ print("power_on" in finished)  # True
 
 The type hints use `str` for text and `float` for measured numbers; `->` names the return type. All inputs satisfy the stated types. Reading values are finite numbers of ordinary measurement size; you do not need to validate malformed inputs. Each function returns a new collection without changing its input lists. Channel names match exactly, including capitalization and spaces, except for E4's explicit serial-number rule. Dictionary key order is not checked.
 
-From the Linux reading: **redirection** sends a program's output to a file (`>`), and a **pipe** sends it into another program (`|`). These let an operator save or filter station reports. Today's functions work on supplied Python collections; no shell commands are required.
+From the Linux reading: **redirection** sends a program's output to a file (`>`), and a **pipe** sends it into another program (`|`). These let an operator save or filter station reports. The functions in this set work on supplied Python collections; no shell commands are required.
 
 ## Exercises
 

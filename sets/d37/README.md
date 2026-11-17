@@ -1,6 +1,6 @@
 # d37 — Test sequences as state machines
 
-**Time:** about 45 minutes · **Read first:** [Wikipedia: Finite-state machine (overview)](https://en.wikipedia.org/wiki/Finite-state_machine); *A Common-Sense Guide to Data Structures and Algorithms*, chapter on graphs; [Pro Git 6.2: Contributing to a Project (forks, pull requests, review)](https://git-scm.com/book/en/v2/GitHub-Contributing-to-a-Project) (optional preview; scheduled on day 39) · **You edit:** `starter/sequencer.py`
+**Time:** about 45 minutes · **Read first:** [Wikipedia: Finite-state machine (overview)](https://en.wikipedia.org/wiki/Finite-state_machine); *A Common-Sense Guide to Data Structures and Algorithms*, chapter on graphs; [Pro Git 6.2: Contributing to a Project (forks, pull requests, review)](https://git-scm.com/book/en/v2/GitHub-Contributing-to-a-Project) (optional preview; a later GitHub workflow reading) · **You edit:** `starter/sequencer.py`
 
 ## What you're building
 
@@ -59,7 +59,7 @@ A new sequencer exposes `state == "IDLE"` and `history == ["IDLE"]`. For a move 
 
 **Watch out:** A rejected move does not count as a visit. A terminal state cannot be restarted. Reuse `can_move` for the transition rule.
 
-**Reread:** Wikipedia, Concepts and terminology (current state and transitions); Pro Git 6.2 (optional preview; scheduled on day 39), GitHub Flow (review the small change to the transition rule before merging).
+**Reread:** Wikipedia, Concepts and terminology (current state and transitions); Pro Git 6.2 (optional preview; a later GitHub workflow reading), GitHub Flow (review the small change to the transition rule before merging).
 
 ### E3 — Run measurements and release instruments (medium, ~17 min)
 
@@ -90,4 +90,4 @@ Follow this order exactly:
 
 **Watch out:** Hold the selected result until cleanup finishes: moving to `ABORTED` and then to `ERROR` would violate E1. If setup was interrupted, history has no `RUNNING` entry. Teardown interruption is an equipment cleanup failure and therefore ends in `ERROR`.
 
-**Reread:** Wikipedia, Concepts and terminology (terminal states and transitions); Pro Git 6.2 (optional preview; scheduled on day 39), GitHub Flow and Pull Requests (review the abort and cleanup cases as part of the change).
+**Reread:** Wikipedia, Concepts and terminology (terminal states and transitions); Pro Git 6.2 (optional preview; a later GitHub workflow reading), GitHub Flow and Pull Requests (review the abort and cleanup cases as part of the change).

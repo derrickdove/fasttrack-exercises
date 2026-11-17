@@ -1,6 +1,6 @@
 # d47 — Reading C: registers, bits and structs
 
-**Time:** about 53 minutes (5 minutes to orient, then 48 minutes of exercises) · **Read first:** learncpp O.2, [Bitwise operators](https://www.learncpp.com/cpp-tutorial/bitwise-operators/), and O.3, [Bit manipulation with bitwise operators and bit masks](https://www.learncpp.com/cpp-tutorial/bit-manipulation-with-bitwise-operators-and-bit-masks/); learncpp 13.7, Introduction to structs; *C++ Primer*, chapter 4, the section on bitwise operators (your book; read for understanding, you won't write C++ until tomorrow); Wikipedia, [Endianness](https://en.wikipedia.org/wiki/Endianness) · **You edit:** `starter/registers.py`
+**Time:** about 53 minutes (5 minutes to orient, then 48 minutes of exercises) · **Read first:** learncpp O.2, [Bitwise operators](https://www.learncpp.com/cpp-tutorial/bitwise-operators/), and O.3, [Bit manipulation with bitwise operators and bit masks](https://www.learncpp.com/cpp-tutorial/bit-manipulation-with-bitwise-operators-and-bit-masks/); learncpp 13.7, Introduction to structs; *C++ Primer*, chapter 4, the section on bitwise operators (your book; read for understanding, you will write C++ in d48); Wikipedia, [Endianness](https://en.wikipedia.org/wiki/Endianness) · **You edit:** `starter/registers.py`
 
 ## What you're building
 
@@ -95,7 +95,7 @@ Only exact input strings are accepted: any other string, including an empty stri
 
 **Watch out:** One card writes a byte; the others read or convert values. On the cast card, conversion keeps the lowest eight bits of `raw`. On the hardware card, `status_reg` points to a volatile byte even though the word `volatile` is in the supplied context rather than on the line itself.
 
-**Reread:** learncpp 13.7, member selection; *C++ Primer*, chapter 4, bitwise operators, for the cast's lowest-eight-bits effect. Use the pointer, cast, and volatile definitions above and the header's E4 context; no additional pointer chapter is required today.
+**Reread:** learncpp 13.7, member selection; *C++ Primer*, chapter 4, bitwise operators, for the cast's lowest-eight-bits effect. Use the pointer, cast, and volatile definitions above and the header's E4 context; no additional pointer chapter is required for this set.
 
 ### E5 — Byte order on the wire (QUIZ, easy, ~8 min)
 

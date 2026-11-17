@@ -1,6 +1,6 @@
 # p01 — First steps: values, text and your first functions
 
-**Time:** about 61 minutes (12 exercises) · **Read first:** [Automate the Boring Stuff 2e chapter 1](https://automatetheboringstuff.com/2e/chapter1/) and [the def/return part of chapter 3](https://automatetheboringstuff.com/2e/chapter3/) · **You edit:** `starter/basics.py`
+**Time:** about 61 minutes (12 exercises) · **Read first:** the p01 Read first page in your tracker. Optional lookup: [Automate the Boring Stuff 2e chapter 1](https://automatetheboringstuff.com/2e/chapter1/) and [the def/return part of chapter 3](https://automatetheboringstuff.com/2e/chapter3/) · **You edit:** `starter/basics.py`
 
 ## What you're building
 
@@ -480,4 +480,4 @@ IndentationError: expected an indented block after function definition
 1. Match each final error line to the name, types or indentation in the lines above it.
 2. For `TypeError`, check the two values on either side of `+`.
 
-After this set, continue with p02, then d02. d01, the placement check you did on day 1, needs decisions and rejecting bad input; those come in p02. Revisit d01 later on a review day.
+After this set, continue with p02, then d02. d01, the placement check you did first, needs decisions and rejecting bad input; those come in p02. Revisit d01 later on a review day.

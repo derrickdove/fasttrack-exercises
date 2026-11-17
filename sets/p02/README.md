@@ -1,6 +1,6 @@
 # p02 — Decisions and loops
 
-**Time:** about 60 minutes · **Read first:** [Automate the Boring Stuff 2e chapter 2, flow control](https://automatetheboringstuff.com/2e/chapter2/) · **You edit:** `starter/decisions.py`
+**Time:** about 60 minutes · **Read first:** the p02 Read first page in your tracker. Optional lookup: [Automate the Boring Stuff 2e chapter 2, flow control](https://automatetheboringstuff.com/2e/chapter2/) · **You edit:** `starter/decisions.py`
 
 ## What you're building
 

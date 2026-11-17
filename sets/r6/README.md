@@ -94,7 +94,7 @@ Validate references before ordering: if references are missing from the keys, ra
 
 ### E4 — Interpret a driver error reply (easy, ~8 min)
 
-**Goal:** Review the error boundary of a driver (software that talks to an instrument), using the same kind of reply as the C++ driver day. SCPI (Standard Commands for Programmable Instruments) uses text commands and replies for instruments.
+**Goal:** Review the error boundary of a driver (software that talks to an instrument), using the same kind of reply as the d48 C++ driver exercises. SCPI (Standard Commands for Programmable Instruments) uses text commands and replies for instruments.
 
 **Signature:** `def parse_error_reply(reply: str) -> tuple[int, str]`
 

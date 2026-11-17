@@ -1,6 +1,6 @@
 # d33 — Processes, exit codes and signals
 
-**Time:** about 45 minutes (41 coding + 4 review) · **Read first:** [Missing Semester, Command-line Environment](https://missing.csail.mit.edu/2020/command-line/) (job control and signals); Python [subprocess](https://docs.python.org/3/library/subprocess.html) and [signal](https://docs.python.org/3/library/signal.html) docs; **Review for tomorrow's day-34 check: your weakest set so far** — look at your tracker and redo the set you marked partial or stuck most recently. · **You edit:** `starter/procs.py`
+**Time:** about 45 minutes (41 coding + 4 review) · **Read first:** [Missing Semester, Command-line Environment](https://missing.csail.mit.edu/2020/command-line/) (job control and signals); Python [subprocess](https://docs.python.org/3/library/subprocess.html) and [signal](https://docs.python.org/3/library/signal.html) docs; **Review for the minimum-ready check (check34): your weakest set so far** — look at your tracker and redo the set you marked partial or stuck most recently. · **You edit:** `starter/procs.py`
 
 ## What you're building
 
@@ -10,7 +10,7 @@ A chassis test station starts instrument-check tools, records whether they succe
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/procs.py`. Don't edit `tests/`.
 2. Press **Ctrl+Shift+B → Test: d33** (or run `bash tools/run.sh d33` / `tools\run.ps1 d33`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
-3. Report **all pass / partial / stuck** in the tracker. Spend the final four minutes revisiting your most recently partial or stuck set for tomorrow's day-34 check; if you need longer, continue that review after this set.
+3. Report **all pass / partial / stuck** in the tracker. Spend the final four minutes revisiting your most recently partial or stuck set for the minimum-ready check (check34); if you need longer, continue that review after this set.
 
 A **process** is a running program; a **child process** is one started by your Python program. An **argument list** contains the executable path followed by its separate arguments. A **shell** interprets command text; passing a list with `shell=False` (the default) avoids that extra interpreter.
 
@@ -92,7 +92,7 @@ with GracefulStop() as stop:
 
 **Watch out:** `restarts` counts additional tries, so zero still permits one attempt. Negative `restarts` raises `ValueError` before launching anything. Any nonzero code, including E1's `-9` timeout marker, consumes an attempt and permits another if budget remains. Use the same `cmd` each time; do not add a delay or change its arguments. Discard the output strings. Other errors from E1 propagate instead of being retried. Finish E1 first; E4 reuses it.
 
-**Reread:** Python `subprocess` docs, `run` and `CompletedProcess.returncode`; Missing Semester, “Job Control”. For tomorrow's check, revisit your most recently partial or stuck set in the tracker.
+**Reread:** Python `subprocess` docs, `run` and `CompletedProcess.returncode`; Missing Semester, “Job Control”. Before check34, revisit your most recently partial or stuck set in the tracker.
 
 ## Terminal drill (WSL2 Ubuntu, ~5 min)
 

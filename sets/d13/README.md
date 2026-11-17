@@ -137,4 +137,4 @@ Accept either `<testsuite>` (one group of tests) or `<testsuites>` (several grou
 
 **Watch out:** A fixture error is not an assertion failure. Read properties from each test case, including the offline case. The station module's intentional failures are evidence to inspect; the normal **Test: d13** command grades both your authored tests and your reader and should show `Exercises: 4 / 4 passed` when all exercises are complete.
 
-**Reread:** The reporting guidance above; pytest → “Creating JUnitXML format files”, “record_property”, and “Indirect parametrization”; Python `xml.etree.ElementTree` → “Finding interesting elements”. Pro Git 3.5 → “Tracking Branches” remains today's workflow reading; the rebasing reading's 25 minutes now belong to this lab.
+**Reread:** The reporting guidance above; pytest → “Creating JUnitXML format files”, “record_property”, and “Indirect parametrization”; Python `xml.etree.ElementTree` → “Finding interesting elements”. Pro Git 3.5 → “Tracking Branches” remains this set's workflow reading; the rebasing reading's 25 minutes now belong to this lab.

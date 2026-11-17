@@ -26,7 +26,7 @@ assert decoded == 258
 
 A **CRC** (cyclic redundancy check) is a number computed from bytes to detect corruption. `crc16(data)` is supplied: it returns a 16-bit integer using the station's CRC-16/CCITT-FALSE algorithm. Do not implement the CRC algorithm. The check example is `crc16(b"123456789") == 0x29b1`. This variant uses CRC-16 rather than d26's CRC-32.
 
-A `bytearray` is a byte buffer you can change; `buffer.extend(chunk)` appends bytes. A **sequence number** labels a packet's position; after 65535 comes 0, called **wraparound**. A **capture** saves network traffic to a file. **pcap** is a common capture file format containing network frames (raw network messages) and timestamps. The supplied `capture_payloads` helper extracts the UDP **payload**, the application bytes inside a datagram; you do not implement a pcap reader today. A destination **port** is the integer used to direct a datagram to the receiving application.
+A `bytearray` is a byte buffer you can change; `buffer.extend(chunk)` appends bytes. A **sequence number** labels a packet's position; after 65535 comes 0, called **wraparound**. A **capture** saves network traffic to a file. **pcap** is a common capture file format containing network frames (raw network messages) and timestamps. The supplied `capture_payloads` helper extracts the UDP **payload**, the application bytes inside a datagram; you do not implement a pcap reader in this set. A destination **port** is the integer used to direct a datagram to the receiving application.
 
 For E1-E5, numeric inputs have the integer types in the signatures; you only validate the ranges below. Do not mutate caller dictionaries or lists. Work in arrival order throughout.
 
