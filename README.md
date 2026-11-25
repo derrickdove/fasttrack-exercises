@@ -59,9 +59,9 @@ Small test-driven exercise sets that go with the Engineering Tracker. Each set p
 
 ## Doing a set
 
-1. Keep the whole `fasttrack-exercises` folder open in the WSL VS Code window. In **Terminal → New Terminal**, run `git pull` to get new sets, then open the day's README (for example `sets/d05/README.md`).
+1. Keep the whole `fasttrack-exercises` folder open in VS Code (the WSL window for a WSL clone, or a normal window for a Windows clone). In **Terminal → New Terminal** (Bash for a WSL or Linux clone, PowerShell for a Windows clone), run `git pull` to get new sets, then open the day's README (for example `sets/d05/README.md`).
 2. Start with `pwd` to print your current directory and `git status --short` to list changed files. Write your code in the files the set names, usually `starter/*.py`. Don't edit `tests/`.
-3. Save your changes and run `bash tools/run.sh d05` (replace `d05` with the current set). Red means not yet; fix and rerun after each exercise. Run `git diff` to review your edits.
+3. Save your changes and run `bash tools/run.sh d05` (native Windows PowerShell: `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d05`; replace `d05` with the current set). Red means not yet; fix and rerun after each exercise. Run `git diff` to review your edits.
 4. Report **all pass / partial / stuck** on the task in the tracker. Partial and stuck come back in two days. After you report, the tracker links the reference solution so you can compare approaches.
 
 Each run is recorded in the local `.ft-progress.jsonl` file, which is never uploaded. Run `python tools/ft_times.py <set>` (inside WSL: `.venv/bin/python tools/ft_times.py <set>`) to see how long each exercise took.
@@ -86,7 +86,7 @@ Use the first five minutes of the existing code/test/retry time for this loop; n
 ## Capstone and gates
 
 Build the chassis tester in `capstone/` as the tracker introduces each block.
-A **gate** is a group of checks for a capstone block. Use the same Bash loop with `bash tools/run.sh b1` (later `b2` through `b6`). Gates run every earlier block too and finish with `Checks: N / M passed`. **Ctrl+Shift+B → Gate: b1** is a shortcut; tasks appear when those suites arrive.
+A **gate** is a group of checks for a capstone block. Use the same Bash loop with `bash tools/run.sh b1` (native Windows PowerShell: `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 b1`; later `b2` through `b6`). Gates run every earlier block too and finish with `Checks: N / M passed`. **Ctrl+Shift+B → Gate: b1** is a shortcut; tasks appear when those suites arrive.
 
 On capstone-only days, use `(cd capstone && ../.venv/bin/python -m pytest)` for the test command (native Windows PowerShell: `cd capstone`, `..\.venv\Scripts\python.exe -m pytest`, then `cd ..`); it runs your capstone tests with the Python environment created during setup. On review days, rerun the selected retry set, review set, or gate in the same loop.
 

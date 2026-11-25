@@ -9,12 +9,21 @@ A chassis test station needs to run a diagnostic tool, summarize saved outcomes,
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/review5.py`, and replace the unfinished body in `starter/station_summary.sh`. Don't edit `tests/`.
-2. Press Ctrl+Shift+B → **Test: r5** (or run `bash tools/run.sh r5` / `tools\run.ps1 r5`). At first you'll see `Exercises: 0 / 7 passed`. Rerun after each exercise.
+2. Press Ctrl+Shift+B → **Test: r5** (or run `bash tools/run.sh r5` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 r5`). At first you'll see `Exercises: 0 / 7 passed`. Rerun after each exercise.
 3. Report all pass / partial / stuck in the tracker. Stop around 60 minutes and report partial if needed.
 
 **Standard output (stdout)** is a program's normal output; **standard error (stderr)** carries diagnostics. An **exit code** is the integer a process (a running program) returns: conventionally zero means success. A **timeout** caps how long the caller waits. An **argument list** passes separate words to a process without asking a **shell** (a command interpreter) to interpret them.
 
-**Bash** is a command interpreter used on Linux; Git Bash also works on Windows. A **positional parameter**, such as `$1`, is a script argument. Quote file arguments so spaces stay inside one path. `set -euo pipefail` stops on unhandled command failures, unset variables, or a failed command in a pipeline (commands connected with `|`). Install Bash or use Codespaces for E2; a skipped exercise counts as unfinished.
+**Bash** is a command interpreter used on Linux; Git Bash also works on Windows. A **positional parameter**, such as `$1`, is a script argument. Quote file arguments so spaces stay inside one path. `set -euo pipefail` stops on unhandled command failures, unset variables, or a failed command in a pipeline (commands connected with `|`). E2 needs Bash. Use Ubuntu (WSL), Codespaces, or Git Bash. On plain Windows without Git Bash, read along. A skipped exercise counts as unfinished.
+
+If you have Git for Windows, point PowerShell to its Bash executable before running the set. Change the path if you installed Git elsewhere.
+
+```powershell
+$env:FT_BASH = 'C:\Program Files\Git\bin\bash.exe'
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 r5
+```
+
+`FT_BASH` sets the path for this PowerShell session. Without it, the E2 tests look for Bash on PATH (the folders Windows searches for commands). The Windows tests check that Bash can work with Windows file paths before running E2.
 
 A **CLI** (command-line interface) accepts words typed in a terminal. A **parser** turns those words into named values. An `argparse.Namespace` stores those values as attributes, such as `args.station`.
 

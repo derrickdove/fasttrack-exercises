@@ -9,7 +9,7 @@ A **test station** controls measuring equipment while testing several chassis. A
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/topology.py`. Don't edit `tests/` or the supplied `UUT_INSTRUMENTS` mapping.
-2. Press **Ctrl+Shift+B -> Test: d45** (or run `bash tools/run.sh d45` / `tools\run.ps1 d45`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B -> Test: d45** (or run `bash tools/run.sh d45` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d45`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A **configuration** is data describing station connections. **TOML** is a text format for that data; `tomllib` is Python's built-in TOML reader. `[[instruments]]` introduces another dictionary in the `instruments` list. A **resource** is a string identifying a reservable connection, including the channel when needed. An **id** is a string naming a record. A **PSU** (power supply unit) provides electrical power; a **channel** is an independently controlled output. A **DMM** (digital multimeter) measures electrical values; a **scope** (oscilloscope) measures signals over time.

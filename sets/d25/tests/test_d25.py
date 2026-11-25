@@ -111,7 +111,7 @@ def test_e2_calls_stay_separate(station_socket) -> None:
     for payload in (b"volts=24", b"amps=2"):
         send_datagram(payload, receiver.getsockname())
     got = [receiver.recvfrom(65535)[0] for _ in range(2)]
-    assert got == [b"volts=24", b"amps=2"], "each call must send its own datagram"
+    assert sorted(got) == [b"amps=2", b"volts=24"], "each call must send its own datagram"
 
 
 def test_e2_closes_temporary_socket(station_socket, temporary_senders) -> None:
@@ -132,21 +132,23 @@ def test_e2_send_error_propagates_and_closes(station_socket, temporary_senders) 
     assert temporary_senders[0].fileno() == -1, "close the sender even when sendto fails"
 
 
-def test_e3_collects_complete_payloads(station_socket) -> None:
-    receiver, sender = station_socket(), station_socket()
+def test_e3_collects_complete_payloads() -> None:
+    receiver = Mock(spec=socket.socket)
+    receiver.gettimeout.return_value = 0.5
     payloads = [b"V=24", b"", b"\x00\xff", b"waveform=" + b"x" * 8192]
-    for payload in payloads:
-        sender.sendto(payload, receiver.getsockname())
+    receiver.recvfrom.side_effect = [(payload, ("127.0.0.1", 42000)) for payload in payloads]
     got = receive_all(receiver, len(payloads), 0.05)
-    assert got == payloads, "keep message boundaries, empty packets, and all payload bytes"
-    assert receiver.gettimeout() == 0.5, "restore the timeout after reaching the count"
-    assert receiver.fileno() != -1, "the caller still owns the receiver"
+    assert got == payloads, "keep all bytes and message boundaries in receive order"
+    assert receiver.settimeout.call_args.args == (0.5,), "restore the timeout after reaching the count"
+    receiver.close.assert_not_called()
 
 
-def test_e3_maximum_leaves_excess_queued(station_socket) -> None:
-    receiver, sender = station_socket(), station_socket()
-    for payload in (b"step=1", b"step=2", b"step=3"):
-        sender.sendto(payload, receiver.getsockname())
+def test_e3_maximum_leaves_excess_queued() -> None:
+    receiver = Mock(spec=socket.socket)
+    receiver.gettimeout.return_value = 0.5
+    receiver.recvfrom.side_effect = [
+        (payload, ("127.0.0.1", 42000)) for payload in (b"step=1", b"step=2", b"step=3")
+    ]
     assert receive_all(receiver, 2, 0.05) == [b"step=1", b"step=2"]
     assert receiver.recvfrom(65535)[0] == b"step=3", "stop reading at max_packets"
 

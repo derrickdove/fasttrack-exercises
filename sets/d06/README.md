@@ -9,7 +9,7 @@ A test station is a setup that measures hardware and checks whether it works. It
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/models.py`. Don't edit `tests/`. The imports, enum members, dataclass fields, and method signatures are supplied. `RunningStats.__init__` and its four properties are also complete; E3 only needs `add`.
-2. Press **Ctrl+Shift+B → Test: d06** (or run `bash tools/run.sh d06` / `tools\run.ps1 d06` from the repo root). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d06** (or run `bash tools/run.sh d06` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d06` from the repo root). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 Work in order: E4 uses the classes from E2 and E3. The Git reading explains a **branch**, a separate line of development, and **merging**, combining branch changes; use that workflow if you want to keep your practice separate. No Git command is graded here.

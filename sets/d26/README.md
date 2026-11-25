@@ -9,7 +9,7 @@ A chassis test station receives telemetry: measurements sent from a device to th
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/packets.py`. Don't edit `tests/`.
-2. Press Ctrl+Shift+B → **Test: d26** (or run `bash tools/run.sh d26` / `tools\run.ps1 d26`). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
+2. Press Ctrl+Shift+B → **Test: d26** (or run `bash tools/run.sh d26` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d26`). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A **byte** holds 8 bits (binary digits); Python's `bytes` is an immutable sequence of byte values from 0 to 255. A **packet** is one message with a defined byte layout. Its **header** describes the message, its **payload** contains readings, and its **trailer** contains a check value.

@@ -9,7 +9,7 @@ A chassis test station reads temperature and pressure from a serial sensor. You 
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/serial_sensor.py`. Don't edit `tests/`.
-2. Press Ctrl+Shift+B → **Test: d22** (or run `bash tools/run.sh d22` / `tools\run.ps1 d22`). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
+2. Press Ctrl+Shift+B → **Test: d22** (or run `bash tools/run.sh d22` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d22`). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A **serial connection** carries bits one after another. A **UART** (universal asynchronous receiver/transmitter) converts bytes to serial signals; **baud** measures signal changes per second. **8N1** means eight data bits, no parity bit (an extra error-checking bit), and one stop bit. pySerial defaults to 9600 baud and 8N1; keep those defaults here.

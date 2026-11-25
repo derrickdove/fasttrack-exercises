@@ -8,7 +8,7 @@ This project follows the work of a test-station software engineer. You will writ
 
 ## How to work
 
-Use Bash (the Linux command shell) on Linux or WSL (Windows Subsystem for Linux, which runs Linux on Windows) for your daily loop.
+Use PowerShell on Windows or Bash on Linux or WSL (Windows Subsystem for Linux, which runs Linux on Windows) for your daily loop.
 
 1. When you start your capstone, use Git, a tool that records your project's history in a repository. A commit is a saved version of your files. Open a terminal in this `capstone/` folder. The supplied `pyproject.toml` describes the package and its Python/tool settings; `chassis/__init__.py` marks the package. Keep both. Run these commands in order, replacing the name and email with your own; `git config` sets the identity recorded on commits in this repository:
 
@@ -26,7 +26,7 @@ Use Bash (the Linux command shell) on Linux or WSL (Windows Subsystem for Linux,
 4. Run the supplied gate after each feature and at the end of the block. A gate is a suite of checks for the public interfaces listed below; don't edit `gates/` to make your code pass. Later gates also run all earlier blocks. `Checks: N / M passed` tells you how many individual checks passed. A missing-module error is expected until you create the named files.
 5. Commit working changes and report all pass / partial / stuck in the tracker. Keep your own tests as you add later blocks.
 
-Within the first five minutes of each existing slot, run `pwd` to show the current folder and `git status --short` to list changed files from inside `capstone/`. Run the current gate from the exercises root with `bash tools/run.sh b4`, for example. For capstone-only tasks, run `(cd capstone && ../.venv/bin/python -m pytest)` from the exercises root; `cd` changes folders, `&&` runs the next command only if that succeeds, and parentheses keep the folder change inside that command. After editing, rerun the tests and run `git diff` inside `capstone/` to inspect your changes. This uses the existing task time.
+Within the first five minutes of each existing slot, run `pwd` to show the current folder and `git status --short` to list changed files from inside `capstone/`. From the exercises root, run the current gate with `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 b4` on Windows or `bash tools/run.sh b4` in Bash, for example. For capstone-only tasks, open a terminal in `capstone/` and run `..\.venv\Scripts\python -m pytest` on Windows or `../.venv/bin/python -m pytest` in Bash. After editing, rerun the tests and run `git diff` inside `capstone/` to inspect your changes. This uses the existing task time.
 
 ## Before the limit-file parsing task: your first temporary-file test
 
@@ -128,14 +128,15 @@ Raise `LimitFileError` for a bad header, a row with the wrong number of columns,
 
 ### Suggested order
 
-- **(~45 minutes) Start your capstone: git init, pyproject.toml, the chassis package.** Follow the setup above, inspect the supplied package files, make your first commit, and write `Status` in `chassis/models.py`. Check that each member's `.value` is the specified string.
+- **(~45 minutes) Start your capstone: git init, pyproject.toml, the chassis package.** Follow the setup above, inspect the supplied package files, and make your first commit. Stop there for this task.
+- **(~5 minutes, after the d06 enum reading) Write `Status`.** Write `Status` in `chassis/models.py` from the declaration above and check that each member's `.value` is the specified string. Nothing before d06 needs it.
 - **(~50 minutes) Parse limit-file rows: skip blanks and comments, with line-numbered errors.** Use the standard-library `csv` module to read the header and rows. Strip whitespace, convert nonempty bounds with `float`, and check column counts, empty names, and duplicates. Keep physical line numbers even when skipping blanks and `#` comments. Start with the temporary-file example above, then use the same pattern in your own parser tests; for now you can hold parsed fields in tuples until the records are ready.
 - **(~55 minutes) Measurement and Limit dataclasses; finish load_limits() returning Limit objects.** Add both records and `Limit.__post_init__`, then turn the previous task's parsed fields into a dictionary of `Limit` objects. Wrap invalid bounds in `LimitFileError` with the row's physical line number. Test two bounds, one missing bound, equal bounds, NaN, reversed bounds, and both bounds missing; commit the working code. Start using branches before Block 2.
 - **(~10 minutes) Run gate b1 on your capstone.** Save your files, run the gate, and use each failing check's name and message to fix the behavior. The tracker schedules this gate later, but run it as soon as Block 1 is finished: Block 2 builds on these records and limits.
 
 Run: Ctrl+Shift+B → Gate: b1
 
-From a terminal at the exercises root: `bash tools/run.sh b1` on WSL/Linux (or Mac), or `tools\run.ps1 b1` on Windows. The gate runs your `chassis` package; your own tests stay in `capstone/tests/`.
+From a terminal at the exercises root: `bash tools/run.sh b1` on WSL/Linux (or Mac), or `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 b1` on Windows. The gate runs your `chassis` package; your own tests stay in `capstone/tests/`.
 
 ## Block 2 - result checking and reports (gate b2)
 
@@ -254,7 +255,7 @@ Empty input gives just `OVERALL: ERROR (0 pass, 0 fail, 0 error)`. A final newli
 
 Run: Ctrl+Shift+B → Gate: b2
 
-From a terminal at the exercises root: `bash tools/run.sh b2` on WSL/Linux (or Mac), or `tools\run.ps1 b2` on Windows. Your own tests still run separately from `capstone/tests/`.
+From a terminal at the exercises root: `bash tools/run.sh b2` on WSL/Linux (or Mac), or `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 b2` on Windows. Your own tests still run separately from `capstone/tests/`.
 
 ## Block 3 - instrument drivers (gate b3)
 
@@ -405,7 +406,7 @@ Create `chassis/instruments/__init__.py` and re-export `InstrumentError`, `Trans
 
 Run: Ctrl+Shift+B → Gate: b3
 
-From a terminal at the exercises root: `bash tools/run.sh b3` on WSL/Linux (or Mac), or `tools\run.ps1 b3` on Windows. Your own tests still run separately from `capstone/tests/`.
+From a terminal at the exercises root: `bash tools/run.sh b3` on WSL/Linux (or Mac), or `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 b3` on Windows. Your own tests still run separately from `capstone/tests/`.
 
 ### TcpTransport task: fake TCP server and driver-doc template
 
@@ -641,7 +642,7 @@ for source, missing in listener.gap_report().items():
 
 Run: Ctrl+Shift+B → Gate: b4
 
-From a terminal at the exercises root: `bash tools/run.sh b4` on WSL/Linux (or Mac), or `tools\run.ps1 b4` on Windows. The gate uses local UDP only; no instruments or internet are needed. Your own tests still run separately from `capstone/tests/`.
+From a terminal at the exercises root: `bash tools/run.sh b4` on WSL/Linux (or Mac), or `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 b4` on Windows. The gate uses local UDP only; no instruments or internet are needed. Your own tests still run separately from `capstone/tests/`.
 
 ## Block 5 - test executor and operator CLI (gate b5)
 
@@ -703,13 +704,15 @@ Keep a list of steps whose setup has started. Add the step before calling setup 
 first setup, first run, second setup, second run, second teardown, first teardown
 ```
 
+Compare that with d37 E3: first setup, second setup, first run, second run, second teardown, first teardown. In d37 a run returning `False` stops the remaining runs. Here each run returns readings and a limit failure is decided after collecting the readings. In both, register cleanup before each setup and clean up in reverse order.
+
 The specification also says "setup, then run, then teardown" for each step; its more explicit guarantee puts teardowns **at the end in reverse order**, as shown above. Keep that order on successful runs, errors, and aborts.
 
 - An exception in setup or run ends forward execution immediately: skip the remaining steps and return ERROR after cleanup.
 - A `KeyboardInterrupt` in setup or run ends forward execution. Do not re-raise it; return ABORTED if cleanup succeeds.
 - Any teardown that raises `Exception` or `KeyboardInterrupt` makes the final state ERROR, overriding PASS, FAIL, ERROR, or ABORTED selected earlier. Do not re-raise these cleanup failures; still attempt every remaining teardown callback.
 - Keep state transitions in `log` as `"IDLE->SETUP"`, `"SETUP->RUNNING"`, and similar moves using the enum member names. Also record step events as `"step <name>: <event>"`. Intermediate transitions for multiple steps are not prescribed; make the state history consistent with the final state.
-- Record an abort from setup or run as a step event whose `<event>` starts with `abort:`. Record each teardown that raises `Exception` or `KeyboardInterrupt` as a step event whose `<event>` starts with `cleanup failed:`. Use the affected step's name in each record, even when cleanup changes the final state to ERROR. These markers (fixed pieces of text identifying an event) are required exactly as written; any text after them is up to you and may be empty. Other event wording is not prescribed. Keep the checked results from measurements already collected.
+- Record an abort from setup or run as a step event whose `<event>` starts with `abort:`. Record each teardown that raises `Exception` or `KeyboardInterrupt` as a step event whose `<event>` starts with `cleanup failed:`. Use the affected step's name in each record, even when cleanup changes the final state to ERROR. These markers (fixed pieces of text identifying an event) are required exactly as written; any text after them is up to you and may be empty. Other event wording is up to you. When a DMM read times out in the end-to-end run, `RunResult.log` must include the timeout exception's message. You can add text around it. Keep the checked results from measurements already collected.
 
 After setup or run raises an exception, check the readings collected before it so useful partial results remain available. Choose the final state after all cleanup attempts: a cleanup failure takes priority over an earlier abort or the checked results. An abort followed by failed cleanup therefore returns ERROR, with the abort still recorded in the log.
 
@@ -762,12 +765,12 @@ Use your exercise environment's Python path if `python` does not select it. No a
 - **(~60 minutes, after the separate 45-minute d37 set) `run_sequence()` with guaranteed teardown.** First complete [d37: Test sequences as state machines](../sets/d37/README.md) as its own tracker task. Then use the full 60-minute capstone slot to implement `run_sequence()`: run two successful capstone steps, register cleanup before setup, and handle exceptions with reverse-order teardown. Write your own tests for a failing setup, a failing run, Ctrl+C represented by raising `KeyboardInterrupt`, and a teardown failure that must not prevent other cleanup. Replace 5 minutes of successful-run practice with an abort followed by failed cleanup: check that the final state is ERROR, the abort remains in the log, earlier readings remain in the results, and all remaining cleanup runs. Check the callback order and final state.
 - **(~60 minutes) Operator CLI: `chassis check` with exit codes 0/1/2/3 (optional).** Add `main`, parse the required paths, load both files, reuse checking and text reporting, and return the right integer. Test PASS, FAIL, ERROR, and invalid input separately; capture stdout and stderr with pytest's `capsys` fixture.
 - **(~55 minutes) `python -m chassis`, JSON report from the CLI, and CLI tests (optional).** Add `__main__.py`, the optional report and station arguments, and metadata. Test paths with spaces, read a generated JSON report back, and use `subprocess.run` with a timeout to check the actual module command and process exit code.
-- **(~55 minutes) Push to GitHub, add CI (pytest + mypy), open your first PR.** Push your capstone repository and branch, add a GitHub Actions workflow (a file describing automated jobs) that installs the tools and runs `python -m pytest --junitxml=report.xml` and `python -m mypy --strict chassis` from your capstone repository root, then open a PR. The pytest option writes a JUnit XML test report, a structured text file of test outcomes, as practised in d13's JUnit lab. Add an `actions/upload-artifact` step to save `report.xml` as a downloadable artifact (a file retained with the workflow run); set its `path` to `report.xml` and `if: always()` so the report is uploaded even when tests fail. Download it from a workflow run and inspect its test outcomes. Review your diff before merging. From now on, use a PR for each capstone change and require CI to pass; the gate checks program behavior, not your GitHub account or workflow files.
+- **(~55 minutes) Push to GitHub, add CI (pytest + mypy), open your first PR.** Publish your capstone repository to GitHub if you have only worked locally so far. From `capstone/`, run `git remote -v` and check that `origin` points to your GitHub repository before pushing your branch. Then add a GitHub Actions workflow (a file describing automated jobs) that installs the tools and runs `python -m pytest --junitxml=report.xml` and `python -m mypy --strict chassis` from your capstone repository root, then open a PR. The pytest option writes a JUnit XML test report, a structured text file of test outcomes, as practised in d13's JUnit lab. Add an `actions/upload-artifact` step to save `report.xml` as a downloadable artifact (a file retained with the workflow run); set its `path` to `report.xml` and `if: always()` so the report is uploaded even when tests fail. Download it from a workflow run and inspect its test outcomes. Review your diff before merging. From now on, use a PR for each capstone change and require CI to pass; the gate checks program behavior, not your GitHub account or workflow files.
 - **(~10 minutes) Run gate b5 on your capstone (optional).** Save your files and fix failing checks. This gate reruns b1 through b5, so models, limits, checking, reports, drivers, and telemetry must keep working.
 
 Run: Ctrl+Shift+B → Gate: b5
 
-From a terminal at the exercises root: `bash tools/run.sh b5` on WSL/Linux (or Mac), or `tools\run.ps1 b5` on Windows. Your own tests still run separately from `capstone/tests/`; the gate uses saved CSV files and local processes, with no hardware or internet needed.
+From a terminal at the exercises root: `bash tools/run.sh b5` on WSL/Linux (or Mac), or `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 b5` on Windows. Your own tests still run separately from `capstone/tests/`; the gate uses saved CSV files and local processes, with no hardware or internet needed.
 
 
 ## Block 6 - station config, operator status page, and deployment (gate b6)
@@ -906,7 +909,7 @@ The gate reads these files; it never runs Docker, systemd, or Ansible. Despite t
 
 Run: Ctrl+Shift+B → Gate: b6
 
-From a terminal at the exercises root: `bash tools/run.sh b6` on WSL/Linux (or Mac), or `tools\run.ps1 b6` on Windows. Your own tests still run separately from `capstone/tests/`; no hardware, internet, Linux service manager, or Docker installation is needed for the gate.
+From a terminal at the exercises root: `bash tools/run.sh b6` on WSL/Linux (or Mac), or `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 b6` on Windows. Your own tests still run separately from `capstone/tests/`; no hardware, internet, Linux service manager, or Docker installation is needed for the gate.
 
 ### One station run, end to end (~55 minutes)
 
@@ -999,7 +1002,7 @@ This prints `OVERALL: PASS (2 pass, 0 fail, 0 error)`. The returned state is `Ru
 
 ## Final repairs, demonstration, and gates
 
-- [ ] **(~50 minutes) Run your gates; fix anything red.** Run the cumulative gate for the last block you finished in order: **b3** for the core plan; b4, b5, or b6 only if you built every block up to that gate. Gate b5 also needs Block 4; b6 needs Blocks 4-6. From the exercises root, run `bash tools/run.sh b3` on WSL/Linux (or Mac), or `tools\run.ps1 b3` on Windows; replace b3 with your chosen gate if needed. Fix failing behavior, rerun your own tests (including your executor tests) and `mypy --strict chassis`, and report all pass / partial / stuck in the tracker.
+- [ ] **(~50 minutes) Run your gates; fix anything red.** Run the cumulative gate for the last block you finished in order: **b3** for the core plan; b4, b5, or b6 only if you built every block up to that gate. Gate b5 also needs Block 4; b6 needs Blocks 4-6. From the exercises root, run `bash tools/run.sh b3` on WSL/Linux (or Mac), or `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 b3` on Windows; replace b3 with your chosen gate if needed. Fix failing behavior, rerun your own tests (including your executor tests) and `mypy --strict chassis`, and report all pass / partial / stuck in the tracker.
 - [ ] **(~45 minutes) Prepare a five-minute demo script of your mini chassis tester.** Write and rehearse a short walkthrough using your existing modules, with no real hardware required. Cover each item below:
   - Load CSV limits, check readings, and write and show the JSON report and text summary from Block 2. Explain PASS, FAIL, and ERROR and where the operator finds the reports.
   - Drive the PSU and DMM drivers through fake transports. Show output-off evidence in the PSU fake's recorded writes.

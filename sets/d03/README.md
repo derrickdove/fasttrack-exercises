@@ -9,7 +9,7 @@ A test station is a computer and instruments used to check hardware. A channel i
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/channels.py`. Don't edit `tests/`.
-2. Press **Ctrl+Shift+B → Test: d03** (or run `bash tools/run.sh d03` / `tools\run.ps1 d03` from the repo root). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d03** (or run `bash tools/run.sh d03` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d03` from the repo root). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A **collection** holds multiple items:

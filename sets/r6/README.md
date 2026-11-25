@@ -9,7 +9,7 @@ This set mixes this week's material with new problems from earlier weeks. An ope
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/review6.py`. Don't edit `tests/`. Keep the supplied `_ServiceParser`, `_service_settings`, `_setup_graph`, `_health_app`, and `Transport` interface unchanged; their complete code reduces setup work in this review.
-2. Press **Ctrl+Shift+B → Test: r6** (or run `bash tools/run.sh r6` / `tools\run.ps1 r6`). At first you'll see `Exercises: 0 / 7 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: r6** (or run `bash tools/run.sh r6` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 r6`). At first you'll see `Exercises: 0 / 7 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 Earlier readings used here:

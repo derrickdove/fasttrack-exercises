@@ -23,10 +23,10 @@ Agreed rules for E2 onward: L and R turn exactly 90 degrees without moving; F mo
 Spend the first 5 minutes writing questions and tracing the two cases, then work through the five exercises (40 minutes).
 
 1. Replace each `raise NotImplementedError(...)` in `starter/stage.py`. This error marks unfinished code. Leave `tests/` alone. The two quizzes also use functions: return a dictionary of chosen letters.
-2. Save and run `bash tools/run.sh t01` in the terminal from the exercises repo. Initially you should see `Exercises: 0 / 5 passed`. Rerun after each exercise. **pytest** is the tool running these checks; one exercise may contain several checks.
+2. Save and run the command for your terminal from the exercises repo. Bash: `bash tools/run.sh t01`. Windows (PowerShell): `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 t01`. Initially you should see `Exercises: 0 / 5 passed`. Rerun after each exercise. **pytest** is the tool running these checks; one exercise may contain several checks.
 3. Report **all pass / partial / stuck** in the tracker. Stop at 45 minutes and report where you reached. Ask your coach for a hint if needed.
 
-Type Python in the file, then save it; type the Bash command above in the terminal. Do not type a `>>>` prompt. Use `return` to send a value to a caller; `print` only displays it. A missing `return` gives `None`, meaning no returned value.
+Type Python in the file, then save it; type your run command above in the terminal. Do not type a `>>>` prompt. Use `return` to send a value to a caller; `print` only displays it. A missing `return` gives `None`, meaning no returned value.
 
 A **signature** is the function's exact definition line. `def` names a function; parentheses hold its inputs, and `()` means no inputs. A **type hint** describes an expected type: `:` introduces an input type and `->` introduces the returned type; a final `:` starts an indented block. Indent the function body by four spaces; indent a block inside it by four more. `str` means text, `int` a whole number, and `bool` either `True` or `False`.
 

@@ -9,7 +9,7 @@ A chassis test station compares measured bus voltages (voltages on shared electr
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/review_fix.py`. E1 and E2 include the proposed buggy bodies in their docstrings (text attached to a function); copy each body out and fix it. For E3, replace the entire placeholder in `starter/ci.yml`. For E4, fill in `review_answers()` in `starter/driver_review.py`; read both files in `data/` without applying them. Don't edit `tests/` or `data/`.
-2. Press **Ctrl+Shift+B → Test: d40** (or run `bash tools/run.sh d40` / `tools\run.ps1 d40`). At first you'll see `Exercises: 0 / 4 passed`, all reported as `NotImplementedError`; this includes the untouched YAML placeholder. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d40** (or run `bash tools/run.sh d40` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d40`). At first you'll see `Exercises: 0 / 4 passed`, all reported as `NotImplementedError`; this includes the untouched YAML placeholder. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 **Git** tracks versions of files. A **branch** is a named line of Git development. A **commit** records a snapshot of changes. A **pull request (PR)** asks reviewers to merge a branch into the shared branch. **Continuous integration (CI)** runs automated checks when code is pushed or a PR changes. A **regression** is previously working behavior broken by a change.
@@ -160,7 +160,7 @@ A repair needs the same scrutiny as the original change before it is accepted.
 
 ## Hands-on git checklist (~5 min; not scored)
 
-Do this in your own capstone repository (the longer chassis-tester project), where you can push a branch. These actions are practice for you; the exercise runner does not run Git or check a PR.
+Do this in your own capstone repository (the longer chassis-tester project), starting with the local steps below. Run `git remote -v` before the push. If it shows no `origin` for your GitHub repository, finish the local steps now and save the push and PR for the capstone's "Push to GitHub" task. The exercise runner does not run Git or check a PR.
 
 - Start from your shared branch with a clean working tree (no uncommitted changes). Create your work branch with `git switch -c fix/CTS-34-limit-review`.
 - Make a small limit-checker change and a regression test in that project. Run its tests locally. Use `git diff` to inspect the changed lines before recording them.

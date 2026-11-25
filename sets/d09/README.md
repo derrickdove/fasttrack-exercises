@@ -9,7 +9,7 @@ A chassis test station checks instrument readings against allowed limits before 
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/test_limits_learner.py` with test code. Keep the four function names, their empty argument lists, and the supplied imports. Do not edit `starter/limits_lib.py`, `conftest.py`, or `tests/`.
-2. Press **Ctrl+Shift+B → Test: d09** (or run `bash tools/run.sh d09` / `tools\run.ps1 d09` from the repository root). At first you'll see `Exercises: 0 / 4 passed`. Save and rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d09** (or run `bash tools/run.sh d09` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d09` from the repository root). At first you'll see `Exercises: 0 / 4 passed`. Save and rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 The grader runs each exercise's test on the correct checker, then uses a fresh Python process (a separate running copy of Python) to run it on each matching mutant in `tests/mutants/`. Each mutant breaks one required scenario, so your test must catch them all to pass the exercise. A failure naming a mutant means your test allowed its faulty behavior. An unfinished test cannot earn credit by failing on every checker. The learner test file is excluded from ordinary collection because these grading checks run it themselves.

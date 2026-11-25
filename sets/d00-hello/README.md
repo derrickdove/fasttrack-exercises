@@ -9,7 +9,7 @@ A test station greets the operator with its name. This tiny check proves Python 
 ## How this works
 
 1. Open `starter/hello.py` and read the supplied function. This setup check is already implemented. Later sets ask you to replace `raise NotImplementedError(...)` lines; don't edit `tests/`.
-2. Press **Ctrl+Shift+B → Test: d00-hello** (or run `bash tools/run.sh d00-hello` / `tools\run.ps1 d00-hello`). Expect `Exercises: 1 / 1 passed` immediately.
+2. Press **Ctrl+Shift+B → Test: d00-hello** (or run `bash tools/run.sh d00-hello` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d00-hello`). Expect `Exercises: 1 / 1 passed` immediately.
 3. Report **all pass / partial / stuck** in the tracker. If setup fails, report stuck with the first error you see.
 
 A **function** is a named piece of code you can call. A **string** is text; `str` in the signature says the input and output are strings. An **f-string** inserts a value into text:

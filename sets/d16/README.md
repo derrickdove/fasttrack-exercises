@@ -9,7 +9,7 @@ A chassis test station sends settings to a power supply and asks a meter for mea
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/scpi.py`. Don't edit `tests/`.
-2. Press Ctrl+Shift+B → **Test: d16** (or run `bash tools/run.sh d16` / `tools\run.ps1 d16`). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
+2. Press Ctrl+Shift+B → **Test: d16** (or run `bash tools/run.sh d16` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d16`). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A **string** (`str`) holds text; **bytes** hold integer byte values from 0 to 255, as sent over an instrument connection. An **encoding** maps text characters to bytes; **ASCII** is an encoding limited to values 0–127. `encode("ascii")` converts text to bytes; `decode("ascii")` converts bytes to text. A **terminator** is the ending that marks a message boundary, commonly `"\n"` (line feed) or `"\r\n"` (carriage return followed by line feed). **Whitespace** means spaces, tabs, line endings, and other characters removed by `str.strip()`.

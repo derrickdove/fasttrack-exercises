@@ -45,11 +45,22 @@ def test_e1_launch_error_propagates(tmp_path: Path) -> None:
         run_probe([str(tmp_path / "no-such-station-probe")], 1.0)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def bash() -> str:
-    executable = shutil.which("bash")
+    executable = shutil.which(os.environ.get("FT_BASH") or "bash") if os.name == "nt" else shutil.which("bash")
+    if os.name == "nt":
+        guidance = "Set FT_BASH to Git for Windows' bash.exe (see the README), or use Codespaces; E2 is unfinished."
+        if executable is None:
+            pytest.skip(guidance)
+        try:
+            version = subprocess.run([executable, "--version"], capture_output=True, timeout=3)
+        except (OSError, subprocess.TimeoutExpired):
+            pytest.skip(guidance)
+        # The WSL launcher cannot use the Windows paths passed to the script.
+        if version.returncode != 0 or b"-msys" not in version.stdout.partition(b"\n")[0]:
+            pytest.skip(guidance)
     if executable is None:
-        pytest.skip("Bash is missing: install Git Bash or use Codespaces; E2 is unfinished.")
+        pytest.skip("Bash is missing: install Bash or use Codespaces; E2 is unfinished.")
     return executable
 
 

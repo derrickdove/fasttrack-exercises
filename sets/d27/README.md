@@ -9,7 +9,7 @@ A chassis test station receives **telemetry**, measurements sent by the hardware
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/sequence.py`. Don't edit `tests/`.
-2. Press Ctrl+Shift+B → **Test: d27** (or run `bash tools/run.sh d27` / `tools\run.ps1 d27`). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
+2. Press Ctrl+Shift+B → **Test: d27** (or run `bash tools/run.sh d27` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d27`). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A **16-bit counter** has 65536 possible values, 0 through 65535. **Wraparound** means 65535 is followed by 0. **Serial arithmetic** compares counters on this ring rather than treating 0 as always older than 65535. `%` is the modulo operator: `65536 % 65536` is `0`.

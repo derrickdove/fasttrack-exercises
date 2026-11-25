@@ -9,7 +9,7 @@ A chassis test station checks electrical connections and records measurements fo
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/review1.py`. Don't edit `tests/`. The two dataclasses and the enum are supplied; leave their declarations in place.
-2. Press **Ctrl+Shift+B → Test: r1** (or run `bash tools/run.sh r1` / `tools\run.ps1 r1` from the repository root). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: r1** (or run `bash tools/run.sh r1` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 r1` from the repository root). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker. Note which earlier topic needs more practice.
 
 Earlier readings, by name:

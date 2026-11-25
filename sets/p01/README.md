@@ -11,7 +11,7 @@ Build small helpers that return station labels and turn simple replies into usef
 ## How this works
 
 1. Open `sets/p01/starter/basics.py`. Replace only the `raise NotImplementedError(...)` line for the current exercise. Keep its `def` line and the line in triple quotes. A **docstring** is the description in triple quotes; a **NotImplementedError** marks unfinished code, and `raise` stops that function with the named error.
-2. Save the file. From the repository folder, run `bash tools/run.sh p01` in the VS Code terminal. Start with `Exercises: 0 / 12 passed`. Rerun after each exercise. Several checks can belong to one exercise; they all need to pass. Don't edit `tests/`.
+2. Save the file. From the repository folder, run `bash tools/run.sh p01` (Windows PowerShell: `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 p01`) in the VS Code terminal. Start with `Exercises: 0 / 12 passed`. Rerun after each exercise. Several checks can belong to one exercise; they all need to pass. Don't edit `tests/`.
 3. Report **all pass / partial / stuck** in the tracker. If an exercise takes longer than its estimate, record where you got stuck and ask your coach for a hint.
 
 A **shell** is a program that runs commands such as `bash tools/run.sh p01`. Write Python in the starter file, not at the shell prompt. The worked examples below are for reading; they are complete Python snippets you can also run in a separate practice file. If you use Python's interactive window, `>>>` is its prompt, not something to type.

@@ -9,7 +9,7 @@ A test station uses a power supply unit (**PSU**) to power the hardware being te
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/safety.py`. Don't edit `tests/`. The supplied `Protocol` classes describe the methods an instrument must offer; their `...` declarations are complete and need no edits.
-2. Press Ctrl+Shift+B → **Test: d20** (or run `bash tools/run.sh d20` / `tools\run.ps1 d20`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+2. Press Ctrl+Shift+B → **Test: d20** (or run `bash tools/run.sh d20` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d20`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
 3. Report all pass / partial / stuck in the tracker.
 
 A **channel** is an independently controlled PSU output, identified here by an integer. A **context manager** runs entry and exit actions around a `with` block; Python calls `__enter__` before the block and `__exit__` when it ends, including on an exception (a raised error). Returning false from `__exit__` lets that error continue to the caller. A `finally` block runs cleanup whether a `try` block succeeds or fails.
@@ -67,7 +67,7 @@ Only errors matching `exceptions` trigger another attempt (subclasses, more spec
 
 **Signature:** `with_deadline(fn, timeout_s, clock=time.monotonic, sleep=time.sleep) -> T`
 
-Reject a negative timeout with `ValueError` before calling any dependency. Compute the deadline from the injected clock once, then call `fn()` immediately, even for a zero timeout. Return the exact first truthy result. After a falsey result, raise `TimeoutError` if no time remains. Otherwise sleep for the smaller of 0.01 seconds and the remaining time. Check the clock after sleeping: at or beyond the deadline, raise `TimeoutError` without another `fn()` call. Repeat while time remains. The timeout message is up to you.
+The timeout must be finite and nonnegative. Raise `ValueError` for a negative timeout, infinity, or NaN (not a number) before calling anything. Compute the deadline from the injected clock once, then call `fn()` immediately, even for a zero timeout. Return the exact first truthy result. After a falsey result, raise `TimeoutError` if no time remains. Otherwise sleep for the smaller of 0.01 seconds and the remaining time. Check the clock after sleeping: at or beyond the deadline, raise `TimeoutError` without another `fn()` call. Repeat while time remains. The timeout message is up to you.
 
 The clock returns seconds and never moves backward; sleep advances time. Propagate errors from `fn`, `clock`, or `sleep` immediately. Calls are synchronous (one finishes before the next starts): this helper cannot interrupt a blocked `fn()`. A truthy result from an already-started call is accepted even if that call took past the deadline.
 

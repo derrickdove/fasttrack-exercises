@@ -9,7 +9,7 @@ A chassis test station needs to read a meter and control a power supply before t
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `FakeTransport`, `Dmm`, and `PowerSupply` in `starter/driver.py`, and in `Psu` in `starter/psu.py`. Leave the supplied protocols, `Psu.from_config`, and the marked setup at the start of `Psu.__init__` unchanged. Don't edit `tests/`.
-2. Press **Ctrl+Shift+B → Test: d19** (or run `bash tools/run.sh d19` / `tools\run.ps1 d19`). At first you'll see `Exercises: 0 / 6 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d19** (or run `bash tools/run.sh d19` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d19`). At first you'll see `Exercises: 0 / 6 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A **protocol** describes the methods an object must offer; matching objects do not need to inherit from it. An **abstract base class** is an alternative that can require subclasses to implement methods. This set uses a protocol.
@@ -93,6 +93,8 @@ Both methods require channel 1, 2, or 3; otherwise raise `ValueError` before any
 
 **Reread:** *The Pragmatic Programmer*, "Decoupling"; Pro Git 5.2, "Commit Guidelines", keeping a change focused enough to review.
 
+**Pause here:** Rerun the set after E4. E1-E4 should pass before you move on to the bench driver.
+
 ### E5 - Build the bench power-supply driver (medium, ~23 min)
 
 **Goal:** Implement `Psu` in the new `starter/psu.py`. This is the kind of problem the team asks in interviews. Leave E1-E4 in `starter/driver.py` as they are. `ResourceLike` and `ResourceManagerLike` are supplied protocols; do not implement or change them. The existing primer's general type-validation advice applies to E1-E4; E5-E6 add the explicit runtime checks below.
@@ -123,6 +125,18 @@ A VISA **resource manager** opens connections; a **message-based resource** is a
 | `resource.close()` | Close the connection |
 
 PyVISA calls this resource type `MessageBasedResource`. The supplied `ResourceLike` describes just the operations above. A **decorator** is an `@` modifier on a class or function. The supplied `@runtime_checkable` decorator allows `isinstance(resource, ResourceLike)` to check PyVISA's general resource type for **mypy**, a tool that checks type hints before you run the code. You do not need a VISA backend (the communication implementation) or hardware to complete these exercises: the tests inject fake managers and use **pyvisa-sim**, a simulated backend, once with `data/psu.yaml`. **YAML** is the text format used for that supplied device description; do not edit it.
+
+Here is a separate example. `read_label()` promises only an `object`, so check its type before saving it in a list of strings. After the check, mypy knows `label` is a `str`.
+
+```python
+def read_label() -> object:
+    return "shipping"
+
+labels: list[str] = []
+label = read_label()
+if isinstance(label, str):
+    labels.append(label)
+```
 
 **Signatures:** On `Psu`:
 

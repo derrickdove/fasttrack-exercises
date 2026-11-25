@@ -9,7 +9,7 @@ A chassis test station needs evidence that its requirements were checked. A **re
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/trace.py`. Don't edit `tests/`.
-2. Press **Ctrl+Shift+B → Test: d53** (or run `bash tools/run.sh d53` / `tools\run.ps1 d53`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d53** (or run `bash tools/run.sh d53` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d53`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A glossary pass for the station vocabulary:
@@ -85,7 +85,7 @@ A requirement is `failed` if **any** matching record is `FAIL`, otherwise `verif
 
 **Signature:** `def untested(reqs: Requirements, results: Results) -> list[str]`
 
-**Contract:** Return only ids whose method is exactly `Test` and whose coverage status is `not-run`, sorted. A failed test has run, so it is not untested. Missing Analysis, Inspection, and Demonstration evidence never belongs in this list. Empty inputs return `[]`.
+**Contract:** Return only ids whose method is exactly `Test` and whose coverage status is `not-run`, sorted. A failed test has run, so it is not untested. Missing Analysis, Inspection, and Demonstration evidence never belongs in this list. An empty plan returns `[]`. If results are empty, list every requirement whose method is `Test`, sorted by ID.
 
 **Example:** With the supplied files, `untested(reqs, results)` returns `["REQ-03"]`.
 

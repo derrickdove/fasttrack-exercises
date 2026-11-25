@@ -9,7 +9,7 @@ A chassis test station needs to launch its tools, read limits, command a power s
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` bodies in `starter/check34.py`. Don't edit `tests/`. The supplied data classes and `Transport` interface stay as supplied; don't implement the interface's two placeholder methods. In E10, complete only the two marked learner methods; keep its supplied code.
-2. Press **Ctrl+Shift+B → Test: check34** (or run `bash tools/run.sh check34` / `tools\run.ps1 check34`). At first you'll see `Exercises: 0 / 10 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: check34** (or run `bash tools/run.sh check34` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 check34`). At first you'll see `Exercises: 0 / 10 passed`. Rerun after each exercise.
 3. **Time-box this check to 165 minutes:** set a timer, work from E1 to E10, and move on when an exercise's budget expires. The exercises can be completed independently. E10 includes 10 minutes of code work plus 5 minutes reserved for reading these instructions and rerunning tests throughout the check. Record unfinished exercises and the ones that took longest.
 4. Report **all pass / partial / stuck** in the tracker when time is up. Use the reread table to choose your next practice.
 

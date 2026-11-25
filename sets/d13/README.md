@@ -9,7 +9,7 @@ A test station runs checks on instrument channels (named measurement inputs, suc
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/reporting.py` and `starter/station_checks.py`; E4 also needs a test decorator. Don't edit `tests/`.
-2. Press Ctrl+Shift+B → **Test: d13** (or run `bash tools/run.sh d13` / `tools\run.ps1 d13` from the repo root). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+2. Press Ctrl+Shift+B → **Test: d13** (or run `bash tools/run.sh d13` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d13` from the repo root). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 **UTF-8** is a text encoding that supports non-English characters. In type hints, `Any` means a value of any Python type; `Path` is a filesystem path object from `pathlib`.

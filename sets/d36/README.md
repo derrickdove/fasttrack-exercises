@@ -9,10 +9,10 @@ A test station is the computer that controls instruments and records chassis tes
 ## How this works
 
 1. Replace the unfinished `printf` / `exit 99` bodies in the two Bash files. Keep the first `#!/usr/bin/env bash` line, which identifies the interpreter (the program that runs the script). No Python edits are needed; don't edit `tests/` or the supplied `starter/scripts.py` helper.
-2. Press **Ctrl+Shift+B → Test: d36** (or run `bash tools/run.sh d36` / `tools\run.ps1 d36`). Initially expect `Exercises: 0 / 4 passed` with `NotImplementedError`: the tests translate the shell placeholders into that Python exception. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d36** (or run `bash tools/run.sh d36` in Bash). In PowerShell, run `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d36`. Initially expect `Exercises: 0 / 4 passed` with `NotImplementedError`: the tests translate the shell placeholders into that Python exception. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
-Install Bash, a command interpreter, or use the repo's Codespaces option. Git Bash counts on Windows. Tests skip with a clear message if `bash` is missing; skipped exercises are unfinished. Save `.sh` files with LF (Unix-style line endings).
+This set needs Bash. The native Windows runner (`tools\run.ps1`) passes Windows paths to Bash, so it needs **Git for Windows Bash**, not the WSL launcher. In the same PowerShell terminal, run `Get-Command bash`: the path should end in `Git\bin\bash.exe` or `Git\usr\bin\bash.exe`. If it shows `C:\Windows\System32\bash.exe` (the WSL launcher) or nothing, put Git's Bash first for this terminal with `$env:Path = "C:\Program Files\Git\bin;" + $env:Path` and check again. If you have Ubuntu (WSL), you can instead run `bash tools/run.sh d36` inside Ubuntu on a WSL clone. Codespaces also works. On plain Windows without Git Bash, read along. Tests skip with a clear message if `bash` is missing; skipped exercises are unfinished. Save `.sh` files with LF (Unix-style line endings).
 
 A **positional parameter** such as `$1` is an argument passed to the script; `$#` is the argument count. An **exit status** is a number returned to the caller: zero means success. **stdout** is ordinary output; **stderr** is diagnostic output. A **glob**, such as `*.log`, matches filenames. Quote variable expansions so a path containing spaces remains one argument. A **pipeline** joins commands with `|`. A **key=value** line associates a setting name with text. A Bash **array** stores several values, for example missing setting names.
 
@@ -24,6 +24,15 @@ if [[ $# -ne 1 ]]; then
 fi
 printf 'Selected: %s\n' "$1"
 ```
+
+**Literal-line example.** Imagine a file of exhibit labels. The first line is `  Gallery \ West  ` (two spaces at each end), followed by a newline. The second line is `Exit`, and the file ends immediately after the `t`. A line reader should hand both lines to the printer. Here are the printed lines with brackets showing exactly which characters were kept.
+
+```text
+[  Gallery \ West  ]
+[Exit]
+```
+
+The first line keeps its spaces and backslash. The second line prints even though it has no final newline.
 
 ## Exercises
 
@@ -65,7 +74,7 @@ On success, obtain the current local date with `date +%Y%m%d`. Here `YYYYMMDD` m
 
 `CONFIG` is a readable regular text file. Read it as data; never execute or `source` it (`source` runs a file as shell commands). Required keys, in report order, are `station_id`, `instrument_host`, and `log_dir`. `instrument_host` is the instrument's network name or address; `log_dir` is the directory used for logs. Check presence only; do not connect to the host or check that the directory exists.
 
-Each non-comment line has `key=value`, with no spaces around `=`. Ignore blank lines, lines starting with `#`, and unknown keys. Split at the first `=`; the rest is the literal value, including spaces, additional `=` signs, or shell punctuation. A required key is missing if absent or its final value is empty. Later occurrences replace earlier ones. Whitespace inside a value is preserved and counts as nonempty. Support LF and CRLF (Windows-style line endings), and a final line without a newline. Other malformed input is outside the contract.
+Each setting has a key immediately followed by `=`. Ignore blank lines, lines starting with `#`, and unknown keys. Every character after the first `=` belongs to the value, including leading and trailing spaces, additional `=` signs, or shell punctuation. A required key is missing if absent or its final value is empty. Later occurrences replace earlier ones. Whitespace inside a value is preserved and counts as nonempty. Support LF and CRLF (Windows-style line endings), and a final line without a newline. Other malformed input is outside the contract.
 
 When keys are missing, print one `Missing: KEY` line per key in the order above and exit 1. When none are missing, print `Station OK` and a newline, and exit 0. Leave stderr empty for these valid calls.
 
@@ -97,6 +106,8 @@ JSON is a text format for structured data. Produce exactly one JSON object on on
 **Reread:** The Linux Command Line ch. 32, processing options; Missing Semester "Shell Tools and Scripting," composing command-line tools.
 
 ## Terminal drill (WSL2 Ubuntu, ~5 min)
+
+Needs Ubuntu (WSL) or Codespaces. On plain Windows, read along.
 
 This drill is ungraded; its minutes come from the day's readings. Finish E3 first. Use your clone inside Ubuntu's Linux filesystem, starting in the repo root. An **execute permission** allows a file to run as a program. `chmod` changes permissions; `u+x` adds execute permission for the file's owner, and `u-x` removes it.
 

@@ -9,7 +9,7 @@ A **test station** is a computer and connected equipment used to check hardware;
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/replies.py`. Don't edit `tests/`. A `NotImplementedError` marks an unfinished function.
-2. Press **Ctrl+Shift+B → Test: d01** (or run `bash tools/run.sh d01` / `tools\run.ps1 d01` from the repo folder). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise. The tests use **pytest**, a tool that runs Python checks for you.
+2. Press **Ctrl+Shift+B → Test: d01** (or run `bash tools/run.sh d01` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d01` from the repo folder). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise. The tests use **pytest**, a tool that runs Python checks for you.
 3. Report **all pass / partial / stuck** in the tracker. Note which exercises took longest and where you got stuck: those topics get extra attention. If you reach 45 minutes, report your current result.
 
 A **shell** is a program that runs commands you type. Check that you opened the exercises repo folder; in the shell reading, `pwd` shows the current folder and `cd` changes folders. If setup still fails, use the repo README's troubleshooting steps and include the first error in your report.

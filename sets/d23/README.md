@@ -9,7 +9,7 @@ Your test station controls a bench instrument over Ethernet, a network connectio
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/tcp_instrument.py`. Don't edit `tests/`. E3 improves the methods you wrote in E2; it has no separate method stub. E5 has its own stub in `starter/network_diagnosis.py`.
-2. Press **Ctrl+Shift+B → Test: d23** (or run `bash tools/run.sh d23` / `tools\run.ps1 d23`). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d23** (or run `bash tools/run.sh d23` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d23`). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 TCP (Transmission Control Protocol) delivers an ordered stream of bytes, the numeric units used to transmit data. A socket is the program's connection endpoint; a raw TCP client uses this socket directly. The host identifies the instrument computer, and the port identifies its listening service. Tests use `127.0.0.1` (your own computer) and an automatically assigned port, so no hardware or internet is needed.
@@ -82,7 +82,7 @@ For a Python **connection attempt** (before sending any command):
 
 **Goal:** Own one socket for the lifetime of a station instrument object.
 
-**Signatures:** `TcpInstrument(host: str, port: int, timeout: float = 2.0)`, `close() -> None`, `__enter__() -> TcpInstrument`, and the supplied `__exit__(...) -> None`.
+**Signatures:** `TcpInstrument(host: str, port: int, timeout: float = 2.0)`, `close() -> None`, `__enter__() -> TcpInstrument`, and the supplied signature `__exit__(...) -> None`. Fill in the body of `__exit__` too.
 
 Connect immediately in `__init__` using `socket.create_connection((host, port), timeout=timeout)`. Use the supplied timeout, in seconds, for subsequent sends and receives too (`settimeout` can set it explicitly). `close()` releases the socket and is safe to call more than once. `__enter__` returns this same instance. `__exit__` always closes and lets any exception continue to the caller.
 

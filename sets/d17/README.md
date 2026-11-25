@@ -9,7 +9,7 @@ A chassis test station must find its instruments, record their identities, and r
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/visa_basics.py`. Don't edit `tests/` or the supplied `data/station.yaml`.
-2. Press **Ctrl+Shift+B -> Test: d17** (or run `bash tools/run.sh d17` / `tools\run.ps1 d17`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B -> Test: d17** (or run `bash tools/run.sh d17` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d17`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 **VISA** (Virtual Instrument Software Architecture) is a common interface for talking to instruments; **PyVISA** is its Python interface. A **backend** is the implementation handling those communications; **pyvisa-sim** supplies a simulated backend instead of real hardware. **YAML** is a text format for structured settings; the supplied YAML file defines fixed command/reply pairs.

@@ -9,7 +9,7 @@ An operator needs to see whether a chassis test station is running and which com
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/statuspage.py`. The imports, models, application, starting data, and route decorators are supplied. Don't edit `tests/`.
-2. Press **Ctrl+Shift+B → Test: d43** (or run `bash tools/run.sh d43` / `tools\run.ps1 d43`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d43** (or run `bash tools/run.sh d43` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d43`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 An **API** (application programming interface) lets another program request information or changes. **FastAPI** is the Python framework used here to handle those requests; `app` is the supplied application object.

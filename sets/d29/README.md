@@ -9,7 +9,7 @@ A chassis test station sends commands to an instrument over TCP (Transmission Co
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/framing.py`. Don't edit `tests/`.
-2. Press Ctrl+Shift+B → **Test: d29** (or run `bash tools/run.sh d29` / `tools\run.ps1 d29` from the repository root). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+2. Press Ctrl+Shift+B → **Test: d29** (or run `bash tools/run.sh d29` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d29` from the repository root). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A **byte** is an integer from 0 to 255; a `bytes` object is an immutable sequence of bytes, written for example as `b"CH1?"`.

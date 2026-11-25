@@ -9,8 +9,8 @@ An operator needs the same chassis tester software on every bench computer. You 
 ## How this works
 
 1. E1–E3: replace the placeholder comments in the three deployment files. Leave the supplied `starter/deploycheck.py` as it is. Don't edit `tests/` or the empty `starter/__init__.py`.
-2. Press **Ctrl+Shift+B → Test: d44** (or run `bash tools/run.sh d44` / `tools\run.ps1 d44`). At first you'll see `Exercises: 0 / 3 passed`. Comment-only deployment files deliberately report `NotImplementedError`; once filled in, they get structural assertions. Rerun after each exercise.
-3. Complete the unscored live drill below, including cleanup. Report **all pass / partial / stuck** in the tracker; record the three observed change counts separately from the exercise score.
+2. Press **Ctrl+Shift+B → Test: d44** (or run `bash tools/run.sh d44` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d44`). At first you'll see `Exercises: 0 / 3 passed`. Comment-only deployment files deliberately report `NotImplementedError`; once filled in, they get structural assertions. Rerun after each exercise.
+3. If you have a Linux terminal with `sudo` and `apt`, complete the unscored live drill below, including cleanup, and record the three observed change counts separately from the exercise score. Otherwise read the drill along. Report **all pass / partial / stuck** in the tracker for the exercises.
 
 A **deployment** is putting software and configuration on a computer. A Docker **image** is a packaged filesystem and startup recipe; a **container** is a running instance of that image. A **Dockerfile** lists instructions for constructing an image. A **base image** supplies the starting filesystem; its **tag**, such as `3.12-slim`, selects a version and variant. **Root** is Linux's unrestricted administrator account; the station process should use another account.
 
@@ -146,7 +146,7 @@ role_problems(roles / "notify_mismatch")
 
 ## Live drill (WSL2 Ubuntu, ~30 min)
 
-This drill is **unscored**: pytest does not execute it. Open the WSL2 Ubuntu terminal and keep using that terminal through cleanup. An Ubuntu-based **Codespace** (a hosted Linux development environment) with `sudo` and package-install access can also run this drill; it needs no systemd service. If those are unavailable, use WSL2 Ubuntu. Do not run E2's station playbook: this drill uses its own scratch files (temporary practice files).
+**Needs a Linux terminal with `sudo` and `apt`: Ubuntu (WSL) or this repo's Codespace. On plain Windows, read along.** This drill is **unscored**: pytest does not execute it. Open the WSL2 Ubuntu terminal and keep using that terminal through cleanup. This repo's **Codespace** (a hosted Debian Linux development environment) has `sudo` and `apt` and can also run this drill; it needs no systemd service. If those are unavailable, use WSL2 Ubuntu. Do not run E2's station playbook: this drill uses its own scratch files (temporary practice files).
 
 An operation is **idempotent** when applying the same desired state again changes nothing. Ansible's **PLAY RECAP** is the final per-host summary: `ok` counts successful tasks, including successful tasks that changed something; `changed` counts tasks that changed the host; `unreachable` counts connection failures; `failed` counts task failures. Read these together: `changed=0` alone does not prove success.
 

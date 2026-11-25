@@ -9,7 +9,7 @@ A **test station** is a computer and equipment used to check hardware. An **inst
 ## How this works
 
 1. Edit `sets/p03/starter/collections_basics.py`. Replace each `raise NotImplementedError(...)` line with your code. This line marks unfinished work; leave `tests/` alone.
-2. Save, then run `bash tools/run.sh p03` in the terminal from the repository folder. A **terminal** is where you type shell commands. Put Python code in the file, not at the shell prompt, and never type the interactive Python prompt `>>>` into your file.
+2. Save, then run `bash tools/run.sh p03` (Windows PowerShell: `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 p03`) in the terminal from the repository folder. A **terminal** is where you type shell commands. Put Python code in the file, not at the shell prompt, and never type the interactive Python prompt `>>>` into your file.
 3. At first the report says `Exercises: 0 / 12 passed`. Rerun after each exercise. Several checks may belong to one exercise; all must pass. Report **all pass / partial / stuck** in the tracker at 63 minutes.
 
 A **function** is named code that takes inputs and sends a result back with `return`. `print(...)` only displays something; it does not send the result back to a test. The examples below use `print` to show results, but your functions must return their results.

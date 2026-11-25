@@ -9,7 +9,7 @@ A chassis test station controls instruments that measure electrical signals. An 
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/errors.py`. Don't edit `tests/`.
-2. Press **Ctrl+Shift+B → Test: d05** (or run `bash tools/run.sh d05` / `tools\run.ps1 d05`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise; E3 uses E2, and E4 uses E1.
+2. Press **Ctrl+Shift+B → Test: d05** (or run `bash tools/run.sh d05` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d05`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise; E3 uses E2, and E4 uses E1.
 3. Report **all pass / partial / stuck** in the tracker.
 
 An **exception** is an object describing a failure; `raise` stops normal execution and sends it to a matching `except` block.

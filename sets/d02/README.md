@@ -9,7 +9,7 @@ A test station is a computer connected to equipment that measures or controls ha
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/decide.py`. Don't edit `tests/`.
-2. Press **Ctrl+Shift+B → Test: d02** (or run `bash tools/run.sh d02` / `tools\run.ps1 d02` from the repository root). At first you'll see `Exercises: 0 / 4 passed`. Save and rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d02** (or run `bash tools/run.sh d02` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d02` from the repository root). At first you'll see `Exercises: 0 / 4 passed`. Save and rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A **function** is a named block of code; its **parameters** are the named inputs in its definition.

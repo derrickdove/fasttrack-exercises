@@ -14,11 +14,13 @@ Those sets add tables of measurements and instrument failures after these small 
 ## How this works
 
 1. Open `sets/p04/starter/filesafe.py` in VS Code. Replace each `raise NotImplementedError(...)` body as you reach it. Leave the function names and tests alone. **NotImplementedError** marks unfinished work.
-2. Save, then run this command in the Bash terminal from the repository folder:
+2. Save, then run this command in the terminal from the repository folder (Bash on Ubuntu/WSL):
 
    ```bash
    bash tools/run.sh p04
    ```
+
+   On plain Windows, in PowerShell: `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 p04`
 
    Type only the command, without a `>>>` prompt. Python examples below belong in a Python file or Python's interactive shell, not at the Bash prompt.
 3. At first, expect `Exercises: 0 / 11 passed`. Rerun after each exercise. A **test** checks a result; **pytest** is the tool running these tests. Its **tmp_path** provides a fresh temporary folder for each file test; the tests create all needed files.

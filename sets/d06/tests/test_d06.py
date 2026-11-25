@@ -107,6 +107,7 @@ def test_e2_conversion_cannot_create_infinity():
 
 
 def test_e3_empty_statistics():
+    # The starter already supplies the empty state, so this check passes from the start; E3's other tests check add().
     stats = RunningStats()
     assert stats.count == 0
     for name in ("mean", "min", "max"):

@@ -11,7 +11,7 @@ This set prepares you for [d06](../d06/README.md), which adds richer reading rec
 ## How this works
 
 1. Open `starter/objects.py`. Replace the `raise NotImplementedError(...)` lines for one exercise at a time. `NotImplementedError` marks unfinished code. Keep all class and function names. E9 has special instructions for replacing a whole method. Leave the already complete `FakeLink` alone. Don't edit `tests/`.
-2. Save, then run `bash tools/run.sh p05` from the repository folder in the **shell**, the terminal program that runs commands. At first expect `Exercises: 0 / 11 passed`. Run again after each exercise; all tests for an exercise must pass before its score changes.
+2. Save, then run `bash tools/run.sh p05` (Windows PowerShell: `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 p05`) from the repository folder in the **shell**, the terminal program that runs commands. At first expect `Exercises: 0 / 11 passed`. Run again after each exercise; all tests for an exercise must pass before its score changes.
 3. Work through the 11 exercises in order. E2 uses E1, E6 uses E3, and E10 combines E2 and E3 with the loop pattern below. Report **all pass / partial / stuck** in the tracker. Stop around 65 minutes and report where you reached.
 
 Python examples below go in a temporary Python file or the Python interactive prompt, not directly at the shell prompt. Do not type prompt marks such as `>>>`. Each worked example runs by itself. Exercise examples assume you have finished the named class in `objects.py`.

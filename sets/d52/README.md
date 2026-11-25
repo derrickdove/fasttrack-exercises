@@ -9,7 +9,7 @@ On your first day, a chassis test station already has working instrument drivers
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in the E1 answer file and E2 driver. E3 asks you to locate and repair existing code and add a test. Keep the supplied code otherwise intact. Don't edit the set's top-level `tests/`, or the existing files under `starter/legacy_station/tests/`; add your regression test (a check that prevents a repaired defect from returning) there.
-2. Press **Ctrl+Shift+B → Test: d52** (or run `bash tools/run.sh d52` / `tools\run.ps1 d52` from the repository root). At first you'll see `Exercises: 0 / 3 passed`. Rerun after each exercise. Until your regression file exists, E3 reports `NotImplementedError` with the required path.
+2. Press **Ctrl+Shift+B → Test: d52** (or run `bash tools/run.sh d52` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d52` from the repository root). At first you'll see `Exercises: 0 / 3 passed`. Rerun after each exercise. Until your regression file exists, E3 reports `NotImplementedError` with the required path.
 3. Report **all pass / partial / stuck** in the tracker.
 
 ### How to read an unfamiliar codebase

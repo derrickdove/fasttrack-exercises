@@ -9,7 +9,7 @@ A test station needs repeatable tests without a physical power supply attached. 
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/fixtures_learner.py`. Keep the supplied imports, types, signatures, and `@pytest.fixture` decorators. Don't edit `tests/`, `conftest.py`, or the provided `starter/fakes.py`.
-2. Press **Ctrl+Shift+B → Test: d11** (or run `bash tools/run.sh d11` / `tools\run.ps1 d11` from the repository root). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d11** (or run `bash tools/run.sh d11` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d11` from the repository root). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A **fixture** is a function that pytest runs to supply a test's named argument. A **decorator**, here `@pytest.fixture`, marks a function for pytest. A **dependency** is another fixture requested as an argument; pytest supplies it automatically. The supplied set-root `conftest.py` registers your fixtures so the tests can request them. Tests request fixture names; they do not call decorated fixture functions directly.
@@ -32,7 +32,7 @@ A **Path** is a `pathlib` object representing a filesystem path. `tmp_path` is p
 
 A **factory** is a function that creates a new object on each call. Here one fixture returns a function, and the test calls that function many times. `Callable[..., Reading]` means a callable returning a `Reading`; the dots leave argument details to the contract below. `Reading` is a supplied **TypedDict**, a type description for an ordinary dictionary with specified keys and value types.
 
-For the shell reading, **find** searches directory trees, **grep** searches text, and **history** recalls shell commands. On Linux, practice finding `test_d11.py`, searching for `OUTP`, and recalling your test command. These are optional navigation drills; the graded exercises run on Windows and Linux without a shell dependency.
+For the shell reading, **find** searches directory trees, **grep** searches text, and **history** recalls shell commands. Optional Bash drill: run it in Git Bash on Windows, Ubuntu (WSL), or Codespaces. Practice finding `test_d11.py`, searching for `OUTP`, and recalling your test command. The graded exercises run on Windows and Linux.
 
 ## Exercises
 

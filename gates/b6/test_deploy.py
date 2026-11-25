@@ -62,7 +62,10 @@ def test_systemd_service_runs_chassis_once_with_non_root_user(capstone_root, inv
     parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
     parser.add_argument("--limits", required=True)
     parser.add_argument("--measurements", required=True)
-    saved_files, _ = parser.parse_known_args(arguments)
+    parser.add_argument("--report")
+    parser.add_argument("--station")
+    saved_files, extras = parser.parse_known_args(arguments)
+    assert not extras, f"unsupported ExecStart arguments: {extras}"
     assert saved_files.limits and saved_files.measurements, "both saved-file arguments need a path"
     assert service["Restart"] == "no", "a UUT FAIL exits 1; do not re-check the same files forever"
     assert service["User"].strip() and service["User"].strip() not in {"root", "0"}

@@ -9,7 +9,7 @@ A chassis test station records thousands of sensor readings each second. Build h
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/windows.py`. Don't edit `tests/`.
-2. Press **Ctrl+Shift+B → Test: d15** (or run `bash tools/run.sh d15` / `tools\run.ps1 d15`). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d15** (or run `bash tools/run.sh d15` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d15`). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 Allow about 2 minutes of E1's estimate to read these shared rules, then start coding.
@@ -55,6 +55,8 @@ E1, E2 and E4 have timed checks allowing **2 seconds per function call**, exclud
 **Signature:** `def max_in_windows(values: list[float], window: int) -> list[float]`
 
 **Example:** `max_in_windows([4.0, 2.0, 3.0, 1.0, 5.0], 3)` → `[4.0, 3.0, 5.0]`
+
+Imagine keeping the best discount from store coupons, which expire in the order they arrive. The deque starts as [A (30%), B (20%), C (10%)] from left to right. When A expires, it becomes [B (20%), C (10%)]. A new coupon D (15%) makes C unnecessary because D saves more and expires later. The deque becomes [B (20%), D (15%)].
 
 Build the idea one step at a time:
 

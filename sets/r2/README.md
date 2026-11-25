@@ -16,7 +16,7 @@ Readings to revisit from d08-d15, plus d04-d05 for the final two exercises:
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines for E1-E3 and E6-E7 in `starter/review2.py` and E4-E5 in `starter/test_review2_learner.py`. Leave the supplied `current_status` and `log_status` helpers alone. Don't edit `tests/` or `conftest.py`.
-2. Press Ctrl+Shift+B → **Test: r2** (or run `bash tools/run.sh r2` / `tools\run.ps1 r2`). At first you'll see `Exercises: 0 / 7 passed`. Rerun after each exercise.
+2. Press Ctrl+Shift+B → **Test: r2** (or run `bash tools/run.sh r2` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 r2`). At first you'll see `Exercises: 0 / 7 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A **module** is a Python file you can import. A **type hint**, such as `-> float`, states what kind of value code expects; **mypy** checks those hints without running the functions. E1 includes a `mypy --strict` check of the entire `review2.py` module: keep its supplied annotations and annotate any helpers you add. A mypy message gives a file, a line, and a type mismatch to fix.

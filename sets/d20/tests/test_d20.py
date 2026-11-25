@@ -310,15 +310,12 @@ def test_e3_dependency_errors_propagate_without_retry(source: str) -> None:
 
 
 def test_e3_rejects_negative_timeout_before_dependencies() -> None:
-    calls: list[str] = []
+    def dependency(*_: float) -> float:
+        pytest.fail("An invalid timeout must be rejected before calling any dependency.")
 
-    def dependency() -> float:
-        calls.append("dependency")
-        return 0.0
-
-    with pytest.raises(ValueError):
-        with_deadline(dependency, -1, clock=dependency)
-    assert calls == []
+    for timeout in (-1, float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(ValueError):
+            with_deadline(dependency, timeout, clock=dependency, sleep=dependency)
 
 
 def test_e3_accounts_for_time_in_poll_and_accepts_started_success() -> None:

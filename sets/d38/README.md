@@ -9,7 +9,7 @@ A **test station** is the bench of instruments and software used to check hardwa
 ## How this works
 
 1. Replace the four `raise NotImplementedError(...)` lines in `starter/opcli.py`. Keep the supplied `STATIONS`, `_OperatorParser`, and `_run_station`; don't edit `tests/`.
-2. Press **Ctrl+Shift+B → Test: d38** (or run `bash tools/run.sh d38` / `tools\run.ps1 d38` from the repository root). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise. E2 uses E1; E3 and E4 can be solved independently.
+2. Press **Ctrl+Shift+B → Test: d38** (or run `bash tools/run.sh d38` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d38` from the repository root). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise. E2 uses E1; E3 and E4 can be solved independently.
 3. Report **all pass / partial / stuck** in the tracker.
 
 An **argument** is one piece of command-line text; `argv` is a list of those strings without the program name. An **option** is a named argument such as `--station`; a **subcommand** such as `run` selects an action. `argparse` is Python's standard-library argument parser; `parse_args` returns a **Namespace**, an object holding parsed values as attributes. A **flag** such as `--dry-run` becomes a Boolean (True/False) rather than consuming a value.

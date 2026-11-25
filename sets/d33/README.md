@@ -9,7 +9,7 @@ A chassis test station starts instrument-check tools, records whether they succe
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/procs.py`. Don't edit `tests/`.
-2. Press **Ctrl+Shift+B → Test: d33** (or run `bash tools/run.sh d33` / `tools\run.ps1 d33`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d33** (or run `bash tools/run.sh d33` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d33`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker. Spend the final four minutes revisiting your most recently partial or stuck set for the minimum-ready check (check34); if you need longer, continue that review after this set.
 
 A **process** is a running program; a **child process** is one started by your Python program. An **argument list** contains the executable path followed by its separate arguments. A **shell** interprets command text; passing a list with `shell=False` (the default) avoids that extra interpreter.
@@ -44,7 +44,7 @@ args = [sys.executable, "-c", "print('Station B7 ready')"]
 
 ### E2 — Explain the tool result (easy, ~6 min)
 
-**Goal:** Convert a recorded code to the exact operator-facing text below. In this exercise a shell-style code greater than 128 encodes a signal as `128 + signal_number`. Python's `Popen` process object uses negative codes for signal termination on POSIX systems (such as Linux); decode those as the positive signal number too. This is a decoding convention, not proof that an arbitrary tool's code came from a signal.
+**Goal:** Convert a recorded code to the exact operator-facing text below. In this exercise a shell-style code greater than 128 encodes a signal as `128 + signal_number`. Python's `Popen` process object uses negative codes for signal termination on POSIX systems (such as Linux); decode those as the positive signal number too. This is a decoding convention, not proof that an arbitrary tool's code came from a signal. E2 takes raw exit codes, so handle E1's timeout result before passing a code to this function.
 
 **Signature:** `def exit_code_meaning(code: int) -> str`
 
@@ -67,7 +67,7 @@ args = [sys.executable, "-c", "print('Station B7 ready')"]
 
 **Goal:** Implement `GracefulStop`, a context manager with a public Boolean `requested` flag. Construction sets `requested=False`. Each entry resets it to `False`, saves the current SIGINT handler and the SIGTERM handler where available, installs `_handle` for those signals, and returns `self`. `_handle(signum, frame)` sets `requested=True` and returns normally. `signum` is the signal number; `frame` describes the interrupted Python execution and is unused here.
 
-**Signatures:** `GracefulStop()`, `__enter__(self) -> GracefulStop`, `_handle(self, signum: int, frame: FrameType | None) -> None`, and the supplied `__exit__(...) -> None`.
+**Signatures:** `GracefulStop()`, `__enter__(self) -> GracefulStop`, `_handle(self, signum: int, frame: FrameType | None) -> None`, and the supplied signature `__exit__(...) -> None`. Fill in the body of `__exit__` too.
 
 **Example:**
 
@@ -95,6 +95,8 @@ with GracefulStop() as stop:
 **Reread:** Python `subprocess` docs, `run` and `CompletedProcess.returncode`; Missing Semester, “Job Control”. Before check34, revisit your most recently partial or stuck set in the tracker.
 
 ## Terminal drill (WSL2 Ubuntu, ~5 min)
+
+Needs Ubuntu (WSL) or Codespaces. On plain Windows, read along.
 
 This drill is ungraded; its minutes come from the day's readings. Finish E3 first. In Ubuntu terminal A, from the repo root, run this **worker** (a process that waits for work or a stop request):
 
@@ -127,4 +129,11 @@ ps -p <pid> -o pid,comm,args
 kill -TERM <pid>
 ```
 
-Watch terminal A print the cleanup and exit messages, then return to its shell prompt. The handler only sets `requested`; the loop notices it, runs cleanup, and leaves the context manager, which restores the previous handlers. Ctrl+C in terminal A also requests a graceful stop if you need to end the drill.
+After the signal, terminal A should print these lines and return to its shell prompt.
+
+```text
+cleanup: station work stopped
+worker exited; previous signal handlers restored
+```
+
+The handler only sets `requested`; the loop notices it, runs cleanup, and leaves the context manager, which restores the previous handlers. Ctrl+C in terminal A also requests a graceful stop if you need to end the drill.

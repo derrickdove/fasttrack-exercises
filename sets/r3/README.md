@@ -9,7 +9,7 @@ A chassis test station uses a **signal generator**, an instrument that produces 
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/review3.py`. Don't edit `tests/`. The two `Protocol` declarations are supplied interfaces. Leave them and the supplied `configuration_commands` and `decode_reply` helpers as given.
-2. Press Ctrl+Shift+B → **Test: r3** (or run `bash tools/run.sh r3` / `tools\run.ps1 r3`). At first you'll see `Exercises: 0 / 7 passed`. Rerun after each exercise.
+2. Press Ctrl+Shift+B → **Test: r3** (or run `bash tools/run.sh r3` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 r3`). At first you'll see `Exercises: 0 / 7 passed`. Rerun after each exercise.
 3. Report all pass / partial / stuck in the tracker.
 
 Earlier readings to revisit as needed (there is no new reading on review day):

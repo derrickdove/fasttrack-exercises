@@ -9,7 +9,7 @@ A chassis test station needs to interpret a power supply unit (PSU) driver's sta
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/registers.py`. Don't edit `tests/`, `data/psu_regs.h`, or the supplied answer choices.
-2. Press **Ctrl+Shift+B → Test: d47** (or run `bash tools/run.sh d47` / `tools\run.ps1 d47`). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d47** (or run `bash tools/run.sh d47` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d47`). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A **header** (`.h`) describes C names and data layouts; `#define` gives a name to a value or expression. A **register** is a small hardware storage location represented here by an integer. A **bit** is a binary digit, 0 or 1; a **byte** has eight bits, numbered 0 through 7 from right to left. **Hexadecimal** (prefix `0x`) writes numbers in base 16; **binary** (prefix `0b`) writes them in base 2.

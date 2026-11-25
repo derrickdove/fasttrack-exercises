@@ -9,7 +9,7 @@ A chassis test station must prepare its instruments before taking measurements a
 ## How this works
 
 1. Fill in `TRANSITIONS` and replace the `raise NotImplementedError(...)` lines in `starter/sequencer.py`. Don't edit `tests/`.
-2. Press **Ctrl+Shift+B → Test: d37** (or run `bash tools/run.sh d37` / `tools\run.ps1 d37`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d37** (or run `bash tools/run.sh d37` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d37`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A **finite-state machine** allows only specified changes between a fixed collection of states. A **state** names the current phase; a **transition** is an allowed change. A **terminal state** ends the sequence and has no outgoing transitions.
@@ -74,6 +74,8 @@ Follow this order exactly:
 5. After cleanup, move once to the selected terminal state and return `(state, history)`. Do not record a terminal state before cleanup.
 
 **Example:** Two passing steps call `setup1, setup2, run1, run2, teardown2, teardown1` and return `("PASS", ["IDLE", "SETUP", "RUNNING", "PASS"])`. Empty input follows that same state history and returns `PASS` without callbacks. A setup exception returns `("ERROR", ["IDLE", "SETUP", "ERROR"])`.
+
+When you reach the capstone, use its [Block 5 executor contract](../../capstone/README.md#block-5---test-executor-and-operator-cli-gate-b5) for the order of setup and measurement. The cleanup rule from this exercise still applies.
 
 **Watch out:** Setup and teardown return `None`; run returns a Boolean. Inputs obey these types; you do not need to validate callback types or handle `SystemExit` or other exceptions outside `Exception` and `KeyboardInterrupt`. Do not alter the input list. The history contains phase transitions once each, not one entry per step. A cleanup stack and `try`/`except`/`finally` keep the code small.
 

@@ -9,7 +9,7 @@ A chassis test station collects **telemetry**, measurements sent by an instrumen
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/udp.py`. Don't edit `tests/`.
-2. Press **Ctrl+Shift+B → Test: d25** (or run `bash tools/run.sh d25` / `tools\run.ps1 d25`). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d25** (or run `bash tools/run.sh d25` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d25`). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A **socket** is an operating-system handle for sending or receiving network data. An **IP address** identifies a network interface; `127.0.0.1` is **loopback**, an address that stays on your own computer. A **port** is a number identifying a socket's destination on that computer. An **address tuple** is a fixed pair `(host, port)`, such as `("127.0.0.1", 42000)`; the example port is illustrative, and tests always ask the operating system to choose a free port with `0`.

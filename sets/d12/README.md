@@ -9,7 +9,7 @@ A chassis test station needs to read voltages and instrument error messages in s
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/test_scpi_learner.py` and add the decorators requested below. Keep the four function names, parameter names, and type hints (the annotations after ?:? and ?->? that describe input and output types). Don't edit `scpi.py`, `pytest.ini`, or `tests/`.
-2. Press **Ctrl+Shift+B → Test: d12** (or run `bash tools/run.sh d12` / `tools\run.ps1 d12`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d12** (or run `bash tools/run.sh d12` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d12`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A **parameter** is a named function input. **Parametrization** makes pytest run one test function for each row of inputs. A **decorator** is an `@...` line above a function that adds instructions to it. This station-status example is separate from your voltage tests:

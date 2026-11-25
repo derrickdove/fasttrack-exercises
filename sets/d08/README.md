@@ -9,7 +9,7 @@ A test station reads voltage, current, and resistance from instruments. Put its 
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/units/convert.py`, `starter/units/parse.py`, and `starter/units/guard.py`. For E3, replace the whole placeholder function in `starter/units/__init__.py` as explained below. Don't edit `tests/` or the empty `starter/__init__.py`.
-2. Press **Ctrl+Shift+B → Test: d08** (or run `bash tools/run.sh d08` / `tools\run.ps1 d08` from the repo root). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d08** (or run `bash tools/run.sh d08` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d08` from the repo root). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A **module** is a Python file; a **package** groups modules in a directory with an `__init__.py` file, which runs when the package is imported. An **import** makes another module's names available; a **relative import** starts with a dot to refer to the current package. This repo imports your package as `starter.units`.

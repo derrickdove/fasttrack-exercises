@@ -1,6 +1,6 @@
 # check54 — Final timed station check
 
-**Time:** about 153 minutes · **Read first:** review day - no new reading; revisit the earlier readings named under each exercise · **You edit:** `starter/check54.py`, `starter/test_interlock_learner.py`
+**Time:** 153-minute first pass, then a separate 100 to 150 minute completion slot for reading, debugging, and reruns · **Read first:** review day - no new reading; revisit the earlier readings named under each exercise · **You edit:** `starter/check54.py`, `starter/test_interlock_learner.py`
 
 ## What you're building
 
@@ -9,8 +9,8 @@ You are checking software for a chassis test station before an operator uses it.
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in the two starter files, and repair the supplied `run_interlocked` ordering in E10. Don't edit `tests/`. The supplied `Transport` interface describes an adapter; you do not need to implement its methods. The two supplied data classes are already complete. E2 also supplies scaffolding (working setup code): leave `StationSupply.__init__` and `from_config` as provided. E4 supplies length checking and unpacking; E10 supplies the `OutputSupply` interface and recording fake.
-2. Press **Ctrl+Shift+B -> Test: check54** (or run `bash tools/run.sh check54` / `tools\run.ps1 check54`). At first you'll see `Exercises: 0 / 10 passed`. Rerun after each exercise.
-3. Use a 153-minute timer: the exercise estimates include 143 minutes of work and a shared 10-minute reading and reruns allowance, counted under E2. Use that allowance to read the contracts and rerun tests as needed. Record the exercises you finish and where you stop. Report **all pass / partial / stuck** in the tracker; use the reread notes afterward.
+2. Press **Ctrl+Shift+B -> Test: check54** (or run `bash tools/run.sh check54` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 check54`). At first you'll see `Exercises: 0 / 10 passed`. Rerun after each exercise.
+3. Set a 153-minute timer for your first pass. Read each contract as you go and stop when the timer ends, even if work remains. Record what passed and where you got stuck. Report **all pass / partial / stuck** in the tracker. Use the separate completion slot to revisit the readings, finish exercises, and rerun the tests.
 
 Exercises are independent: attempt any one without completing the others. E2's methods belong together; E10 joins its own interlock decoder, station harness, and regression tests. A **harness** connects small components into an operation; a **regression test** catches a defect if it returns after a repair. E10 uses a fake supply, so you can complete it before E2. Configuration values from E1 do not automatically control E2 or E8.
 
@@ -26,6 +26,15 @@ label = display_label(lambda: "BENCH-9")
 ```
 
 Unless stated otherwise, arguments have the annotated types; integer arguments are actual integers, not booleans. Do not modify caller-owned lists or dictionaries. Exception message text is your choice. **Finite** means a number other than NaN (not a number) or positive/negative infinity; `math.isfinite` checks this. A **boundary** is the first or last allowed value; tests include these and invalid inputs.
+
+## Before the timer: write an LF line ending
+
+Windows may turn `\n` into `\r\n` when writing text. Setting `newline="\n"` keeps the LF line ending. Try this with a scratch file:
+
+```python
+with open("greeting.txt", "w", encoding="utf-8", newline="\n") as file:
+    file.write("Hello\n")
+```
 
 ## Exercises
 
@@ -50,9 +59,9 @@ For this dynamically typed dictionary, reject booleans, floats, and numeric stri
 
 **Reread:** If you failed E1, reread **d41 E3** (config validation: load instrument settings with useful errors) and **d19 E5** (build the bench power-supply driver); **d03**, Python Tutorial section 5 (lists, dictionaries, sets, tuples); **d08**, the `typing` introduction.
 
-### E2 - Drive a supply from the station config (medium, ~25 min)
+### E2 - Drive a supply from the station config (medium, ~15 min)
 
-**Time:** 15 minutes of implementation plus the shared 10-minute reading and reruns allowance for the whole set. The supplied setup saves those 10 minutes of implementation.
+**Time:** Aim for 15 minutes of implementation on the first pass. Revisit unfinished methods during the completion slot.
 
 **Goal:** Complete a **driver**, software that turns operations into instrument commands, using the supplied configuration validation and resource setup. Implement voltage limits, timeout retries, output safety, and automatic cleanup; this exercise does not load a file.
 

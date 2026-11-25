@@ -9,7 +9,7 @@ A chassis test station receives **telemetry**, measurements sent automatically b
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/review4.py`. Don't edit `tests/`, the supplied helpers, or `data/`.
-2. Press **Ctrl+Shift+B → Test: r4** (or run `bash tools/run.sh r4` / `tools\run.ps1 r4` from the repo root). At first you'll see `Exercises: 0 / 7 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: r4** (or run `bash tools/run.sh r4` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 r4` from the repo root). At first you'll see `Exercises: 0 / 7 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A **byte** holds an integer from 0 through 255; `bytes` is an immutable sequence of bytes. A **packet** is one complete encoded message. **UDP** sends individual messages called **datagrams**, while **TCP** sends a continuous byte stream whose reads may split or combine messages. **Framing** means marking where each message starts and ends in that stream.

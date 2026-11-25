@@ -9,7 +9,7 @@ A chassis test station must read instruments and receive telemetry (measurements
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/workers.py`. Don't edit `tests/`.
-2. Press **Ctrl+Shift+B → Test: d31** (or run `bash tools/run.sh d31` / `tools\run.ps1 d31`). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d31** (or run `bash tools/run.sh d31` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d31`). At first you'll see `Exercises: 0 / 5 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 **I/O** means input/output, such as waiting for an instrument reply. **Concurrency** means tasks can make progress during one another's waits. A **thread** is a separate flow of execution in the same Python process; `Thread.start()` runs its `run()` method in the background, and `join(timeout=...)` waits for it to finish. `is_alive()` tells you whether it is still running.
@@ -23,6 +23,26 @@ ready = Event()
 readings = Queue()
 readings.put_nowait(28.1)
 ready.set()
+```
+
+This worker waits for the main thread to give it a signal. Run the example on its own. The worker prints its message before the last line prints because `join()` waits for it to finish.
+
+```python
+from threading import Event, Thread
+
+finished = Event()
+
+
+def watch_for_finish():
+    finished.wait()
+    print("Worker saw the signal")
+
+
+worker = Thread(target=watch_for_finish)
+worker.start()
+finished.set()
+worker.join()
+print("Both threads are done")
 ```
 
 A **PSU** (power supply unit) supplies electrical power; a **channel** is one independently controlled output on that instrument. A **transaction** is a group of operations that must stay together: selecting a channel and querying (requesting) its voltage must finish before another worker selects a different channel on the same PSU. A **lock** (`threading.Lock`) lets one thread at a time enter a protected section of code. `with lock:` acquires (takes ownership of) it before the block and releases it for another thread when the block ends, even if an exception occurs. Threads sharing an instrument must share its lock; separate instruments need separate locks.

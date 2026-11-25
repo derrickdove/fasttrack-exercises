@@ -11,7 +11,7 @@ This set prepares you for [d02: decisions, loops and functions](../d02/README.md
 ## How this works
 
 1. Open `starter/decisions.py` in VS Code. Replace each `raise NotImplementedError(...)` with your code. A **NotImplementedError** marks an unfinished exercise. Leave the function names and type hints in place. Do not edit `tests/`.
-2. Save, then run `bash tools/run.sh p02` from the repository folder. This is a **shell command**, an instruction for the terminal. Type Python code in the file, not at the Bash prompt. Do not type `>>>`; that is a prompt shown in some Python books.
+2. Save, then run `bash tools/run.sh p02` (Windows PowerShell: `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 p02`) from the repository folder. This is a **shell command**, an instruction for the terminal. Type Python code in the file, not at the Bash prompt. Do not type `>>>`; that is a prompt shown in some Python books.
 3. At first the report says `Exercises: 0 / 11 passed`. Rerun after each exercise. A **test** calls your function and checks its result. Each exercise may have several tests; all must pass for that exercise to pass.
 4. Work for the minutes shown, then ask your coach for a hint if needed. Report **all pass / partial / stuck**, including the exercise where you stopped.
 

@@ -11,7 +11,7 @@ A chassis test station saves network traffic when an instrument drops readings. 
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/pcap.py`. Don't edit `tests/`.
-2. Press Ctrl+Shift+B → **Test: d30** (or run `bash tools/run.sh d30` / `tools\run.ps1 d30`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+2. Press Ctrl+Shift+B → **Test: d30** (or run `bash tools/run.sh d30` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d30`). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
 3. Report all pass / partial / stuck in the tracker.
 
 `bytes` holds raw byte values (each 0..255). An **offset** counts bytes from zero. A **slice** selects a range, excluding its end. A **bit** is a binary digit, 0 or 1; a byte contains eight bits. An **unsigned** integer cannot be negative. Hexadecimal (base 16) notation uses digits 0..9 and a..f; Python writes it with a `0x` prefix. **Byte order** says which end of a multi-byte integer holds the largest place value: big-endian puts it first; little-endian puts it last. `struct.unpack` decodes fixed-width fields; `>` selects big-endian, `<` little-endian, `H` a 2-byte unsigned integer, `I` a 4-byte unsigned integer, `Q` an 8-byte unsigned integer, `i` a 4-byte signed integer, and `f` a 4-byte float.
@@ -22,6 +22,18 @@ raw = bytes.fromhex("00 2a 00 03")
 step, attempts = struct.unpack(">HH", raw)
 print(step, attempts)  # 42 3
 ```
+
+Try tracing this made-up record before reading E3. Its outer header is one byte giving the size of the label that follows. The label can vary in size. Inside the record, a one-byte text length comes just before the text.
+
+| Byte offsets | Bytes (hex) | What they mean |
+| --- | --- | --- |
+| 0 | `02` | The label takes two bytes |
+| 1–2 | `41 42` | The label is `AB` |
+| 3 | `03` | The text takes three bytes |
+| 4–6 | `63 61 74` | The text is `cat` |
+| 7 | `00` | Extra padding |
+
+After the one-byte outer header and two label bytes, the next field starts at offset 3. The text starts at offset 4 and ends just before offset 7. A function that extracts only the text bytes would return `b"cat"`.
 
 A **binary file** opened with `open(path, "rb")` returns bytes from `f.read(n)` (at most n bytes). `with open(...) as f:` closes it automatically. A **dictionary** maps names to values. A **tuple** groups values in a fixed order, such as `(time, frame)`; a **list** collects items in order. An **iterator** produces items one at a time; `yield item` makes a function produce such an iterator. `list(iterator)` collects its items. `Path` is a filesystem path from `pathlib`; `str | Path` means either type is accepted. All file paths below can be absolute or relative to the current working directory; from this set's directory, `Path("data/telemetry.pcap")` selects the supplied file. No mount (attaching a storage device to a directory) is needed.
 
@@ -110,6 +122,8 @@ Require exactly `17 + 5 * count` bytes, correct sync, unique channel IDs within 
 **Watch out:** Check length before indexing fields, then check CRC before trusting the packet. **Reread:** Libpcap File Format, Packet Data (application bytes must be interpreted separately); supplemental Wireshark Capturing chapter, capture concepts. The telemetry layout above is the complete application-specific contract.
 
 ## Terminal drill (WSL2 Ubuntu, ~10 min)
+
+Needs Ubuntu (WSL) or Codespaces. On plain Windows, read along.
 
 This drill is ungraded; its minutes come from the day's readings. Use two Ubuntu terminals in the repo root, with the Linux `.venv` already created by the test runner and `tcpdump` installed. `tcpdump` captures or displays network packets. **Loopback** (`lo`) sends traffic back to this computer; `127.0.0.1` is its IPv4 address.
 

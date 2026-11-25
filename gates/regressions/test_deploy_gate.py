@@ -9,16 +9,17 @@ import pytest
 
 GATE = runpy.run_path(str(Path(__file__).parents[1] / "b6" / "test_deploy.py"))
 ANSIBLE_CHECK = GATE["test_ansible_has_one_privileged_station_play_with_install_and_service_tasks"]
+SERVICE_CHECK = GATE["test_systemd_service_runs_chassis_once_with_non_root_user"]
 UNIT_NAME = "chassis-telemetry.service"
-UNIT = """[Unit]
+CHECK_COMMAND = "python -m chassis check --limits limits.csv --measurements measurements.csv"
+UNIT = f"""[Unit]
 Description=Chassis tester
 After=network-online.target
 Wants=network-online.target
 [Service]
-Type=simple
-ExecStart=python -m chassis check
-Restart=on-failure
-RestartSec=5
+Type=oneshot
+ExecStart={CHECK_COMMAND}
+Restart=no
 User=chassis
 [Install]
 WantedBy=multi-user.target
@@ -38,9 +39,20 @@ def test_repeated_unit_dependencies_pass_both_checks(tmp_path, key, required, ex
     deploy.mkdir()
     (deploy / UNIT_NAME).write_text(UNIT.replace(original, replacement), encoding="utf-8")
     GATE["test_systemd_unit_has_network_dependencies_and_install_target"](tmp_path)
-    GATE["test_systemd_service_runs_chassis_with_restart_policy_and_non_root_user"](
-        tmp_path, lambda command: command == "python -m chassis check",
-    )
+    SERVICE_CHECK(tmp_path, lambda command: command == CHECK_COMMAND)
+
+
+def test_systemd_service_rejects_unsupported_saved_file_argument(tmp_path):
+    deploy = tmp_path / "deploy"
+    deploy.mkdir()
+    unit = deploy / UNIT_NAME
+    supported = CHECK_COMMAND + ' --report "shift report.json" --station "Bench 2"'
+    unit.write_text(UNIT.replace(CHECK_COMMAND, supported), encoding="utf-8")
+    SERVICE_CHECK(tmp_path, lambda command: command.startswith("python -m chassis "))
+
+    unit.write_text(UNIT.replace(CHECK_COMMAND, supported + " --dry-run"), encoding="utf-8")
+    with pytest.raises(AssertionError, match="unsupported ExecStart arguments"):
+        SERVICE_CHECK(tmp_path, lambda command: command.startswith("python -m chassis "))
 
 
 @pytest.fixture

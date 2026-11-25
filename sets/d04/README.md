@@ -9,7 +9,7 @@ A test station is a computer connected to instruments that measure hardware. Its
 ## How this works
 
 1. Replace the `raise NotImplementedError(...)` lines in `starter/logs.py`. Don't edit `tests/`.
-2. Press **Ctrl+Shift+B → Test: d04** (or run `bash tools/run.sh d04` / `tools\run.ps1 d04` from the repository root). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d04** (or run `bash tools/run.sh d04` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d04` from the repository root). At first you'll see `Exercises: 0 / 4 passed`. Rerun after each exercise.
 3. Report **all pass / partial / stuck** in the tracker.
 
 A **path** locates a file or folder. `pathlib.Path` represents it without choosing Windows or Linux separators. A **parent** is the folder containing a path; `parents=True` creates missing folders above it too.

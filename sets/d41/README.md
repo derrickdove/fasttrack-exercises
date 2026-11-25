@@ -9,7 +9,7 @@ A chassis test station needs a predictable way to start its Python process and l
 ## How this works
 
 1. For E1, replace the entire placeholder in `starter/chassis-demo.service`. For E2–E3, replace the `raise NotImplementedError(...)` lines in `starter/units.py`. The unit parser and policy checklist are complete scaffolding (supplied working code); leave them as supplied. Don't edit `tests/` or `data/`.
-2. Press Ctrl+Shift+B → **Test: d41** (or run `bash tools/run.sh d41` / `tools\run.ps1 d41`). At first you'll see `Exercises: 0 / 3 passed`. Rerun after each exercise. The E1 placeholder marker makes its file-only exercise report `NotImplementedError` until you replace it.
+2. Press Ctrl+Shift+B → **Test: d41** (or run `bash tools/run.sh d41` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d41`). At first you'll see `Exercises: 0 / 3 passed`. Rerun after each exercise. The E1 placeholder marker makes its file-only exercise report `NotImplementedError` until you replace it.
 3. Report all pass / partial / stuck in the tracker.
 
 **systemd** is a Linux manager that starts and supervises processes. A **service** is a process it manages. A **unit file** describes something systemd manages; a `.service` file describes a service. A **section** is a group headed by `[Name]`; a **directive** is a `Key=value` setting within it. A **target** groups units into a startup milestone. The **root** user (numeric user ID `0`) has unrestricted system privileges; a station process should use a separate account.
@@ -172,7 +172,9 @@ Input has `parse_unit`'s dictionary/list/string shape. Missing sections and keys
 
 ## Live drill (WSL2 Ubuntu, ~15 min)
 
-This drill is ungraded. **WSL2** (Windows Subsystem for Linux, version 2) runs Ubuntu Linux on Windows. Use its Ubuntu terminal. Codespaces cannot run this drill: the course's Codespaces environment has no systemd user session. Complete the graded exercises there if needed, then use WSL2 Ubuntu for this drill.
+**Offline route (Windows or Codespaces):** Finish after E3. Read the live steps below, then look again at a saved E2 journal. Point to the process exit and describe what later journal lines would show if systemd started a replacement process.
+
+**Live drill (ungraded):** Needs WSL2 Ubuntu with a working systemd user session. On plain Windows or in the course's Codespace, read along.
 
 Your **user manager** is the systemd instance that manages services for your logged-in account. First check that systemd is running as process 1, the first Linux process:
 

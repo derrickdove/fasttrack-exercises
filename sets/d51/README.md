@@ -9,7 +9,7 @@ A chassis test station powers connected equipment (the load), reads its supply v
 ## How this works
 
 1. Replace the four `raise NotImplementedError(...)` lines in `starter/flaky_driver.py`. Each function's docstring (its embedded description) includes the old, buggy code for diagnosis; those excerpts are deliberately not executable so every exercise starts unfinished. E5 and E6 have their remaining stubs in `starter/timing.py`; leave its supplied statistics helper unchanged. Don't edit `tests/`.
-2. Press **Ctrl+Shift+B → Test: d51** (or run `bash tools/run.sh d51` / `tools\run.ps1 d51`). At first you'll see `Exercises: 0 / 6 passed`. Rerun after each exercise.
+2. Press **Ctrl+Shift+B → Test: d51** (or run `bash tools/run.sh d51` / `powershell -NoProfile -ExecutionPolicy Bypass -File tools\run.ps1 d51`). At first you'll see `Exercises: 0 / 6 passed`. Rerun after each exercise.
 3. Fill the short evidence table in `starter/notes.md` as you go. The notebook supports your repairs; E6 grades your diagnosis in `starter/timing.py` against the captured evidence in `data/`. Report **all pass / partial / stuck** in the tracker.
 
 A **driver** translates software requests into equipment commands. A **datasheet** states an instrument's supported ranges, accuracy, and interface rules. A **multimeter** measures quantities such as steady voltage; an **oscilloscope** displays voltage over time, using a **trigger** (a condition that starts a capture) to catch a brief event. Neither a passing software test nor a correct display alone proves the physical voltage is correct: compare independent evidence.
